@@ -13,7 +13,8 @@ export default defineConfig(
   globalIgnores([
     "**/coverage/**",
     "**/dist/**",
-    "**/node_modules/**"
+    "**/node_modules/**",
+    "**/src/generated/**"
   ]),
   {
     files: ["**/*.{js,mjs,cjs}"],
