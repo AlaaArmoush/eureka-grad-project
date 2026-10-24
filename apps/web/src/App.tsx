@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 import { useRef, useState } from "react";
-import { mountPixiCircle } from "./lab/renderer";
+import { mountLabRenderer } from "./lab/renderer";
+import { S02_LAB_MOCK } from "./lab/mocks";
 
-function CircleLab() {
+function LabCanvas() {
   const hostRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -12,7 +13,11 @@ function CircleLab() {
       return;
     }
 
-    return mountPixiCircle(host);
+    return mountLabRenderer(
+      host,
+      S02_LAB_MOCK.scene,
+      S02_LAB_MOCK.snapshot
+    );
   }, []);
 
   return (
@@ -58,7 +63,7 @@ export function App() {
         aria-label="Physics laboratory"
         style={{ marginTop: "16px" }}
       >
-        {labVisible ? <CircleLab /> : <p>The lab is closed.</p>}
+        {labVisible ? <LabCanvas /> : <p>The lab is closed.</p>}
       </section>
     </main>
   );

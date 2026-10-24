@@ -4,16 +4,24 @@
     "private": true,
     "type": "module",
     "scripts": {
+        "build:dependencies": "npm run build --workspace=@eureka/engine",
+        "prebuild": "npm run build:dependencies",
+        "pretypecheck": "npm run build:dependencies",
+        "pretest": "npm run build:dependencies",
         "build": "tsc -b && vite build",
         "dev": "vite",
+        "test": "vitest run src/lab/coordinates.test.ts",
         "typecheck": "tsc --noEmit"
     },
     "dependencies": {
+        "@eureka/contracts": "0.0.0",
+        "@eureka/engine": "0.0.0",
         "i18next": "26.5.3",
         "pixi.js": "8.22.0",
         "react": "19.3.1",
         "react-dom": "19.3.1",
-        "react-i18next": "17.1.0"
+        "react-i18next": "17.1.0",
+        "zustand": "5.0.15"
     },
     "devDependencies": {
         "@tailwindcss/vite": "4.3.3",
