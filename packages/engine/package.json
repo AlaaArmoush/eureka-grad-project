@@ -1,0 +1,24 @@
+{
+    "name": "@eureka/engine",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "exports": {
+        ".": {
+            "types": "./dist/index.d.ts",
+            "import": "./dist/index.js"
+        }
+    },
+    "scripts": {
+        "build:contracts": "tsc -b ../contracts/tsconfig.build.json",
+        "prebuild": "npm run build:contracts",
+        "pretest": "npm run build:contracts",
+        "pretypecheck": "npm run build:contracts",
+        "build": "tsc -b tsconfig.build.json",
+        "test": "vitest run",
+        "typecheck": "tsc -p tsconfig.json"
+    },
+    "dependencies": {
+        "@eureka/contracts": "0.0.0"
+    }
+}

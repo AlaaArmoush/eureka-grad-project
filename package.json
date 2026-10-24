@@ -1,0 +1,42 @@
+{
+    "name": "eureka",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "packageManager": "npm@11.19.1",
+    "engines": {
+        "node": "24.22.1",
+        "npm": "11.19.1"
+    },
+    "allowScripts": {
+        "esbuild@0.28.2": true,
+        "prisma@7.10.1": true,
+        "@prisma/engines@7.10.1": true
+    },
+    "workspaces": [
+        "packages/contracts",
+        "packages/engine",
+        "apps/server",
+        "apps/web"
+    ],
+    "scripts": {
+        "build": "npm run build --workspaces --if-present",
+        "db:deploy": "npm exec --workspace=@eureka/server -- prisma migrate deploy --config prisma.config.ts",
+        "db:generate": "npm exec --workspace=@eureka/server -- prisma generate --config prisma.config.ts",
+        "db:migrate": "npm exec --workspace=@eureka/server -- prisma migrate dev --config prisma.config.ts",
+        "lint": "eslint .",
+        "test": "npm run test --workspaces --if-present",
+        "typecheck": "npm run typecheck --workspaces --if-present",
+        "db:seed": "npm exec --workspace=@eureka/server -- prisma db seed --config prisma.config.ts"
+    },
+    "devDependencies": {
+        "@eslint/js": "10.0.1",
+        "@types/node": "24.19.2",
+        "eslint": "10.13.0",
+        "eslint-plugin-react-hooks": "7.1.1",
+        "eslint-plugin-react-refresh": "0.5.7",
+        "typescript": "5.9.3",
+        "typescript-eslint": "8.72.0",
+        "vitest": "5.0.5"
+    }
+}
