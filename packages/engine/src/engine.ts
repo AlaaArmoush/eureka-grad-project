@@ -111,6 +111,7 @@ function createMutableBody(body: Body): MutableBodyState {
   };
 }
 
+// Keeps the starting state separate from the state changed by the engine.
 function cloneBodies(bodies: readonly MutableBodyState[]): MutableBodyState[] {
   return bodies.map((body) => {
     const sharedState = {
@@ -130,16 +131,16 @@ function cloneBodies(bodies: readonly MutableBodyState[]): MutableBodyState[] {
 
     return body.kind === "dynamic"
       ? {
-          ...sharedState,
-          kind: "dynamic",
-          shape: { ...body.shape },
-          massKilograms: body.massKilograms
-        }
+        ...sharedState,
+        kind: "dynamic",
+        shape: { ...body.shape },
+        massKilograms: body.massKilograms
+      }
       : {
-          ...sharedState,
-          kind: "static",
-          shape: { ...body.shape }
-        };
+        ...sharedState,
+        kind: "static",
+        shape: { ...body.shape }
+      };
   });
 }
 
@@ -248,7 +249,9 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
 
   const initialBodies = scene.bodies.map(createMutableBody);
   const fixedTimeStepSeconds = scene.numericalProfile.fixedTimeStepSeconds;
-  const acceleration = scene.environment.gravityMetersPerSecondSquared;
+  const acceleration = {
+    ...scene.environment.gravityMetersPerSecondSquared
+  };
 
   let bodies = cloneBodies(initialBodies);
   let tick = 0;
@@ -333,7 +336,10 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
       );
     }
 
-    const queued = { command, sequence: nextSequence };
+    const queued = {
+      command: structuredClone(command),
+      sequence: nextSequence
+    };
     pendingCommands.push(queued);
     pendingCommands.sort(
       (left, right) =>
