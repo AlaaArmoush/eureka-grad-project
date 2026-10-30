@@ -211,36 +211,61 @@ export function validateCommand(command: Command): EngineFailure | undefined {
   const payload = command.payload;
 
   switch (payload.kind) {
-    case "editBody":
-      return (payload.changes.massKilograms === undefined
-        ? undefined
-        : checkPositive(
-            payload.changes.massKilograms,
-            "payload.changes.massKilograms"
-          )) ??
-        (payload.changes.material === undefined
-          ? undefined
-          : validateMaterial(payload.changes.material, "payload.changes.material")) ??
-        (payload.changes.pose === undefined
-          ? undefined
-          : validateVector(
-              payload.changes.pose.positionMeters,
-              "payload.changes.pose.positionMeters"
-            ) ??
-            checkFinite(
-              payload.changes.pose.angleRadians,
-              "payload.changes.pose.angleRadians"
-            )) ??
-        (payload.changes.velocity === undefined
-          ? undefined
-          : validateVector(
-              payload.changes.velocity.linearMetersPerSecond,
-              "payload.changes.velocity.linearMetersPerSecond"
-            ) ??
-            checkFinite(
-              payload.changes.velocity.angularRadiansPerSecond,
-              "payload.changes.velocity.angularRadiansPerSecond"
-            ));
+    case "editBody": {
+      const changes = payload.changes;
+
+      if (changes.massKilograms !== undefined) {
+        const massFailure = checkPositive(
+          changes.massKilograms,
+          "payload.changes.massKilograms"
+        );
+
+        if (massFailure !== undefined) {
+          return massFailure;
+        }
+      }
+
+      if (changes.material !== undefined) {
+        const materialFailure = validateMaterial(
+          changes.material,
+          "payload.changes.material"
+        );
+
+        if (materialFailure !== undefined) {
+          return materialFailure;
+        }
+      }
+
+      if (changes.pose !== undefined) {
+        const poseFailure = validateVector(
+          changes.pose.positionMeters,
+          "payload.changes.pose.positionMeters"
+        ) ?? checkFinite(
+          changes.pose.angleRadians,
+          "payload.changes.pose.angleRadians"
+        );
+
+        if (poseFailure !== undefined) {
+          return poseFailure;
+        }
+      }
+
+      if (changes.velocity !== undefined) {
+        const velocityFailure = validateVector(
+          changes.velocity.linearMetersPerSecond,
+          "payload.changes.velocity.linearMetersPerSecond"
+        ) ?? checkFinite(
+          changes.velocity.angularRadiansPerSecond,
+          "payload.changes.velocity.angularRadiansPerSecond"
+        );
+
+        if (velocityFailure !== undefined) {
+          return velocityFailure;
+        }
+      }
+
+      return undefined;
+    }
 
     case "launchBody":
       return validateVector(payload.positionMeters, "payload.positionMeters") ??
