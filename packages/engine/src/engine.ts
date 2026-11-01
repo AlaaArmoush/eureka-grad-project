@@ -111,7 +111,7 @@ function createMutableBody(body: Body): MutableBodyState {
   };
 }
 
-// Keeps the starting state separate from the state changed by the engine.
+// Copy each body so a tick can change it freely and throw it away if something fails.
 function cloneBodies(bodies: readonly MutableBodyState[]): MutableBodyState[] {
   return bodies.map((body) => {
     const sharedState = {
@@ -129,18 +129,20 @@ function cloneBodies(bodies: readonly MutableBodyState[]): MutableBodyState[] {
       }
     };
 
-    return body.kind === "dynamic"
-      ? {
+    if (body.kind === "dynamic") {
+      return {
         ...sharedState,
         kind: "dynamic",
         shape: { ...body.shape },
         massKilograms: body.massKilograms
-      }
-      : {
-        ...sharedState,
-        kind: "static",
-        shape: { ...body.shape }
       };
+    }
+
+    return {
+      ...sharedState,
+      kind: "static",
+      shape: { ...body.shape }
+    };
   });
 }
 
@@ -152,7 +154,7 @@ function makeSnapshot(
   return {
     contractVersion: 1,
     engineVersion: "0.0.0",
-    engineBuild: "s02-boundary",
+    engineBuild: "constant-gravity-v1",
     tick,
     simulationTimeSeconds: tick * fixedTimeStepSeconds,
     bodies: bodies.map((body) => ({
@@ -359,6 +361,7 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
       return disposedFailure;
     }
 
+    // Require a whole nonnegative number of ticks
     if (!Number.isSafeInteger(tickCount) || tickCount < 0) {
       return failure(
         "INVALID_ADVANCE_COUNT",
@@ -367,9 +370,11 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
       );
     }
 
+    // Each tick is all-or-nothing: build and check a copy before accepting it.
     for (let stepIndex = 0; stepIndex < tickCount; stepIndex += 1) {
       const nextBodies = cloneBodies(bodies);
 
+      // Apply commands scheduled for the current tick.
       for (const queued of pendingCommands) {
         if (queued.command.targetTick === tick) {
           applyCommand(queued.command, nextBodies);
@@ -379,6 +384,7 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
       const halfTimeStepSquared =
         0.5 * fixedTimeStepSeconds * fixedTimeStepSeconds;
 
+      // Update each dynamic body
       for (const body of nextBodies) {
         if (body.kind === "static") {
           continue;
@@ -400,6 +406,7 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
           acceleration.y * fixedTimeStepSeconds;
         const nextTimeSeconds = (tick + 1) * fixedTimeStepSeconds;
 
+        // Rejection happens here
         if (
           !Number.isFinite(nextPositionX) ||
           !Number.isFinite(nextPositionY) ||
@@ -420,11 +427,16 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
         body.velocity.linearMetersPerSecond.y = nextVelocityY;
       }
 
+      // Accept the checked state and move to the next tick.
       bodies = nextBodies;
+
+      // Remove commands that were consumed during this tick.
       pendingCommands = pendingCommands.filter(
         (queued) => queued.command.targetTick !== tick
       );
       tick += 1;
+
+      // Clear the cached snapshot because the engine state has changed.
       borrowedSnapshot = undefined;
     }
 
@@ -438,10 +450,19 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
       return disposedFailure;
     }
 
-    borrowedSnapshot ??= makeSnapshot(bodies, tick, fixedTimeStepSeconds);
+    // Create a snapshot only when the cache is empty.
+    if (borrowedSnapshot === undefined) {
+      borrowedSnapshot = makeSnapshot(
+        bodies,
+        tick,
+        fixedTimeStepSeconds
+      );
+    }
+
     return { ok: true, value: borrowedSnapshot };
   }
 
+  // getSnapshot is used for immediate rendering, this copy is used for history and saving.
   function copySnapshot(): EngineResult<Snapshot> {
     const snapshotResult = getSnapshot();
 
@@ -468,6 +489,7 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
     return { ok: true };
   }
 
+  // Use when leaving the lab or replacing the simulation so the old engine cannot keep running.
   function dispose(): EngineStatus {
     if (disposed) {
       return { ok: true };
