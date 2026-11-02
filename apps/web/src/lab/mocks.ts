@@ -1,4 +1,7 @@
-// Supplies portable scene, snapshot and diagnostic records.
+// This file contains mock data used to test the lab display.
+// It supplies a sample scene and simulation results so we can check
+// how they appear on screen without running the physics engine.
+
 import type {
   Diagnostic,
   SceneDefinition,
@@ -49,7 +52,7 @@ const EVENT_VELOCITY_METERS_PER_SECOND = {
 
 const scene = {
   schemaVersion: 1,
-  id: "s02-handwritten-projectile",
+  id: "handwritten-projectile",
   revision: 1,
   seed: 0,
   numericalProfile: {
@@ -133,7 +136,7 @@ const scene = {
 const snapshot = {
   contractVersion: 1,
   engineVersion: "mock",
-  engineBuild: "handwritten-s02",
+  engineBuild: "handwritten-projectile-sample",
   tick: EVENT_TICK,
   simulationTimeSeconds: EVENT_TIME_SECONDS,
   bodies: [
@@ -212,7 +215,7 @@ const invalidInputDiagnostic = {
   entityId: "projectile"
 } as const satisfies Diagnostic;
 
-export const S02_LAB_MOCK = {
+export const PROJECTILE_LAB_MOCK = {
   scene,
   snapshot,
   invalidInputDiagnostic

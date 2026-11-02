@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useRef, useState } from "react";
 import { mountLabRenderer } from "./lab/renderer";
-import { S02_LAB_MOCK } from "./lab/mocks";
+import { PROJECTILE_LAB_MOCK } from "./lab/mocks";
 
 function LabCanvas() {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -15,8 +15,8 @@ function LabCanvas() {
 
     return mountLabRenderer(
       host,
-      S02_LAB_MOCK.scene,
-      S02_LAB_MOCK.snapshot
+      PROJECTILE_LAB_MOCK.scene,
+      PROJECTILE_LAB_MOCK.snapshot
     );
   }, []);
 

@@ -16,7 +16,7 @@ const VIEWPORT = {
   }
 } as const;
 
-describe("S02-COORDINATES-01 world/screen mapping", () => {
+describe("world/screen coordinate mapping", () => {
   it("maps the camera center and positive world axes", () => {
     expect(
       worldToScreen(

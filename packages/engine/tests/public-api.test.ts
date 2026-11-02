@@ -1,3 +1,5 @@
+// Verifies the engine’s public contract for validation, commands, state safety, reset, snapshots, and disposal.
+
 import { describe, expect, it } from "vitest";
 
 import type {
@@ -71,7 +73,7 @@ function expectRejectedWith(
 function makeValidScene(): SceneDefinition {
   return {
     schemaVersion: 1,
-    id: "s02-public-api",
+    id: "public-api-scene",
     revision: 1,
     seed: 17,
     numericalProfile: {
@@ -135,7 +137,7 @@ function makeLaunchCommand(
   };
 }
 
-describe("S02-ENGINE-API-01 public engine boundary", () => {
+describe("public engine API", () => {
   it("validates and rejects invalid creation without mutating input", () => {
     const scene = makeValidScene();
     const invalidScene = {

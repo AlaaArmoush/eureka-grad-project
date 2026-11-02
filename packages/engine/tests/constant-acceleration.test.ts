@@ -40,16 +40,16 @@ function expectWithinAbsoluteTolerance(
   expect(Math.abs(actual - expected)).toBeLessThanOrEqual(tolerance);
 }
 
-describe("S00-ENGINE-01 constant-acceleration starter", () => {
+describe("constant acceleration through fixed ticks", () => {
   it("advances one particle through fixed ticks using the public engine API", () => {
-    const particleId = "s00-particle";
+    const particleId = "particle";
     const fixedTimeStepSeconds = 0.25;
     const tickCount = 4;
 
     const engine = requireValue(
       createEngine({
         schemaVersion: 1,
-        id: "s00-constant-acceleration",
+        id: "constant-acceleration-scene",
         revision: 1,
         seed: 0,
         numericalProfile: {

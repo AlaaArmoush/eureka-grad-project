@@ -17,12 +17,14 @@ export interface LabEditorState {
   selectEntity(entityId: string | null): void;
 }
 
+// Share editor state outside React; keep it across canvas remounts.
 export const labStore = createStore<LabEditorState>()(
   (set) => ({
     cameraCenterWorldMeters: {
       x: 5,
       y: 0
     },
+    // Pixels per metre. A narrower browser shows less world, not smaller objects.
     pixelsPerMeter: 48,
     selectedEntityId: null,
 
@@ -41,6 +43,7 @@ export const labStore = createStore<LabEditorState>()(
         );
       }
 
+      // Copy the point so later caller changes cannot move the stored camera.
       set({
         cameraCenterWorldMeters: {
           ...cameraCenterWorldMeters
