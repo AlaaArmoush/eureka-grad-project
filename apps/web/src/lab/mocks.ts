@@ -2,11 +2,7 @@
 // It supplies a sample scene and simulation results so we can check
 // how they appear on screen without running the physics engine.
 
-import type {
-  Diagnostic,
-  SceneDefinition,
-  Snapshot
-} from "@eureka/contracts";
+import type { Diagnostic, SceneDefinition, Snapshot } from "@eureka/contracts";
 
 export interface LabMock {
   readonly scene: SceneDefinition;
@@ -16,38 +12,33 @@ export interface LabMock {
 
 const FIXED_TIME_STEP_SECONDS = 1 / 60;
 const EVENT_TICK = 60;
-const EVENT_TIME_SECONDS =
-  EVENT_TICK * FIXED_TIME_STEP_SECONDS;
+const EVENT_TIME_SECONDS = EVENT_TICK * FIXED_TIME_STEP_SECONDS;
 
 const INITIAL_VELOCITY_METERS_PER_SECOND = {
   x: 10,
-  y: 5
+  y: 5,
 } as const;
 
 const GRAVITY_METERS_PER_SECOND_SQUARED = {
   x: 0,
-  y: -10
+  y: -10,
 } as const;
 
 const EVENT_POSITION_METERS = {
-  x:
-    INITIAL_VELOCITY_METERS_PER_SECOND.x *
-    EVENT_TIME_SECONDS,
+  x: INITIAL_VELOCITY_METERS_PER_SECOND.x * EVENT_TIME_SECONDS,
   y:
-    INITIAL_VELOCITY_METERS_PER_SECOND.y *
-    EVENT_TIME_SECONDS +
+    INITIAL_VELOCITY_METERS_PER_SECOND.y * EVENT_TIME_SECONDS +
     0.5 *
-    GRAVITY_METERS_PER_SECOND_SQUARED.y *
-    EVENT_TIME_SECONDS *
-    EVENT_TIME_SECONDS
+      GRAVITY_METERS_PER_SECOND_SQUARED.y *
+      EVENT_TIME_SECONDS *
+      EVENT_TIME_SECONDS,
 } as const;
 
 const EVENT_VELOCITY_METERS_PER_SECOND = {
   x: INITIAL_VELOCITY_METERS_PER_SECOND.x,
   y:
     INITIAL_VELOCITY_METERS_PER_SECOND.y +
-    GRAVITY_METERS_PER_SECOND_SQUARED.y *
-    EVENT_TIME_SECONDS
+    GRAVITY_METERS_PER_SECOND_SQUARED.y * EVENT_TIME_SECONDS,
 } as const;
 
 const scene = {
@@ -61,13 +52,12 @@ const scene = {
     scales: {
       lengthMeters: 1,
       massKilograms: 1,
-      timeSeconds: 1
-    }
+      timeSeconds: 1,
+    },
   },
   environment: {
-    gravityMetersPerSecondSquared:
-      GRAVITY_METERS_PER_SECOND_SQUARED,
-    linearDragKilogramsPerSecond: 0
+    gravityMetersPerSecondSquared: GRAVITY_METERS_PER_SECOND_SQUARED,
+    linearDragKilogramsPerSecond: 0,
   },
   bodies: [
     {
@@ -75,24 +65,23 @@ const scene = {
       kind: "dynamic",
       shape: {
         kind: "circle",
-        radiusMeters: 0.1
+        radiusMeters: 0.1,
       },
       massKilograms: 1,
       material: {
-        restitution: 0
+        restitution: 0,
       },
       pose: {
         positionMeters: {
           x: 0,
-          y: 0
+          y: 0,
         },
-        angleRadians: 0
+        angleRadians: 0,
       },
       velocity: {
-        linearMetersPerSecond:
-          INITIAL_VELOCITY_METERS_PER_SECOND,
-        angularRadiansPerSecond: 0
-      }
+        linearMetersPerSecond: INITIAL_VELOCITY_METERS_PER_SECOND,
+        angularRadiansPerSecond: 0,
+      },
     },
     {
       id: "landing-platform",
@@ -100,19 +89,57 @@ const scene = {
       shape: {
         kind: "box",
         widthMeters: 2,
-        heightMeters: 0.5
+        heightMeters: 0.5,
       },
       material: {
-        restitution: 0
+        restitution: 0,
       },
       pose: {
         positionMeters: {
           x: 10,
-          y: -0.35
+          y: -0.35,
         },
-        angleRadians: 0
-      }
-    }
+        angleRadians: 0,
+      },
+    },
+    {
+      id: "default-ground",
+      kind: "static",
+      shape: {
+        kind: "box",
+        widthMeters: 30,
+        heightMeters: 0.5,
+      },
+      material: {
+        restitution: 0,
+      },
+      pose: {
+        positionMeters: {
+          x: 5,
+          y: -2,
+        },
+        angleRadians: 0,
+      },
+    },
+    {
+      id: "ramp",
+      kind: "static",
+      shape: {
+        kind: "box",
+        widthMeters: 3,
+        heightMeters: 0.25,
+      },
+      material: {
+        restitution: 0,
+      },
+      pose: {
+        positionMeters: {
+          x: 3,
+          y: -0.75,
+        },
+        angleRadians: Math.PI / 6,
+      },
+    },
   ],
   triggers: [
     {
@@ -120,17 +147,17 @@ const scene = {
       kind: "target",
       shape: {
         kind: "circle",
-        radiusMeters: 0.25
+        radiusMeters: 0.25,
       },
       pose: {
         positionMeters: {
           x: 10,
-          y: 0
+          y: 0,
         },
-        angleRadians: 0
-      }
-    }
-  ]
+        angleRadians: 0,
+      },
+    },
+  ],
 } as const satisfies SceneDefinition;
 
 const snapshot = {
@@ -144,40 +171,72 @@ const snapshot = {
       id: "projectile",
       pose: {
         positionMeters: EVENT_POSITION_METERS,
-        angleRadians: 0
+        angleRadians: 0,
       },
       velocity: {
-        linearMetersPerSecond:
-          EVENT_VELOCITY_METERS_PER_SECOND,
-        angularRadiansPerSecond: 0
-      }
+        linearMetersPerSecond: EVENT_VELOCITY_METERS_PER_SECOND,
+        angularRadiansPerSecond: 0,
+      },
     },
     {
       id: "landing-platform",
       pose: {
         positionMeters: {
           x: 10,
-          y: -0.35
+          y: -0.35,
         },
-        angleRadians: 0
+        angleRadians: 0,
       },
       velocity: {
         linearMetersPerSecond: {
           x: 0,
-          y: 0
+          y: 0,
         },
-        angularRadiansPerSecond: 0
-      }
-    }
+        angularRadiansPerSecond: 0,
+      },
+    },
+    {
+      id: "default-ground",
+      pose: {
+        positionMeters: {
+          x: 5,
+          y: -2,
+        },
+        angleRadians: 0,
+      },
+      velocity: {
+        linearMetersPerSecond: {
+          x: 0,
+          y: 0,
+        },
+        angularRadiansPerSecond: 0,
+      },
+    },
+    {
+      id: "ramp",
+      pose: {
+        positionMeters: {
+          x: 3,
+          y: -0.75,
+        },
+        angleRadians: Math.PI / 6,
+      },
+      velocity: {
+        linearMetersPerSecond: {
+          x: 0,
+          y: 0,
+        },
+        angularRadiansPerSecond: 0,
+      },
+    },
   ],
   projectileReadouts: [
     {
       bodyId: "projectile",
       flightTimeSeconds: EVENT_TIME_SECONDS,
-      horizontalDisplacementMeters:
-        EVENT_POSITION_METERS.x,
-      heightMeters: EVENT_POSITION_METERS.y
-    }
+      horizontalDisplacementMeters: EVENT_POSITION_METERS.x,
+      heightMeters: EVENT_POSITION_METERS.y,
+    },
   ],
   events: [
     {
@@ -186,7 +245,7 @@ const snapshot = {
       tick: EVENT_TICK,
       timeSeconds: EVENT_TIME_SECONDS,
       bodyId: "projectile",
-      targetId: "target"
+      targetId: "target",
     },
     {
       id: "ground-contact-60",
@@ -197,26 +256,26 @@ const snapshot = {
       surfaceBodyId: "landing-platform",
       pointMeters: {
         x: 10,
-        y: -0.1
+        y: -0.1,
       },
       normal: {
         x: 0,
-        y: 1
-      }
-    }
+        y: 1,
+      },
+    },
   ],
-  diagnostics: []
+  diagnostics: [],
 } as const satisfies Snapshot;
 
 const invalidInputDiagnostic = {
   code: "NONFINITE_NUMBER",
   path: "bodies[0].massKilograms",
   message: "Mass must be finite.",
-  entityId: "projectile"
+  entityId: "projectile",
 } as const satisfies Diagnostic;
 
 export const PROJECTILE_LAB_MOCK = {
   scene,
   snapshot,
-  invalidInputDiagnostic
+  invalidInputDiagnostic,
 } as const satisfies LabMock;

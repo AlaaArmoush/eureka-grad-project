@@ -17,6 +17,7 @@
         "@eureka/contracts": "0.0.0",
         "@eureka/engine": "0.0.0",
         "i18next": "26.5.3",
+        "pixi-filters": "6.1.5",
         "pixi.js": "8.22.0",
         "react": "19.3.1",
         "react-dom": "19.3.1",
