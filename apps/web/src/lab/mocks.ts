@@ -279,3 +279,184 @@ export const PROJECTILE_LAB_MOCK = {
   snapshot,
   invalidInputDiagnostic,
 } as const satisfies LabMock;
+// before passing
+
+const passThroughScene = {
+  schemaVersion: 1,
+  id: "target-pass-through",
+  revision: 1,
+  seed: 0,
+  numericalProfile: {
+    fixedTimeStepSeconds: FIXED_TIME_STEP_SECONDS,
+    substeps: 1,
+    scales: {
+      lengthMeters: 1,
+      massKilograms: 1,
+      timeSeconds: 1,
+    },
+  },
+  environment: {
+    gravityMetersPerSecondSquared: { x: 0, y: 0 },
+    linearDragKilogramsPerSecond: 0,
+  },
+  bodies: [
+    {
+      id: "projectile",
+      kind: "dynamic",
+      shape: {
+        kind: "circle",
+        radiusMeters: 0.1,
+      },
+      massKilograms: 1,
+      material: {
+        restitution: 0,
+      },
+      pose: {
+        positionMeters: {
+          x: 0,
+          y: 0,
+        },
+        angleRadians: 0,
+      },
+      velocity: {
+        linearMetersPerSecond: { x: 6, y: 0 },
+        angularRadiansPerSecond: 0,
+      },
+    },
+  ],
+  triggers: [
+    {
+      id: "target",
+      kind: "target",
+      shape: {
+        kind: "circle",
+        radiusMeters: 0.85,
+      },
+      pose: {
+        positionMeters: {
+          x: 6,
+          y: 0,
+        },
+        angleRadians: 0,
+      },
+    },
+  ],
+} as const satisfies SceneDefinition;
+const passThroughBeforeSnapshot: Snapshot = {
+  contractVersion: 1,
+  engineVersion: "mock",
+  engineBuild: "handwritten-target-pass-through",
+  tick: 40,
+  simulationTimeSeconds: 40 / 60,
+  bodies: [
+    {
+      id: "projectile",
+      pose: {
+        positionMeters: { x: 4, y: 0 },
+        angleRadians: 0,
+      },
+      velocity: {
+        linearMetersPerSecond: { x: 6, y: 0 },
+        angularRadiansPerSecond: 0,
+      },
+    },
+  ],
+  projectileReadouts: [
+    {
+      bodyId: "projectile",
+      flightTimeSeconds: 40 / 60,
+      horizontalDisplacementMeters: 4,
+      heightMeters: 0,
+    },
+  ],
+  events: [],
+  diagnostics: [],
+};
+
+const passThroughEnteredSnapshot: Snapshot = {
+  contractVersion: 1,
+  engineVersion: "mock",
+  engineBuild: "handwritten-target-pass-through",
+  tick: 51,
+  simulationTimeSeconds: 51 / 60,
+  bodies: [
+    {
+      id: "projectile",
+      pose: {
+        positionMeters: { x: 5.1, y: 0 },
+        angleRadians: 0,
+      },
+      velocity: {
+        linearMetersPerSecond: { x: 6, y: 0 },
+        angularRadiansPerSecond: 0,
+      },
+    },
+  ],
+  projectileReadouts: [
+    {
+      bodyId: "projectile",
+      flightTimeSeconds: 51 / 60,
+      horizontalDisplacementMeters: 5.1,
+      heightMeters: 0,
+    },
+  ],
+  events: [
+    {
+      id: "target-pass-through-entry",
+      kind: "targetEntered",
+      tick: 51,
+      timeSeconds: 5.05 / 6,
+      bodyId: "projectile",
+      targetId: "target",
+    },
+  ],
+  diagnostics: [],
+};
+
+const passThroughAfterSnapshot: Snapshot = {
+  contractVersion: 1,
+  engineVersion: "mock",
+  engineBuild: "handwritten-target-pass-through",
+  tick: 80,
+  simulationTimeSeconds: 80 / 60,
+  bodies: [
+    {
+      id: "projectile",
+      pose: {
+        positionMeters: { x: 8, y: 0 },
+        angleRadians: 0,
+      },
+      velocity: {
+        linearMetersPerSecond: { x: 6, y: 0 },
+        angularRadiansPerSecond: 0,
+      },
+    },
+  ],
+  projectileReadouts: [
+    {
+      bodyId: "projectile",
+      flightTimeSeconds: 80 / 60,
+      horizontalDisplacementMeters: 8,
+      heightMeters: 0,
+    },
+  ],
+  events: [],
+  diagnostics: [],
+};
+export const TARGET_PASS_THROUGH_MOCKS = {
+  before: {
+    scene: passThroughScene,
+    snapshot: passThroughBeforeSnapshot,
+    invalidInputDiagnostic,
+  },
+  entered: {
+    scene: passThroughScene,
+    snapshot: passThroughEnteredSnapshot,
+    invalidInputDiagnostic,
+  },
+  after: {
+    scene: passThroughScene,
+    snapshot: passThroughAfterSnapshot,
+    invalidInputDiagnostic,
+  },
+} as const satisfies Record<"before" | "entered" | "after", LabMock>;

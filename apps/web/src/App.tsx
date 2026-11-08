@@ -1,12 +1,12 @@
 import { useEffect } from "react";
 import { useRef, useState } from "react";
 import { mountLabRenderer } from "./lab/renderer";
-import { PROJECTILE_LAB_MOCK } from "./lab/mocks";
+import { TARGET_PASS_THROUGH_MOCKS, type LabMock } from "./lab/mocks";
 import { useStore } from "zustand";
 import { labStore } from "./lab/store";
 import type { Body, TargetTrigger, Pose, Snapshot } from "@eureka/contracts";
 import "./App.css";
-
+const PROJECTILE_LAB_MOCK: LabMock = TARGET_PASS_THROUGH_MOCKS.entered;
 type InspectorShape = Body["shape"] | TargetTrigger["shape"];
 
 function LabCanvas() {
@@ -194,16 +194,8 @@ export function App() {
   }, [labVisible]);
 
   return (
-    <main
-      className="lab-shell"
-      style={{
-        boxSizing: "border-box",
-        fontFamily: "system-ui, sans-serif",
-        margin: "0 auto",
-        padding: "24px",
-      }}
-    >
-      <header>
+    <main className="lab-shell">
+      <header className="lab-header">
         <h1>Eureka</h1>
         <button
           onClick={() => {
@@ -254,7 +246,6 @@ export function App() {
               </svg>
             </button>
           </span>
-
           <span className="playback-action" title="Step">
             <button aria-label="Step" disabled type="button">
               <svg
@@ -273,7 +264,6 @@ export function App() {
               </svg>
             </button>
           </span>
-
           <span className="playback-action" title="Reset">
             <button aria-label="Reset" disabled type="button">
               <svg
@@ -293,7 +283,6 @@ export function App() {
             </button>
           </span>
           <label htmlFor="simulation-speed">Speed </label>
-
           <select name="Speed:" id="simulation-speed" defaultValue="1" disabled>
             <option value="0.25">0.25x</option>
             <option value="0.5">0.5x </option>
@@ -301,7 +290,10 @@ export function App() {
             <option value="2">2x</option>
             <option value="4">4x</option>
           </select>
-          <p>Time(sec): {PROJECTILE_LAB_MOCK.snapshot.simulationTimeSeconds}</p>
+          <p>
+            Time:
+            {PROJECTILE_LAB_MOCK.snapshot.simulationTimeSeconds.toFixed(3)} s
+          </p>
           <p>Tick: {PROJECTILE_LAB_MOCK.snapshot.tick}</p>
         </div>
       </header>
@@ -475,7 +467,8 @@ export function App() {
               <ul>
                 {visibleEvents.map((event) => (
                   <li key={event.id}>
-                    {event.kind} — {event.bodyId} at {event.timeSeconds} s
+                    {event.kind} — {event.bodyId} at
+                    {event.timeSeconds.toFixed(3)} s
                   </li>
                 ))}
               </ul>

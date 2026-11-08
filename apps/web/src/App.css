@@ -14,9 +14,101 @@
   border-radius: 10px;
 }
 
+.lab-shell {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 24px;
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #20272d;
+  background: #f4f5f3;
+}
+.lab-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px 20px;
+}
+
+.lab-header > h1 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.5px;
+}
+
+.lab-header > section,
+.lab-header > .playback-bar {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.lab-header > section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 20px;
+}
+
+.lab-header > section > h2 {
+  margin: 0;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 17px;
+  font-weight: 600;
+  color: #20272d;
+}
+
+.lab-header > section > p {
+  margin: 0;
+  font-size: 13px;
+  color: #53616b;
+  overflow-wrap: anywhere;
+}
+.lab-header > button {
+  padding: 8px 14px;
+  font: inherit;
+  font-weight: 500;
+  line-height: 1.3;
+  color: #20272d;
+  background: #ffffff;
+  border: 1px solid #c2c9ce;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.lab-header > button:hover {
+  background: #f6f7f7;
+  border-color: #a7b1b8;
+}
+
+.lab-header > button:active {
+  background: #e5e9eb;
+}
+
+.lab-header > button:focus-visible {
+  outline: 2px solid #355d78;
+  outline-offset: 3px;
+}
+
 .canvas {
   grid-area: canvas;
   min-width: 0;
+}
+.playback-bar button,
+.playback-bar select,
+.canvas > button {
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: #20272d;
+  background: #ffffff;
+  border: 1px solid #c2c9ce;
+  border-radius: 6px;
 }
 
 .properties {
@@ -42,13 +134,13 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
-  gap: 16px;
-  padding: 16px;
+  justify-content: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
   background: #ffffff;
-  color: #24323a;
-  border: 1px solid #d4dce0;
-  border-radius: 10px;
+  color: #20272d;
+  border: 1px solid #d4d9dd;
+  border-radius: 6px;
 }
 .playback-bar p {
   margin: 0;
@@ -106,14 +198,6 @@ body {
   margin: 0;
 }
 
-.lab-shell {
-  box-sizing: border-box;
-  min-height: 100vh;
-  padding: 24px;
-  font-family: Inter, system-ui, sans-serif;
-  color: #24323a;
-  background: #f1f4f5;
-}
 .bodies {
   display: flex;
   flex-direction: column;

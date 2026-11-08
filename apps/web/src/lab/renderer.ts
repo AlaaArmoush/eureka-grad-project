@@ -1,17 +1,18 @@
 import type { SceneDefinition, Snapshot, Vector2 } from "@eureka/contracts";
 
-import { Application, Graphics } from "pixi.js";
+import { Application, Graphics, Container, Text } from "pixi.js";
 
 import { worldToScreen, type ViewportTransform } from "./coordinates.js";
 import { labStore } from "./store.js";
-import { GlowFilter } from "pixi-filters";
+import { OutlineFilter } from "pixi-filters";
 
 interface RenderItem {
-  readonly graphic: Graphics;
+  readonly graphic: Container;
   readonly positionMeters: Vector2;
   readonly angleRadians: number;
   readonly sourcePixelsPerMeter: number;
   readonly entityId: string;
+  readonly selectionGraphic: Container;
 }
 
 function createRenderItems(
@@ -24,17 +25,48 @@ function createRenderItems(
   for (const trigger of scene.triggers) {
     const radiusPixels = trigger.shape.radiusMeters * pixelsPerMeter;
 
-    const graphic = new Graphics()
+    const hasTargetEntered: boolean = snapshot.events.some((event) => {
+      return (
+        event.kind === "targetEntered" &&
+        event.targetId === trigger.id &&
+        event.tick === snapshot.tick
+      );
+    });
+    const targetColor = hasTargetEntered ? 0x16776e : 0x9a6700;
+
+    const graphic = new Container();
+
+    const ring = new Graphics()
       .circle(0, 0, radiusPixels)
       .fill({
-        alpha: 0.12,
-        color: 0xfacc15,
+        alpha: hasTargetEntered ? 0.16 : 0.08,
+        color: targetColor,
       })
       .stroke({
-        color: 0xfacc15,
+        color: targetColor,
         width: 2,
       });
+
+    const centreMarker = new Graphics()
+      .circle(0, 0, 2)
+      .fill({ color: targetColor });
+
+    const label = new Text({
+      text: hasTargetEntered ? "Target Entered" : "Target",
+      style: {
+        fontFamily: "Inter, system-ui, sans-serif",
+        fontSize: 12,
+        fontWeight: "500",
+        fill: targetColor,
+      },
+    });
+
+    label.anchor.set(0.5, 1);
+    label.position.set(0, -radiusPixels - 8);
+
+    graphic.addChild(ring, centreMarker, label);
     graphic.eventMode = "static";
+    graphic.cursor = "pointer";
 
     graphic.on("pointerdown", () => {
       labStore.getState().selectEntity(trigger.id);
@@ -46,6 +78,7 @@ function createRenderItems(
       angleRadians: trigger.pose.angleRadians,
       sourcePixelsPerMeter: pixelsPerMeter,
       entityId: trigger.id,
+      selectionGraphic: ring,
     });
   }
 
@@ -70,7 +103,8 @@ function createRenderItems(
               body.shape.widthMeters * pixelsPerMeter,
               body.shape.heightMeters * pixelsPerMeter,
             )
-            .fill({ color: 0x94a3b8 });
+            .fill({ color: 0x57564d })
+            .stroke({ color: 0x302f29, width: 1 });
     graphic.eventMode = "static";
 
     graphic.on("pointerdown", () => {
@@ -83,6 +117,7 @@ function createRenderItems(
       angleRadians: snapshotBody.pose.angleRadians,
       sourcePixelsPerMeter: pixelsPerMeter,
       entityId: snapshotBody.id,
+      selectionGraphic: graphic,
     });
   }
 
@@ -99,13 +134,11 @@ export function mountLabRenderer(
   let initialized = false;
   let renderItems: readonly RenderItem[] = [];
   let unsubscribeFromStore: (() => void) | undefined;
-  const selectedFilter = new GlowFilter({
-    color: 0xffffff,
-    distance: 4, // How far the glow extends (pixels)
-    outerStrength: 3, // Glow intensity outside the shape
-    innerStrength: 0.5, // Glow intensity inside the shape
-    alpha: 0.9, // Glow transparency
-    quality: 0.9, // Glow rendering quality
+  const selectedFilter = new OutlineFilter({
+    color: 0xf26b2a,
+    thickness: 2,
+    alpha: 1,
+    quality: 0.8,
   });
   const resizeAndRender = (): void => {
     const width = Math.max(1, host.clientWidth);
@@ -132,9 +165,9 @@ export function mountLabRenderer(
       item.graphic.rotation = -item.angleRadians;
 
       if (editorState.selectedEntityId === item.entityId) {
-        item.graphic.filters = selectedFilter;
+        item.selectionGraphic.filters = selectedFilter;
       } else {
-        item.graphic.filters = [];
+        item.selectionGraphic.filters = [];
       }
     }
 
@@ -146,7 +179,7 @@ export function mountLabRenderer(
       antialias: true,
       autoDensity: true,
       autoStart: false,
-      backgroundColor: 0x0f172a,
+      backgroundColor: 0xf5f0e4,
       height: Math.max(1, host.clientHeight),
       resolution: window.devicePixelRatio,
       width: Math.max(1, host.clientWidth),
