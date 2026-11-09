@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import { createEngine } from "../../src/index.js";
 import { GRAVITY, makeScene } from "./scene-fixtures.js";
 import { expectNear, unwrap } from "../test-support.js";
-import { measureLanding, ordinaryTolerance } from "./test-support.js";
+import {
+  measureLanding,
+  ordinaryTolerance
+} from "./projectile-test-support.js";
 
 // Independently calculated samples for the 20 m/s, 30-degree launch.
 const referenceSamples = [

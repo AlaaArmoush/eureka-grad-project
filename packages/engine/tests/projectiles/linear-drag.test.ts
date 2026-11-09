@@ -6,7 +6,7 @@ import {
   measureLanding,
   observeReferenceFlight,
   ordinaryTolerance
-} from "./test-support.js";
+} from "./projectile-test-support.js";
 
 // Independently predict an origin launch at 20 m/s and 30 degrees.
 function expectedLaunchState(
