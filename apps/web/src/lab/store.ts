@@ -8,6 +8,7 @@ export interface LabEditorState {
   readonly cameraCenterWorldMeters: Vector2;
   readonly pixelsPerMeter: number;
   readonly selectedEntityId: string | null;
+  
 
   setCamera(
     centerWorldMeters: Vector2,
@@ -15,6 +16,8 @@ export interface LabEditorState {
   ): void;
 
   selectEntity(entityId: string | null): void;
+    readonly activeTool: "select" | "pan";
+  setActiveTool(tool: "select" | "pan"): void;
 }
 
 // Share editor state outside React; keep it across canvas remounts.
@@ -52,8 +55,13 @@ export const labStore = createStore<LabEditorState>()(
       });
     },
 
-    selectEntity: (selectedEntityId) => {
+      selectEntity: (selectedEntityId) => {
       set({ selectedEntityId });
+    },
+
+    activeTool: "select",
+    setActiveTool: (activeTool) => {
+      set({ activeTool });
     }
   })
 );

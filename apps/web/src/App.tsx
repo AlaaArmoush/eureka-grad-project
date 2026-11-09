@@ -192,6 +192,10 @@ export function App() {
     labStore,
     (state) => state.selectedEntityId,
   );
+   const activeTool = useStore(
+    labStore,
+    (state) => state.activeTool,
+  );
   const selectedBody = displayedSnapshot.bodies.find(
     (body) => body.id === selectedEntityId,
   );
@@ -475,6 +479,15 @@ export function App() {
         <section className="canvas">
           <h2>Canvas</h2>
 
+                    <button
+            type="button"
+            
+            onClick={() => {
+              labStore.getState().setActiveTool(activeTool === "pan" ? "select" : "pan");
+            }}
+          >
+            {activeTool === "pan" ? " Panning (Click to stop)" : " Pan"}
+          </button>
           <button
             onClick={() => {
               const state = labStore.getState();
