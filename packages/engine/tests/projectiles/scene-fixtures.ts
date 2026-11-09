@@ -7,7 +7,12 @@ export function makeScene(
   speed: number,
   angleDegrees: number,
   height = 0,
-  withGround = false
+  withGround = false,
+  options: {
+    readonly massKilograms?: number;
+    readonly linearDragKilogramsPerSecond?: number;
+    readonly fixedTimeStepSeconds?: number;
+  } = {}
 ): SceneDefinition {
   // JavaScript's trigonometric functions require radians.
   const angleRadians = angleDegrees * Math.PI / 180;
@@ -17,7 +22,7 @@ export function makeScene(
       id: "projectile",
       kind: "dynamic",
       shape: { kind: "circle", radiusMeters: 0.1 },
-      massKilograms: 1,
+      massKilograms: options.massKilograms ?? 1,
       material: { restitution: 0 },
       pose: {
         positionMeters: { x: 0, y: height },
@@ -58,7 +63,7 @@ export function makeScene(
     revision: 1,
     seed: 17,
     numericalProfile: {
-      fixedTimeStepSeconds: TIME_STEP,
+      fixedTimeStepSeconds: options.fixedTimeStepSeconds ?? TIME_STEP,
       substeps: 1,
       scales: {
         lengthMeters: 1,
@@ -68,7 +73,7 @@ export function makeScene(
     },
     environment: {
       gravityMetersPerSecondSquared: { x: 0, y: -GRAVITY },
-      linearDragKilogramsPerSecond: 0
+      linearDragKilogramsPerSecond: options.linearDragKilogramsPerSecond ?? 0
     },
     bodies,
     triggers: []
