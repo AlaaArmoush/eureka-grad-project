@@ -2,7 +2,19 @@ import { useCallback, useEffect } from "react";
 import { useRef, useState } from "react";
 import { mountLabRenderer } from "./lab/renderer";
 import { PROJECTILE_LAB_MOCK } from "./lab/mocks";
-
+import {
+  Hand,
+  ZoomIn,
+  ZoomOut,
+  Play,
+  Pause,
+  StepForward,
+  RotateCcw,
+  Circle,
+  RectangleHorizontal,
+  TriangleRight,
+  Target,
+} from "lucide-react";
 import { useStore } from "zustand";
 import { labStore } from "./lab/store";
 import { createEngine } from "@eureka/engine";
@@ -192,10 +204,7 @@ export function App() {
     labStore,
     (state) => state.selectedEntityId,
   );
-   const activeTool = useStore(
-    labStore,
-    (state) => state.activeTool,
-  );
+  const activeTool = useStore(labStore, (state) => state.activeTool);
   const selectedBody = displayedSnapshot.bodies.find(
     (body) => body.id === selectedEntityId,
   );
@@ -275,73 +284,22 @@ export function App() {
         <div className="playback-bar">
           <span className="playback-action" title="Play">
             <button aria-label="Play" disabled type="button">
-              <svg
-                aria-hidden="true"
-                width="13"
-                height="13"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polygon points="5,3 13,8 5,13" />
-              </svg>
+              <Play size={14} />
             </button>
           </span>
           <span className="playback-action" title="Pause">
             <button aria-label="Pause" disabled type="button">
-              <svg
-                aria-hidden="true"
-                width="13"
-                height="13"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <line x1="6" y1="3" x2="6" y2="13" />
-                <line x1="10" y1="3" x2="10" y2="13" />
-              </svg>
+              <Pause size={14} />
             </button>
           </span>
           <span className="playback-action" title="Step">
             <button aria-label="Step" disabled type="button">
-              <svg
-                aria-hidden="true"
-                width="13"
-                height="13"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <polygon points="4,3 10,8 4,13" />
-                <line x1="13" y1="3" x2="13" y2="13" />
-              </svg>
+              <StepForward size={14} />
             </button>
           </span>
           <span className="playback-action" title="Reset">
             <button aria-label="Reset" disabled type="button">
-              <svg
-                aria-hidden="true"
-                width="13"
-                height="13"
-                viewBox="0 0 16 16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M3 7 A5 5 0 1 1 4 12" />
-                <polyline points="3,3 3,7 7,7" />
-              </svg>
+              <RotateCcw size={14} />
             </button>
           </span>
           <label htmlFor="simulation-speed">Speed </label>
@@ -367,57 +325,21 @@ export function App() {
           <ul className="tools">
             <li>
               <button disabled type="button">
-                <svg
-                  aria-hidden="true"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <circle cx="8" cy="8" r="4" />
-                </svg>
+                <Circle size={16} />
                 <strong>Projectile</strong>
                 <span>A moving ball with mass and initial velocity.</span>
               </button>
             </li>
             <li>
               <button disabled type="button">
-                <svg
-                  aria-hidden="true"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <rect x="2" y="5" width="12" height="6" />
-                </svg>
+                <RectangleHorizontal size={16} />
                 <strong>Wall / platform</strong>
                 <span>A fixed rectangular collision surface.</span>
               </button>
             </li>
             <li>
               <button disabled type="button">
-                <svg
-                  aria-hidden="true"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <polygon points="2,9 13,3 15,7 4,13" />
-                </svg>
+                <TriangleRight size={16} />
                 <strong>Ramp</strong>
                 <span>A fixed platform placed at an angle.</span>
               </button>
@@ -425,20 +347,7 @@ export function App() {
 
             <li>
               <button disabled type="button">
-                <svg
-                  aria-hidden="true"
-                  width="16"
-                  height="16"
-                  viewBox="0 0 16 16"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.3"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <circle cx="8" cy="8" r="5" />
-                  <circle cx="8" cy="8" r="2" />
-                </svg>
+                <Target size={16} />
                 <strong>Target zone</strong>
                 <span>A pass-through circular sensor that detects entry.</span>
               </button>
@@ -479,38 +388,49 @@ export function App() {
         <section className="canvas">
           <h2>Canvas</h2>
 
-                    <button
-            type="button"
-            
-            onClick={() => {
-              labStore.getState().setActiveTool(activeTool === "pan" ? "select" : "pan");
-            }}
-          >
-            {activeTool === "pan" ? " Panning (Click to stop)" : " Pan"}
-          </button>
-          <button
-            onClick={() => {
-              const state = labStore.getState();
-              state.setCamera(
-                state.cameraCenterWorldMeters,
-                state.pixelsPerMeter + 12,
-              );
-            }}
-          >
-            Zoom In
-          </button>
-          <button
-            onClick={() => {
-              const state = labStore.getState();
-              const nextScale = state.pixelsPerMeter - 12;
+          <div className="canvas-toolbar">
+            <button
+              type="button"
+              className={`tool-btn ${activeTool === "pan" ? "active" : ""}`}
+              aria-pressed={activeTool === "pan"}
+              onClick={() => {
+                labStore
+                  .getState()
+                  .setActiveTool(activeTool === "pan" ? "select" : "pan");
+              }}
+            >
+              <Hand size={14} />
+            </button>
 
-              if (nextScale >= 12) {
-                state.setCamera(state.cameraCenterWorldMeters, nextScale);
-              }
-            }}
-          >
-            Zoom Out
-          </button>
+            <button
+              type="button"
+              className="tool-btn"
+              onClick={() => {
+                const state = labStore.getState();
+                state.setCamera(
+                  state.cameraCenterWorldMeters,
+                  state.pixelsPerMeter + 12,
+                );
+              }}
+            >
+              <ZoomIn size={14} />
+            </button>
+
+            <button
+              type="button"
+              className="tool-btn"
+              onClick={() => {
+                const state = labStore.getState();
+                const nextScale = state.pixelsPerMeter - 12;
+
+                if (nextScale >= 12) {
+                  state.setCamera(state.cameraCenterWorldMeters, nextScale);
+                }
+              }}
+            >
+              <ZoomOut size={14} />
+            </button>
+          </div>
 
           <section
             aria-label="Physics laboratory"

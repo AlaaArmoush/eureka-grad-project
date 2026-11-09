@@ -40,7 +40,7 @@ function createRenderItems(
         fontFamily: "Inter, system-ui, sans-serif",
         fontSize: 12,
         fontWeight: "500",
-        fill: 0x9a6700,
+        fill: 0x3b8066,
       },
     });
     function updateFeedback(nextSnapshot: Snapshot): void {
@@ -51,8 +51,7 @@ function createRenderItems(
           event.tick === nextSnapshot.tick,
       );
 
-      const color = hasEntered ? 0x16776e : 0x9a6700;
-
+      const color = hasEntered ? 0x16776e : 0x3b8066;
       ring
         .clear()
         .circle(0, 0, radiusPixels)
@@ -101,11 +100,14 @@ function createRenderItems(
       throw new Error(`Snapshot omitted scene body "${body.id}".`);
     }
 
+    const isGround = body.id.toLowerCase().includes("ground");
+
     const graphic =
       body.kind === "dynamic"
         ? new Graphics()
             .circle(0, 0, body.shape.radiusMeters * pixelsPerMeter)
-            .fill({ color: 0x38bdf8 })
+            .fill({ color: 0xdd875d })
+            .stroke({ color: 0x9b553b, width: 1.5 })
         : new Graphics()
             .rect(
               (-body.shape.widthMeters * pixelsPerMeter) / 2,
@@ -113,8 +115,8 @@ function createRenderItems(
               body.shape.widthMeters * pixelsPerMeter,
               body.shape.heightMeters * pixelsPerMeter,
             )
-            .fill({ color: 0x57564d })
-            .stroke({ color: 0x302f29, width: 1 });
+            .fill({ color: isGround ? 0xb8c28c : 0xe0b455 })
+            .stroke({ color: isGround ? 0x6f6c51 : 0x9b713b, width: 1.5 });
     graphic.eventMode = "static";
 
     graphic.on("pointerdown", () => {
@@ -149,14 +151,15 @@ export function mountLabRenderer(
   let renderItems: readonly RenderItem[] = [];
   let unsubscribeFromStore: (() => void) | undefined;
 
-let panStart: Vector2 | null = null; // null when user not panning
-let panCameraStart: Vector2 | null = null; //camera position at the start of pan
+  let panStart: Vector2 | null = null; // null when user not panning
+  let panCameraStart: Vector2 | null = null; //camera position at the start of pan
 
-const background = new Graphics();
-background.eventMode = "static"; // Pixi: "static" means this object can receive pointer events
-background.cursor = labStore.getState().activeTool === "pan" ? "grab" : "default";  
-const selectedFilter = new OutlineFilter({
-    color: 0xf26b2a,
+  const background = new Graphics();
+  background.eventMode = "static";
+  background.cursor =
+    labStore.getState().activeTool === "pan" ? "grab" : "default";
+  const selectedFilter = new OutlineFilter({
+    color: 0xd87149,
     thickness: 2,
     alpha: 1,
     quality: 0.8,
@@ -228,7 +231,7 @@ const selectedFilter = new OutlineFilter({
       antialias: true,
       autoDensity: true,
       autoStart: false,
-      backgroundColor: 0xf5f0e4,
+      backgroundColor: 0xe8e0cd,
       height: Math.max(1, host.clientHeight),
       resolution: window.devicePixelRatio,
       width: Math.max(1, host.clientWidth),
@@ -249,47 +252,49 @@ const selectedFilter = new OutlineFilter({
 
     application.stage.addChild(...renderItems.map((item) => item.graphic));
 
-application.stage.addChildAt(background, 0);
-application.stage.eventMode = "static"; 
+    application.stage.addChildAt(background, 0);
+    application.stage.eventMode = "static";
 
-background.on("pointerdown", (event) => {
-  if (labStore.getState().activeTool !== "pan") {
-    return;
-  }
-  panStart = { x: event.global.x, y: event.global.y };
-  panCameraStart = { ...labStore.getState().cameraCenterWorldMeters };
-  background.cursor = "grabbing";
-});
+    background.on("pointerdown", (event) => {
+      if (labStore.getState().activeTool !== "pan") {
+        return;
+      }
+      panStart = { x: event.global.x, y: event.global.y };
+      panCameraStart = { ...labStore.getState().cameraCenterWorldMeters };
+      background.cursor = "grabbing";
+    });
 
-background.on("pointermove", (event) => {
-  if (panStart === null || panCameraStart === null) {
-    return;
-  }
+    background.on("pointermove", (event) => {
+      if (panStart === null || panCameraStart === null) {
+        return;
+      }
 
-  const p = labStore.getState().pixelsPerMeter;
-  const dx = event.global.x - panStart.x;
-  const dy = event.global.y - panStart.y;
+      const p = labStore.getState().pixelsPerMeter;
+      const dx = event.global.x - panStart.x;
+      const dy = event.global.y - panStart.y;
 
- 
-  labStore.getState().setCamera(
-    { x: panCameraStart.x - dx / p, y: panCameraStart.y + dy / p },
-    p,
-  );
-});
+      labStore
+        .getState()
+        .setCamera(
+          { x: panCameraStart.x - dx / p, y: panCameraStart.y + dy / p },
+          p,
+        );
+    });
 
-const stopPan = (): void => {
-  panStart = null;
-  panCameraStart = null;
-    background.cursor = labStore.getState().activeTool === "pan" ? "grab" : "default";
-};
+    const stopPan = (): void => {
+      panStart = null;
+      panCameraStart = null;
+      background.cursor =
+        labStore.getState().activeTool === "pan" ? "grab" : "default";
+    };
 
-background.on("pointerup", stopPan);
-background.on("pointerupoutside", stopPan); 
+    background.on("pointerup", stopPan);
+    background.on("pointerupoutside", stopPan);
     // This host is dedicated to Pixi, so replacing its children enforces
     // one-canvas ownership even across development remounts.
     host.replaceChildren(application.canvas);
     window.addEventListener("resize", resizeAndRender);
-       unsubscribeFromStore = labStore.subscribe((state, previousState) => {
+    unsubscribeFromStore = labStore.subscribe((state, previousState) => {
       if (state.activeTool !== previousState.activeTool) {
         background.cursor = state.activeTool === "pan" ? "grab" : "default";
       }
