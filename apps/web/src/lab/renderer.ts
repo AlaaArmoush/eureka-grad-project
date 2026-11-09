@@ -7,14 +7,19 @@ import { labStore } from "./store.js";
 import { OutlineFilter } from "pixi-filters";
 
 interface RenderItem {
+  readonly kind: "body" | "target";
   readonly graphic: Container;
-  readonly positionMeters: Vector2;
-  readonly angleRadians: number;
+  positionMeters: Vector2;
+  angleRadians: number;
   readonly sourcePixelsPerMeter: number;
   readonly entityId: string;
+  readonly updateFeedback?: (snapshot: Snapshot) => void;
   readonly selectionGraphic: Container;
 }
-
+export interface LabRenderer {
+  updateSnapshot(snapshot: Snapshot): void;
+  dispose(): void;
+}
 function createRenderItems(
   scene: SceneDefinition,
   snapshot: Snapshot,
@@ -25,42 +30,45 @@ function createRenderItems(
   for (const trigger of scene.triggers) {
     const radiusPixels = trigger.shape.radiusMeters * pixelsPerMeter;
 
-    const hasTargetEntered: boolean = snapshot.events.some((event) => {
-      return (
-        event.kind === "targetEntered" &&
-        event.targetId === trigger.id &&
-        event.tick === snapshot.tick
-      );
-    });
-    const targetColor = hasTargetEntered ? 0x16776e : 0x9a6700;
-
     const graphic = new Container();
-
-    const ring = new Graphics()
-      .circle(0, 0, radiusPixels)
-      .fill({
-        alpha: hasTargetEntered ? 0.16 : 0.08,
-        color: targetColor,
-      })
-      .stroke({
-        color: targetColor,
-        width: 2,
-      });
-
-    const centreMarker = new Graphics()
-      .circle(0, 0, 2)
-      .fill({ color: targetColor });
+    const ring = new Graphics();
+    const centreMarker = new Graphics();
 
     const label = new Text({
-      text: hasTargetEntered ? "Target Entered" : "Target",
+      text: "Target",
       style: {
         fontFamily: "Inter, system-ui, sans-serif",
         fontSize: 12,
         fontWeight: "500",
-        fill: targetColor,
+        fill: 0x9a6700,
       },
     });
+    function updateFeedback(nextSnapshot: Snapshot): void {
+      const hasEntered = nextSnapshot.events.some(
+        (event) =>
+          event.kind === "targetEntered" &&
+          event.targetId === trigger.id &&
+          event.tick === nextSnapshot.tick,
+      );
 
+      const color = hasEntered ? 0x16776e : 0x9a6700;
+
+      ring
+        .clear()
+        .circle(0, 0, radiusPixels)
+        .fill({
+          color,
+          alpha: hasEntered ? 0.16 : 0.08,
+        })
+        .stroke({ color, width: 2 });
+
+      centreMarker.clear().circle(0, 0, 2).fill({ color });
+
+      label.text = hasEntered ? "Target Entered" : "Target";
+      label.style.fill = color;
+    }
+
+    updateFeedback(snapshot);
     label.anchor.set(0.5, 1);
     label.position.set(0, -radiusPixels - 8);
 
@@ -79,6 +87,8 @@ function createRenderItems(
       sourcePixelsPerMeter: pixelsPerMeter,
       entityId: trigger.id,
       selectionGraphic: ring,
+      kind: "target",
+      updateFeedback,
     });
   }
 
@@ -118,6 +128,7 @@ function createRenderItems(
       sourcePixelsPerMeter: pixelsPerMeter,
       entityId: snapshotBody.id,
       selectionGraphic: graphic,
+      kind: "body",
     });
   }
 
@@ -128,7 +139,10 @@ export function mountLabRenderer(
   host: HTMLElement,
   scene: SceneDefinition,
   snapshot: Snapshot,
-): () => void {
+): LabRenderer {
+  //deep copy of the whole snapshot (independent copy with no sharing of the nested objects)
+  //The copied values remain stable no matter how and if the engine changes
+  let initialSnapshot = structuredClone(snapshot);
   const application = new Application();
   let disposed = false;
   let initialized = false;
@@ -173,7 +187,34 @@ export function mountLabRenderer(
 
     application.render();
   };
+  function updateSnapshot(nextSnapshot: Snapshot): void {
+    if (disposed) {
+      return;
+    }
 
+    if (!initialized) {
+      initialSnapshot = structuredClone(nextSnapshot);
+      return;
+    }
+    for (const item of renderItems) {
+      if (item.kind === "body") {
+        const body = nextSnapshot.bodies.find(
+          (candidate) => candidate.id === item.entityId,
+        );
+
+        if (body === undefined) {
+          throw new Error(`Snapshot omitted scene body "${item.entityId}".`);
+        }
+
+        item.positionMeters = { ...body.pose.positionMeters };
+        item.angleRadians = body.pose.angleRadians;
+      } else {
+        item.updateFeedback?.(nextSnapshot);
+      }
+    }
+
+    resizeAndRender();
+  }
   const initialize = async (): Promise<void> => {
     await application.init({
       antialias: true,
@@ -194,7 +235,7 @@ export function mountLabRenderer(
 
     renderItems = createRenderItems(
       scene,
-      snapshot,
+      initialSnapshot,
       labStore.getState().pixelsPerMeter,
     );
 
@@ -214,7 +255,7 @@ export function mountLabRenderer(
         resizeAndRender();
       }
     });
-    resizeAndRender();
+    updateSnapshot(initialSnapshot);
   };
 
   void initialize().catch((error: unknown) => {
@@ -223,7 +264,11 @@ export function mountLabRenderer(
     }
   });
 
-  return () => {
+  function dispose(): void {
+    if (disposed) {
+      return;
+    }
+
     disposed = true;
     window.removeEventListener("resize", resizeAndRender);
     unsubscribeFromStore?.();
@@ -232,6 +277,12 @@ export function mountLabRenderer(
       application.ticker.stop();
       application.destroy({ removeView: true }, { children: true });
     }
+
     selectedFilter.destroy();
+  }
+
+  return {
+    updateSnapshot,
+    dispose,
   };
 }

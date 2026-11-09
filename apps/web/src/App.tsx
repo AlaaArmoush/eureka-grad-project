@@ -1,15 +1,23 @@
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import { useRef, useState } from "react";
 import { mountLabRenderer } from "./lab/renderer";
-import { TARGET_PASS_THROUGH_MOCKS, type LabMock } from "./lab/mocks";
+import { PROJECTILE_LAB_MOCK } from "./lab/mocks";
+
 import { useStore } from "zustand";
 import { labStore } from "./lab/store";
+import { createEngine } from "@eureka/engine";
+import { createLabController, type LabController } from "./lab/controller";
 import type { Body, TargetTrigger, Pose, Snapshot } from "@eureka/contracts";
 import "./App.css";
-const PROJECTILE_LAB_MOCK: LabMock = TARGET_PASS_THROUGH_MOCKS.entered;
 type InspectorShape = Body["shape"] | TargetTrigger["shape"];
 
-function LabCanvas() {
+// setDisplayedSnapshot SO THE CHILD CAN SEND BACK INFORMATION TO THE PARENT USING THAT FUNCTION
+function LabCanvas(props: {
+  setDisplayedSnapshot(snapshot: Snapshot): void;
+  setActiveController(controller: LabController | null): void;
+}) {
+  const toSetDisplayedSnapshot = props.setDisplayedSnapshot;
+  const setActiveController = props.setActiveController;
   const hostRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -19,13 +27,53 @@ function LabCanvas() {
       return;
     }
 
-    return mountLabRenderer(
+    setActiveController(null);
+    const renderer = mountLabRenderer(
       host,
       PROJECTILE_LAB_MOCK.scene,
       PROJECTILE_LAB_MOCK.snapshot,
     );
-  }, []);
 
+    const engineResult = createEngine(PROJECTILE_LAB_MOCK.scene);
+
+    if (!engineResult.ok) {
+      console.error("Engine creation failed", engineResult.diagnostics);
+      renderer.dispose();
+      return;
+    }
+
+    const engine = engineResult.value;
+
+    const controllerResult = createLabController(
+      engine,
+      renderer.updateSnapshot,
+      renderer.dispose,
+    );
+
+    if (!controllerResult.ok) {
+      console.error("Controller creation failed", controllerResult.diagnostics);
+      renderer.dispose();
+      engine.dispose();
+      return;
+    }
+
+    const controller = controllerResult.value;
+    const readoutResult = controller.copySnapshot();
+
+    if (!readoutResult.ok) {
+      console.error("Readout copy failed", readoutResult.diagnostics);
+      controller.dispose();
+      return;
+    }
+
+    setActiveController(controller);
+    toSetDisplayedSnapshot(readoutResult.value);
+
+    return () => {
+      setActiveController(null);
+      controller.dispose();
+    };
+  }, [toSetDisplayedSnapshot, setActiveController]);
   return (
     <div
       aria-label="Eureka physics canvas"
@@ -40,6 +88,7 @@ function LabCanvas() {
     />
   );
 }
+
 function describeDimensions(shape: InspectorShape | undefined): string {
   if (shape === undefined) {
     return "No Object Selected";
@@ -135,13 +184,15 @@ function renderProperties(
   }
 }
 export function App() {
-  const displayedSnapshot: Snapshot = PROJECTILE_LAB_MOCK.snapshot;
+  const [displayedSnapshot, setDisplayedSnapshot] = useState<Snapshot>(
+    PROJECTILE_LAB_MOCK.snapshot,
+  );
   const [labVisible, setLabVisible] = useState(true);
   const selectedEntityId = useStore(
     labStore,
     (state) => state.selectedEntityId,
   );
-  const selectedBody = PROJECTILE_LAB_MOCK.snapshot.bodies.find(
+  const selectedBody = displayedSnapshot.bodies.find(
     (body) => body.id === selectedEntityId,
   );
   const selectedTrigger = PROJECTILE_LAB_MOCK.scene.triggers.find(
@@ -168,6 +219,13 @@ export function App() {
 
     return event.surfaceBodyId === selectedEntityId;
   });
+  const controllerRef = useRef<LabController | null>(null);
+  const setActiveController = useCallback(
+    (controller: LabController | null) => {
+      controllerRef.current = controller;
+    },
+    [],
+  );
   useEffect(() => {
     if (!labVisible) {
       return;
@@ -292,9 +350,9 @@ export function App() {
           </select>
           <p>
             Time:
-            {PROJECTILE_LAB_MOCK.snapshot.simulationTimeSeconds.toFixed(3)} s
+            {displayedSnapshot.simulationTimeSeconds.toFixed(3)} s
           </p>
-          <p>Tick: {PROJECTILE_LAB_MOCK.snapshot.tick}</p>
+          <p>Tick: {displayedSnapshot.tick}</p>
         </div>
       </header>
 
@@ -445,7 +503,14 @@ export function App() {
             aria-label="Physics laboratory"
             style={{ marginTop: "16px" }}
           >
-            {labVisible ? <LabCanvas /> : <p>The lab is closed.</p>}
+            {labVisible ? (
+              <LabCanvas
+                setDisplayedSnapshot={setDisplayedSnapshot}
+                setActiveController={setActiveController}
+              />
+            ) : (
+              <p>The lab is closed.</p>
+            )}
           </section>
           <section className="measurements">
             <h2>Measurements and display</h2>
