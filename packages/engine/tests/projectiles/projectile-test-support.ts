@@ -9,6 +9,48 @@ export function ordinaryTolerance(expected: number): number {
   return 1e-6 + 0.005 * Math.max(Math.abs(expected), 1);
 }
 
+// Reject nonfinite values in every numeric part of an accepted snapshot.
+export function expectFiniteSnapshot(snapshot: Snapshot): void {
+  const values = [
+    snapshot.tick,
+    snapshot.simulationTimeSeconds
+  ];
+
+  for (const body of snapshot.bodies) {
+    values.push(
+      body.pose.positionMeters.x,
+      body.pose.positionMeters.y,
+      body.pose.angleRadians,
+      body.velocity.linearMetersPerSecond.x,
+      body.velocity.linearMetersPerSecond.y,
+      body.velocity.angularRadiansPerSecond
+    );
+  }
+
+  for (const readout of snapshot.projectileReadouts) {
+    values.push(
+      readout.flightTimeSeconds,
+      readout.horizontalDisplacementMeters,
+      readout.heightMeters
+    );
+  }
+
+  for (const event of snapshot.events) {
+    values.push(event.tick, event.timeSeconds);
+
+    if (event.kind === "groundContact") {
+      values.push(
+        event.pointMeters.x,
+        event.pointMeters.y,
+        event.normal.x,
+        event.normal.y
+      );
+    }
+  }
+
+  expect(values.every(Number.isFinite)).toBe(true);
+}
+
 // Observe the first matching event through public operations only.
 export function observeFirstEvent(
   scene: SceneDefinition,
@@ -22,19 +64,7 @@ export function observeFirstEvent(
     for (let checkedTick = 0; checkedTick <= tickLimit; checkedTick += 1) {
       const snapshot = unwrap(engine.copySnapshot());
 
-      // Reject every nonfinite public body state encountered during the search.
-      for (const body of snapshot.bodies) {
-        const values = [
-          body.pose.positionMeters.x,
-          body.pose.positionMeters.y,
-          body.pose.angleRadians,
-          body.velocity.linearMetersPerSecond.x,
-          body.velocity.linearMetersPerSecond.y,
-          body.velocity.angularRadiansPerSecond
-        ];
-
-        expect(values.every(Number.isFinite)).toBe(true);
-      }
+      expectFiniteSnapshot(snapshot);
 
       const event = snapshot.events.find(matches);
 
