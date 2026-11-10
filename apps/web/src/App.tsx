@@ -1,5 +1,4 @@
-import { useEffect } from "react";
-import { useRef, useState } from "react";
+import { useRef, useState, useEffect } from "react";
 import { mountLabRenderer } from "./lab/renderer";
 import { PROJECTILE_LAB_MOCK } from "./lab/mocks";
 
@@ -13,6 +12,8 @@ function LabCanvas() {
       return;
     }
 
+    // Mounts a Pixi canvas after the component's first render. The returned
+    // function destroys it on unmount
     return mountLabRenderer(
       host,
       PROJECTILE_LAB_MOCK.scene,

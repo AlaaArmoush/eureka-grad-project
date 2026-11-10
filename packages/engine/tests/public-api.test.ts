@@ -168,23 +168,51 @@ describe("public engine API", () => {
     ).toBe(true);
   });
 
-  it("applies a tick-k command before advancing k to k+1", () => {
+  // A future command stays invisible until its target boundary, then applies
+  // before the target tick advances.
+  it("applies a tick-k command only before advancing k to k+1", () => {
     const engine = requireValue(createEngine(makeValidScene()));
     const accepted = requireValue(
-      engine.enqueue(makeLaunchCommand("launch-now", 0, 5))
+      engine.enqueue(makeLaunchCommand("launch-at-two", 2, 5))
     );
 
     expect(accepted.sequence).toBe(0);
 
-    const beforeAdvance = requireValue(engine.getSnapshot());
-    expect(beforeAdvance.bodies[0]?.pose.positionMeters.x).toBe(0);
+    requireValue(engine.advance(2));
+    const beforeTargetBoundary = requireValue(engine.getSnapshot());
 
-    const advance = requireValue(engine.advance(1));
-    expect(advance.lastValidTick).toBe(1);
+    expect(beforeTargetBoundary.tick).toBe(2);
+    expect(
+      beforeTargetBoundary.bodies[0]?.pose.positionMeters.x
+    ).toBe(0);
 
-    const afterAdvance = requireValue(engine.getSnapshot());
-    expect(afterAdvance.tick).toBe(1);
-    expect(afterAdvance.bodies[0]?.pose.positionMeters.x).toBe(5);
+    requireValue(engine.advance(1));
+    const afterTargetBoundary = requireValue(engine.getSnapshot());
+
+    expect(afterTargetBoundary.tick).toBe(3);
+    expect(
+      afterTargetBoundary.bodies[0]?.pose.positionMeters.x
+    ).toBe(5);
+  });
+
+  // Commands sharing a target tick apply in acceptance-sequence order.
+  it("applies same-tick commands in stable acceptance order", () => {
+    const engine = requireValue(createEngine(makeValidScene()));
+
+    const first = requireValue(
+      engine.enqueue(makeLaunchCommand("z-first", 0, 4))
+    );
+    const second = requireValue(
+      engine.enqueue(makeLaunchCommand("a-second", 0, 7))
+    );
+
+    expect([first.sequence, second.sequence]).toEqual([0, 1]);
+
+    requireValue(engine.advance(1));
+    const snapshot = requireValue(engine.getSnapshot());
+
+    expect(snapshot.tick).toBe(1);
+    expect(snapshot.bodies[0]?.pose.positionMeters.x).toBe(7);
   });
 
   it("rejects unknown, duplicate and past commands without mutation", () => {
@@ -225,6 +253,93 @@ describe("public engine API", () => {
     );
     expect(requireValue(engine.copySnapshot())).toEqual(
       beforePastCommand
+    );
+  });
+
+  // Reject Infinity at the command boundary without changing accepted state.
+  it("rejects nonfinite command input without mutation", () => {
+    const engine = requireValue(createEngine(makeValidScene()));
+    const beforeCommand = requireValue(engine.copySnapshot());
+
+    expectRejectedWith(
+      engine.enqueue(
+        makeLaunchCommand(
+          "infinite-launch",
+          0,
+          Number.POSITIVE_INFINITY
+        )
+      ),
+      "NONFINITE_NUMBER",
+      "payload.positionMeters.x"
+    );
+
+    expect(requireValue(engine.copySnapshot())).toEqual(beforeCommand);
+  });
+
+  // Preserve the last valid tick when the next calculation would overflow.
+  it("rolls back a tick that would produce nonfinite state", () => {
+    const baseScene = makeValidScene();
+    const overflowScene: SceneDefinition = {
+      ...baseScene,
+      numericalProfile: {
+        ...baseScene.numericalProfile,
+        fixedTimeStepSeconds: 1
+      },
+      environment: {
+        ...baseScene.environment,
+        gravityMetersPerSecondSquared: {
+          x: 1e308,
+          y: 0
+        }
+      }
+    };
+
+    const engine = requireValue(createEngine(overflowScene));
+
+    // The first tick remains finite and therefore becomes authoritative.
+    requireValue(engine.advance(1));
+    const lastValid = requireValue(engine.copySnapshot());
+    const projectile = lastValid.bodies.find(
+      (body) => body.id === "projectile"
+    );
+
+    if (projectile === undefined) {
+      throw new Error("Snapshot omitted the projectile.");
+    }
+
+    expect(lastValid.tick).toBe(1);
+    expect([
+      lastValid.simulationTimeSeconds,
+      projectile.pose.positionMeters.x,
+      projectile.pose.positionMeters.y,
+      projectile.pose.angleRadians,
+      projectile.velocity.linearMetersPerSecond.x,
+      projectile.velocity.linearMetersPerSecond.y,
+      projectile.velocity.angularRadiansPerSecond
+    ].every(Number.isFinite)).toBe(true);
+
+    // The second tick overflows, so it must fail atomically.
+    const failedAdvance = engine.advance(1);
+
+    expect(failedAdvance.ok).toBe(false);
+    expect(requireValue(engine.copySnapshot())).toEqual(lastValid);
+
+    if (failedAdvance.ok) {
+      throw new Error("Expected the overflowing tick to fail.");
+    }
+
+    expect(
+      failedAdvance.diagnostics.some(
+        (diagnostic) => diagnostic.message.includes("tick 2")
+      )
+    ).toBe(true);
+    expect(failedAdvance.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "NONFINITE_STATE",
+          entityId: "projectile"
+        })
+      ])
     );
   });
 
