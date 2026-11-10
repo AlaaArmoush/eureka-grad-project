@@ -1,7 +1,9 @@
 import { useCallback, useEffect } from "react";
 import { useRef, useState } from "react";
-import { mountLabRenderer } from "./lab/renderer";
 import { PROJECTILE_LAB_MOCK } from "./lab/mocks";
+import type { PlacementRequest } from "./lab/authoring";
+// Supplies the four placement forms and their validation.
+import { ObjectLibrary } from "./lab/ObjectLibrary";
 import {
   Hand,
   ZoomIn,
@@ -10,194 +12,21 @@ import {
   Pause,
   StepForward,
   RotateCcw,
-  Circle,
-  RectangleHorizontal,
-  TriangleRight,
-  Target,
 } from "lucide-react";
 import { useStore } from "zustand";
 import { labStore } from "./lab/store";
-import { createEngine } from "@eureka/engine";
-import { createLabController, type LabController } from "./lab/controller";
-import type { Body, TargetTrigger, Pose, Snapshot } from "@eureka/contracts";
+import type { LabController } from "./lab/controller";
+import { LabCanvas } from "./lab/LabCanvas";
+import type { Snapshot, SceneDefinition } from "@eureka/contracts";
 import "./App.css";
-type InspectorShape = Body["shape"] | TargetTrigger["shape"];
+import { PropertiesPanel } from "./lab/PropertiesPanel";
 
-// setDisplayedSnapshot SO THE CHILD CAN SEND BACK INFORMATION TO THE PARENT USING THAT FUNCTION
-function LabCanvas(props: {
-  setDisplayedSnapshot(snapshot: Snapshot): void;
-  setActiveController(controller: LabController | null): void;
-}) {
-  const toSetDisplayedSnapshot = props.setDisplayedSnapshot;
-  const setActiveController = props.setActiveController;
-  const hostRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const host = hostRef.current;
-
-    if (host === null) {
-      return;
-    }
-
-    setActiveController(null);
-    const renderer = mountLabRenderer(
-      host,
-      PROJECTILE_LAB_MOCK.scene,
-      PROJECTILE_LAB_MOCK.snapshot,
-    );
-
-    const engineResult = createEngine(PROJECTILE_LAB_MOCK.scene);
-
-    if (!engineResult.ok) {
-      console.error("Engine creation failed", engineResult.diagnostics);
-      renderer.dispose();
-      return;
-    }
-
-    const engine = engineResult.value;
-
-    const controllerResult = createLabController(
-      engine,
-      renderer.updateSnapshot,
-      renderer.dispose,
-    );
-
-    if (!controllerResult.ok) {
-      console.error("Controller creation failed", controllerResult.diagnostics);
-      renderer.dispose();
-      engine.dispose();
-      return;
-    }
-
-    const controller = controllerResult.value;
-    const readoutResult = controller.copySnapshot();
-
-    if (!readoutResult.ok) {
-      console.error("Readout copy failed", readoutResult.diagnostics);
-      controller.dispose();
-      return;
-    }
-
-    setActiveController(controller);
-    toSetDisplayedSnapshot(readoutResult.value);
-
-    return () => {
-      setActiveController(null);
-      controller.dispose();
-    };
-  }, [toSetDisplayedSnapshot, setActiveController]);
-  return (
-    <div
-      aria-label="Eureka physics canvas"
-      data-pixi-host
-      ref={hostRef}
-      role="img"
-      style={{
-        height: "360px",
-        overflow: "hidden",
-        width: "100%",
-      }}
-    />
-  );
-}
-
-function describeDimensions(shape: InspectorShape | undefined): string {
-  if (shape === undefined) {
-    return "No Object Selected";
-  }
-  // might change
-  switch (shape.kind) {
-    case "circle":
-      return `Radius: ${shape.radiusMeters} m`;
-    case "box":
-      return `
-      Height: ${shape.heightMeters} m
-      Width: ${shape.widthMeters} m`;
-  }
-}
-function renderProperties(
-  definition: Body | TargetTrigger | undefined,
-  currentPose: Pose | undefined,
-) {
-  if (definition === undefined) {
-    return null;
-  }
-
-  switch (definition.kind) {
-    case "dynamic": {
-      const initialVelocity = definition.velocity.linearMetersPerSecond;
-      const launchSpeed = Math.hypot(initialVelocity.x, initialVelocity.y); // sqrt(x^2 + y^2)
-
-      let launchAngleDegrees: number | undefined;
-
-      if (launchSpeed === 0) {
-        launchAngleDegrees = undefined;
-      } else {
-        // tan θ = (Vy/Vx)
-        const launchAngleRadians = Math.atan2(
-          initialVelocity.y,
-          initialVelocity.x,
-        );
-
-        launchAngleDegrees = (launchAngleRadians * 180) / Math.PI;
-      }
-
-      return (
-        <div>
-          <p>
-            <strong> Mass: </strong>
-            {definition.massKilograms} kg
-          </p>
-          <p>
-            <strong>Initial launch speed: </strong>
-            {launchSpeed.toFixed(3)} m/s
-          </p>
-          <p>
-            <strong>Initial launch angle: </strong>
-            {launchAngleDegrees === undefined
-              ? "Undefined at zero speed"
-              : `${launchAngleDegrees.toFixed(2)}°`}
-          </p>
-          <p>
-            {" "}
-            <strong>Restitution: </strong>
-            {definition.material.restitution}
-          </p>
-        </div>
-      );
-    }
-
-    case "static": {
-      let angleText: string;
-
-      if (currentPose === undefined) {
-        angleText = "Unavailable";
-      } else {
-        const surfaceAngleDegrees = (currentPose.angleRadians * 180) / Math.PI;
-
-        angleText = `${surfaceAngleDegrees.toFixed(2)}°`;
-      }
-
-      return (
-        <div>
-          <p>
-            <strong> Surface angle:</strong> {angleText}
-          </p>
-          <p>
-            <strong>Restitution: </strong>
-            {definition.material.restitution}
-          </p>
-        </div>
-      );
-    }
-
-    case "target":
-      return <p>Non-solid target sensor.</p>;
-  }
-}
 export function App() {
   const [displayedSnapshot, setDisplayedSnapshot] = useState<Snapshot>(
     PROJECTILE_LAB_MOCK.snapshot,
+  );
+  const [editableScene, setEditableScene] = useState<SceneDefinition>(() =>
+    structuredClone(PROJECTILE_LAB_MOCK.scene),
   );
   const [labVisible, setLabVisible] = useState(true);
   const selectedEntityId = useStore(
@@ -208,14 +37,6 @@ export function App() {
   const selectedBody = displayedSnapshot.bodies.find(
     (body) => body.id === selectedEntityId,
   );
-  const selectedTrigger = PROJECTILE_LAB_MOCK.scene.triggers.find(
-    (trigger) => trigger.id === selectedEntityId,
-  );
-  const selectedDefinition =
-    PROJECTILE_LAB_MOCK.scene.bodies.find(
-      (body) => body.id === selectedEntityId,
-    ) ?? selectedTrigger;
-  const selectedPose = selectedBody?.pose ?? selectedTrigger?.pose;
 
   const visibleEvents = displayedSnapshot.events.filter((event) => {
     if (selectedEntityId === null) {
@@ -239,6 +60,8 @@ export function App() {
     },
     [],
   );
+
+
   useEffect(() => {
     if (!labVisible) {
       return;
@@ -264,6 +87,44 @@ export function App() {
     };
   }, [labVisible]);
 
+  const handlePlacementRequested = useCallback((request: PlacementRequest) => {
+    const controller = controllerRef.current;
+
+    if (controller === null) {
+      return;
+    }
+
+    let placementResult;
+
+    if (request.entityKind === "ramp") {
+      placementResult = controller.placeRamp(
+        request.positionMeters,
+        request.rampProperties,
+      );
+    } else if (request.entityKind === "projectile") {
+      placementResult = controller.placeProjectile(
+        request.positionMeters,
+        request.projectileProperties,
+      );
+    } else if (request.entityKind === "platform") {
+      placementResult = controller.placePlatform(
+        request.positionMeters,
+        request.platformProperties,
+      );
+    } else {
+      placementResult = controller.placeTarget(
+        request.positionMeters,
+        request.targetProperties,
+      );
+    }
+    if (!placementResult.ok) {
+      console.error("Object placement rejected", placementResult.diagnostics);
+      return;
+    }
+
+    setEditableScene(placementResult.value.scene);
+    labStore.getState().selectEntity(placementResult.value.entityId);
+  }, []);
   return (
     <main className="lab-shell">
       <header className="lab-header">
@@ -278,8 +139,8 @@ export function App() {
         </button>
         <section>
           <h2> Sample Scene</h2>
-          <p>scene Id: {PROJECTILE_LAB_MOCK.scene.id}</p>
-          <p>Body Count: {PROJECTILE_LAB_MOCK.scene.bodies.length}</p>
+          <p>scene Id: {editableScene.id}</p>
+          <p>Body Count: {editableScene.bodies.length}</p>
         </section>
         <div className="playback-bar">
           <span className="playback-action" title="Play">
@@ -320,43 +181,10 @@ export function App() {
 
       <div className="lab-layout">
         <section className="object-library">
-          <h2>Objects Library</h2>
-          <h3>Tools</h3>
-          <ul className="tools">
-            <li>
-              <button disabled type="button">
-                <Circle size={16} />
-                <strong>Projectile</strong>
-                <span>A moving ball with mass and initial velocity.</span>
-              </button>
-            </li>
-            <li>
-              <button disabled type="button">
-                <RectangleHorizontal size={16} />
-                <strong>Wall / platform</strong>
-                <span>A fixed rectangular collision surface.</span>
-              </button>
-            </li>
-            <li>
-              <button disabled type="button">
-                <TriangleRight size={16} />
-                <strong>Ramp</strong>
-                <span>A fixed platform placed at an angle.</span>
-              </button>
-            </li>
-
-            <li>
-              <button disabled type="button">
-                <Target size={16} />
-                <strong>Target zone</strong>
-                <span>A pass-through circular sensor that detects entry.</span>
-              </button>
-            </li>
-          </ul>
-
+          <ObjectLibrary />
           <h2>Scene Objects</h2>
           <ul className="bodies">
-            {PROJECTILE_LAB_MOCK.scene.bodies.map((singleBody) => (
+            {editableScene.bodies.map((singleBody) => (
               <li key={singleBody.id}>
                 <button
                   type="button"
@@ -369,7 +197,7 @@ export function App() {
                 </button>
               </li>
             ))}
-            {PROJECTILE_LAB_MOCK.scene.triggers.map((target) => (
+            {editableScene.triggers.map((target) => (
               <li key={target.id}>
                 <button
                   type="button"
@@ -384,19 +212,22 @@ export function App() {
             ))}
           </ul>
         </section>
-
         <section className="canvas">
           <h2>Canvas</h2>
 
           <div className="canvas-toolbar">
             <button
               type="button"
-              className={`tool-btn ${activeTool === "pan" ? "active" : ""}`}
-              aria-pressed={activeTool === "pan"}
+              className={`tool-btn ${activeTool.kind === "pan" ? "active" : ""}`}
+              aria-pressed={activeTool.kind === "pan"}
               onClick={() => {
                 labStore
                   .getState()
-                  .setActiveTool(activeTool === "pan" ? "select" : "pan");
+                  .setActiveTool(
+                    activeTool.kind === "pan"
+                      ? { kind: "select" }
+                      : { kind: "pan" },
+                  );
               }}
             >
               <Hand size={14} />
@@ -438,8 +269,10 @@ export function App() {
           >
             {labVisible ? (
               <LabCanvas
+                scene={editableScene}
                 setDisplayedSnapshot={setDisplayedSnapshot}
                 setActiveController={setActiveController}
+                onPlacementRequested={handlePlacementRequested}
               />
             ) : (
               <p>The lab is closed.</p>
@@ -495,40 +328,13 @@ export function App() {
             </div>
           </section>
         </section>
-
-        <section className="properties">
-          <h2>Properties</h2>
-          <p>
-            <strong> Selected Object: </strong>
-            {selectedEntityId ?? "None"}
-          </p>
-          <p>
-            <strong>Type: </strong>
-            {selectedDefinition?.kind ?? "None"}
-          </p>
-          <p>
-            <strong>Shape: </strong>
-            {selectedDefinition?.shape.kind ?? "None"}
-          </p>
-          <p className="dimension-readout">
-            <strong>Dimensions:</strong>
-            {describeDimensions(selectedDefinition?.shape)}
-          </p>
-          <p>
-            <strong>Selected Object position:</strong>
-          </p>
-          <ul>
-            <li>
-              <strong>x(m):</strong>
-              {selectedPose?.positionMeters.x ?? "Please select an Object"}
-            </li>
-            <li>
-              <strong>y(m):</strong>
-              {selectedPose?.positionMeters.y ?? "Please select an Object"}
-            </li>
-          </ul>
-          {renderProperties(selectedDefinition, selectedPose)}
-        </section>
+        <PropertiesPanel
+          controllerRef={controllerRef}
+          displayedSnapshot={displayedSnapshot}
+          editableScene={editableScene}
+          selectedEntityId={selectedEntityId}
+          setEditableScene={setEditableScene}
+        />
       </div>
     </main>
   );

@@ -2,8 +2,14 @@ import type { SceneDefinition, Snapshot, Vector2 } from "@eureka/contracts";
 
 import { Application, Graphics, Container, Text } from "pixi.js";
 
-import { worldToScreen, type ViewportTransform } from "./coordinates.js";
+import {
+  screenToWorld,
+  worldToScreen,
+  type ViewportTransform,
+} from "./coordinates.js";
+
 import { labStore } from "./store.js";
+import type { PlacementRequest } from "./authoring.js";
 import { OutlineFilter } from "pixi-filters";
 
 interface RenderItem {
@@ -16,6 +22,7 @@ interface RenderItem {
   readonly updateFeedback?: (snapshot: Snapshot) => void;
   readonly selectionGraphic: Container;
 }
+
 export interface LabRenderer {
   updateSnapshot(snapshot: Snapshot): void;
   dispose(): void;
@@ -141,6 +148,7 @@ export function mountLabRenderer(
   host: HTMLElement,
   scene: SceneDefinition,
   snapshot: Snapshot,
+  onPlacementRequested: (request: PlacementRequest) => void,
 ): LabRenderer {
   //deep copy of the whole snapshot (independent copy with no sharing of the nested objects)
   //The copied values remain stable no matter how and if the engine changes
@@ -148,7 +156,8 @@ export function mountLabRenderer(
   const application = new Application();
   let disposed = false;
   let initialized = false;
-  let renderItems: readonly RenderItem[] = [];
+  //                          id(for renderer), item
+  const renderItems = new Map<string, RenderItem>();
   let unsubscribeFromStore: (() => void) | undefined;
 
   let panStart: Vector2 | null = null; // null when user not panning
@@ -157,13 +166,24 @@ export function mountLabRenderer(
   const background = new Graphics();
   background.eventMode = "static";
   background.cursor =
-    labStore.getState().activeTool === "pan" ? "grab" : "default";
+    labStore.getState().activeTool.kind === "pan" ? "grab" : "default";
   const selectedFilter = new OutlineFilter({
     color: 0xd87149,
     thickness: 2,
     alpha: 1,
     quality: 0.8,
   });
+
+  function getViewport(): ViewportTransform {
+    const editorState = labStore.getState();
+
+    return {
+      widthPixels: application.screen.width,
+      heightPixels: application.screen.height,
+      pixelsPerMeter: editorState.pixelsPerMeter,
+      centerWorldMeters: editorState.cameraCenterWorldMeters,
+    };
+  }
   const resizeAndRender = (): void => {
     const width = Math.max(1, host.clientWidth);
     const height = Math.max(1, host.clientHeight);
@@ -173,14 +193,9 @@ export function mountLabRenderer(
 
     const editorState = labStore.getState();
 
-    const viewport: ViewportTransform = {
-      widthPixels: application.screen.width,
-      heightPixels: application.screen.height,
-      pixelsPerMeter: editorState.pixelsPerMeter,
-      centerWorldMeters: editorState.cameraCenterWorldMeters,
-    };
+    const viewport = getViewport();
 
-    for (const item of renderItems) {
+    for (const item of renderItems.values()) {
       const screenPosition = worldToScreen(item.positionMeters, viewport);
 
       item.graphic.position.set(screenPosition.x, screenPosition.y);
@@ -207,7 +222,7 @@ export function mountLabRenderer(
       initialSnapshot = structuredClone(nextSnapshot);
       return;
     }
-    for (const item of renderItems) {
+    for (const item of renderItems.values()) {
       if (item.kind === "body") {
         const body = nextSnapshot.bodies.find(
           (candidate) => candidate.id === item.entityId,
@@ -226,6 +241,7 @@ export function mountLabRenderer(
 
     resizeAndRender();
   }
+
   const initialize = async (): Promise<void> => {
     await application.init({
       antialias: true,
@@ -244,19 +260,70 @@ export function mountLabRenderer(
       return;
     }
 
-    renderItems = createRenderItems(
+    const itemsToRender = createRenderItems(
       scene,
       initialSnapshot,
       labStore.getState().pixelsPerMeter,
     );
 
-    application.stage.addChild(...renderItems.map((item) => item.graphic));
+    for (const item of itemsToRender) {
+      renderItems.set(item.entityId, item);
+    }
 
+    application.stage.addChild(
+      ...Array.from(renderItems.values(), (item) => item.graphic),
+    );
     application.stage.addChildAt(background, 0);
     application.stage.eventMode = "static";
+    application.stage.on("pointerdowncapture", (event) => {
+      const activeTool = labStore.getState().activeTool;
 
+      if (activeTool.kind !== "place") {
+        return;
+      }
+
+      const positionMeters = screenToWorld(event.global, getViewport());
+
+      let placementRequest: PlacementRequest = {
+        entityKind: activeTool.entityKind,
+        positionMeters,
+      };
+
+      if (activeTool.projectileProperties !== undefined) {
+        placementRequest = {
+          ...placementRequest,
+          projectileProperties: activeTool.projectileProperties,
+        };
+      }
+
+      if (activeTool.platformProperties !== undefined) {
+        placementRequest = {
+          ...placementRequest,
+          platformProperties: activeTool.platformProperties,
+        };
+      }
+      if (activeTool.rampProperties !== undefined) {
+        placementRequest = {
+          ...placementRequest,
+          rampProperties: activeTool.rampProperties,
+        };
+      }
+      if (activeTool.targetProperties !== undefined) {
+        placementRequest = {
+          ...placementRequest,
+          targetProperties: activeTool.targetProperties,
+        };
+      }
+
+      onPlacementRequested(placementRequest);
+
+      labStore.getState().setActiveTool({ kind: "select" });
+
+      // Prevent the object underneath from being selected instead.
+      event.stopImmediatePropagation();
+    });
     background.on("pointerdown", (event) => {
-      if (labStore.getState().activeTool !== "pan") {
+      if (labStore.getState().activeTool.kind !== "pan") {
         return;
       }
       panStart = { x: event.global.x, y: event.global.y };
@@ -285,7 +352,7 @@ export function mountLabRenderer(
       panStart = null;
       panCameraStart = null;
       background.cursor =
-        labStore.getState().activeTool === "pan" ? "grab" : "default";
+        labStore.getState().activeTool.kind === "pan" ? "grab" : "default";
     };
 
     background.on("pointerup", stopPan);
@@ -296,7 +363,8 @@ export function mountLabRenderer(
     window.addEventListener("resize", resizeAndRender);
     unsubscribeFromStore = labStore.subscribe((state, previousState) => {
       if (state.activeTool !== previousState.activeTool) {
-        background.cursor = state.activeTool === "pan" ? "grab" : "default";
+        background.cursor =
+          state.activeTool.kind === "pan" ? "grab" : "default";
       }
 
       if (
