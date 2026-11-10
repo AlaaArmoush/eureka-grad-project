@@ -29,6 +29,8 @@ import {
   updateProjectileInScene,
   updateStaticBodyInScene,
   updateTargetInScene,
+  moveEntityInScene,
+  deleteEntityFromScene,
 } from "./authoring.js";
 
 export interface LabController {
@@ -73,6 +75,11 @@ export interface LabController {
     targetId: string,
     properties: TargetPlacementProperties,
   ): EngineResult<SceneDraftChange>;
+  moveEntityWhilePaused(
+    entityId: string,
+    positionMeters: Vector2,
+  ): EngineResult<SceneDraftChange>;
+  deleteEntity(entityId: string): EngineResult<SceneDraftChange>;
 }
 
 export type SnapshotConsumer = (snapshot: Snapshot) => void;
@@ -390,6 +397,80 @@ export function createLabController(
       value: structuredClone(sceneChange),
     };
   }
+  function moveEntityWhilePaused(
+    entityId: string,
+    positionMeters: Vector2,
+  ): EngineResult<SceneDraftChange> {
+    const entityExists =
+      currentScene.bodies.some((body) => body.id === entityId) ||
+      currentScene.triggers.some((trigger) => trigger.id === entityId);
+
+    if (!entityExists) {
+      return {
+        ok: false,
+        diagnostics: [
+          {
+            code: "UNKNOWN_ENTITY_ID",
+            path: "entityId",
+            message: `Entity "${entityId}" does not exist.`,
+            entityId,
+          },
+        ],
+      };
+    }
+
+    const sceneChange = moveEntityInScene(
+      currentScene,
+      entityId,
+      positionMeters,
+    );
+
+    const validationResult = validateScene(sceneChange.scene);
+
+    if (!validationResult.ok) {
+      return validationResult;
+    }
+
+    currentScene = structuredClone(sceneChange.scene);
+
+    return {
+      ok: true,
+      value: structuredClone(sceneChange),
+    };
+  }
+  function deleteEntity(entityId: string): EngineResult<SceneDraftChange> {
+    const entityExists =
+      currentScene.bodies.some((body) => body.id === entityId) ||
+      currentScene.triggers.some((trigger) => trigger.id === entityId);
+
+    if (!entityExists) {
+      return {
+        ok: false,
+        diagnostics: [
+          {
+            code: "UNKNOWN_ENTITY_ID",
+            path: "entityId",
+            message: `Entity "${entityId}" does not exist.`,
+            entityId,
+          },
+        ],
+      };
+    }
+
+    const sceneChange = deleteEntityFromScene(currentScene, entityId);
+    const validationResult = validateScene(sceneChange.scene);
+
+    if (!validationResult.ok) {
+      return validationResult;
+    }
+
+    currentScene = structuredClone(sceneChange.scene);
+
+    return {
+      ok: true,
+      value: structuredClone(sceneChange),
+    };
+  }
   return {
     ok: true,
     value: {
@@ -406,6 +487,8 @@ export function createLabController(
       updateProjectileProperties,
       updateStaticBodyProperties,
       updateTargetProperties,
+      moveEntityWhilePaused,
+      deleteEntity,
     },
   };
 }

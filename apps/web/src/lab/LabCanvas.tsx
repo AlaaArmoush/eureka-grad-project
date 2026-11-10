@@ -4,8 +4,8 @@ import { useEffect, useRef } from "react";
 import type { SceneDefinition, Snapshot } from "@eureka/contracts";
 // Creates the headless physical-state owner for this mounted lab.
 import { createEngine } from "@eureka/engine";
-// Supplies the typed placement request sent from Pixi to React.
-import type { PlacementRequest } from "./authoring.js";
+// Supplies typed placement and movement requests from Pixi to React.
+import type { MoveEntityRequest, PlacementRequest } from "./authoring.js";
 // Creates and types the lab lifetime coordinator.
 import { createLabController, type LabController } from "./controller.js";
 // Mounts and releases the Pixi canvas and its interactions.
@@ -17,10 +17,14 @@ export function LabCanvas(props: {
   setDisplayedSnapshot(snapshot: Snapshot): void;
   setActiveController(controller: LabController | null): void;
   onPlacementRequested(request: PlacementRequest): void;
+  onMoveRequested(request: MoveEntityRequest): boolean;
+  onDeleteRequested(entityId: string): boolean;
 }) {
   const toSetDisplayedSnapshot = props.setDisplayedSnapshot;
   const setActiveController = props.setActiveController;
   const onPlacementRequested = props.onPlacementRequested;
+  const onMoveRequested = props.onMoveRequested;
+  const onDeleteRequested = props.onDeleteRequested;
   const scene = props.scene;
   const hostRef = useRef<HTMLDivElement>(null);
 
@@ -57,8 +61,9 @@ export function LabCanvas(props: {
       scene,
       initialSnapshotResult.value,
       onPlacementRequested,
+      onMoveRequested,
+      onDeleteRequested,
     );
-
     const controllerResult = createLabController(
       engine,
       scene,
@@ -94,6 +99,8 @@ export function LabCanvas(props: {
     toSetDisplayedSnapshot,
     setActiveController,
     onPlacementRequested,
+    onMoveRequested,
+    onDeleteRequested,
   ]);
   return (
     <div

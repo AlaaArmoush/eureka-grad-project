@@ -1,8 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { useRef, useState } from "react";
 import { PROJECTILE_LAB_MOCK } from "./lab/mocks";
-import type { PlacementRequest } from "./lab/authoring";
-// Supplies the four placement forms and their validation.
+import type { MoveEntityRequest, PlacementRequest } from "./lab/authoring";
 import { ObjectLibrary } from "./lab/ObjectLibrary";
 import {
   Hand,
@@ -12,6 +11,8 @@ import {
   Pause,
   StepForward,
   RotateCcw,
+  Move,
+  Trash2,
 } from "lucide-react";
 import { useStore } from "zustand";
 import { labStore } from "./lab/store";
@@ -61,7 +62,6 @@ export function App() {
     [],
   );
 
-
   useEffect(() => {
     if (!labVisible) {
       return;
@@ -86,7 +86,19 @@ export function App() {
       window.removeEventListener("keydown", handleEscKey);
     };
   }, [labVisible]);
+  useEffect(() => {
+    if (selectedEntityId === null) {
+      return;
+    }
 
+    const selectedEntityStillExists =
+      editableScene.bodies.some((body) => body.id === selectedEntityId) ||
+      editableScene.triggers.some((trigger) => trigger.id === selectedEntityId);
+
+    if (!selectedEntityStillExists) {
+      labStore.getState().selectEntity(null);
+    }
+  }, [editableScene, selectedEntityId]);
   const handlePlacementRequested = useCallback((request: PlacementRequest) => {
     const controller = controllerRef.current;
 
@@ -124,6 +136,48 @@ export function App() {
 
     setEditableScene(placementResult.value.scene);
     labStore.getState().selectEntity(placementResult.value.entityId);
+  }, []);
+  const handleMoveRequested = useCallback(
+    (request: MoveEntityRequest): boolean => {
+      const controller = controllerRef.current;
+
+      if (controller === null) {
+        return false;
+      }
+
+      const moveResult = controller.moveEntityWhilePaused(
+        request.entityId,
+        request.positionMeters,
+      );
+
+      if (!moveResult.ok) {
+        console.error("Object movement rejected", moveResult.diagnostics);
+        return false;
+      }
+
+      setEditableScene(moveResult.value.scene);
+      labStore.getState().selectEntity(moveResult.value.entityId);
+      return true;
+    },
+    [],
+  );
+  const handleDeleteRequested = useCallback((entityId: string): boolean => {
+    const controller = controllerRef.current;
+
+    if (controller === null) {
+      return false;
+    }
+
+    const deleteResult = controller.deleteEntity(entityId);
+
+    if (!deleteResult.ok) {
+      console.error("Object deletion rejected", deleteResult.diagnostics);
+      return false;
+    }
+
+    setEditableScene(deleteResult.value.scene);
+    labStore.getState().selectEntity(null);
+    return true;
   }, []);
   return (
     <main className="lab-shell">
@@ -217,6 +271,42 @@ export function App() {
 
           <div className="canvas-toolbar">
             <button
+              aria-label="Delete objects"
+              aria-pressed={activeTool.kind === "delete"}
+              className={`tool-btn ${activeTool.kind === "delete" ? "active" : ""}`}
+              title="Delete objects"
+              type="button"
+              onClick={() => {
+                labStore
+                  .getState()
+                  .setActiveTool(
+                    activeTool.kind === "delete"
+                      ? { kind: "select" }
+                      : { kind: "delete" },
+                  );
+              }}
+            >
+              <Trash2 size={14} />
+            </button>
+            <button
+              aria-label="Move objects"
+              aria-pressed={activeTool.kind === "move"}
+              className={`tool-btn ${activeTool.kind === "move" ? "active" : ""}`}
+              title="Move objects"
+              type="button"
+              onClick={() => {
+                labStore
+                  .getState()
+                  .setActiveTool(
+                    activeTool.kind === "move"
+                      ? { kind: "select" }
+                      : { kind: "move" },
+                  );
+              }}
+            >
+              <Move size={14} />
+            </button>
+            <button
               type="button"
               className={`tool-btn ${activeTool.kind === "pan" ? "active" : ""}`}
               aria-pressed={activeTool.kind === "pan"}
@@ -273,6 +363,8 @@ export function App() {
                 setDisplayedSnapshot={setDisplayedSnapshot}
                 setActiveController={setActiveController}
                 onPlacementRequested={handlePlacementRequested}
+                onMoveRequested={handleMoveRequested}
+                onDeleteRequested={handleDeleteRequested}
               />
             ) : (
               <p>The lab is closed.</p>

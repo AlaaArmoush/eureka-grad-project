@@ -16,6 +16,10 @@ export interface PlacementRequest {
   readonly rampProperties?: RampPlacementProperties;
   readonly targetProperties?: TargetPlacementProperties;
 }
+export interface MoveEntityRequest {
+  readonly entityId: string;
+  readonly positionMeters: Vector2;
+}
 export function createUniqueEntityId(
   prefix: PlaceableEntityKind,
   scene: SceneDefinition,
@@ -377,5 +381,62 @@ export function updateTargetInScene(
       triggers: updatedTriggers,
     },
     entityId: targetId,
+  };
+}
+export function moveEntityInScene(
+  scene: SceneDefinition,
+  entityId: string,
+  positionMeters: Vector2,
+): SceneDraftChange {
+  const movedBodies = scene.bodies.map((body) => {
+    if (body.id !== entityId) {
+      return body;
+    }
+
+    return {
+      ...body,
+      pose: {
+        ...body.pose,
+        positionMeters: { ...positionMeters },
+      },
+    };
+  });
+
+  const movedTriggers = scene.triggers.map((trigger) => {
+    if (trigger.id !== entityId) {
+      return trigger;
+    }
+
+    return {
+      ...trigger,
+      pose: {
+        ...trigger.pose,
+        positionMeters: { ...positionMeters },
+      },
+    };
+  });
+
+  return {
+    scene: {
+      ...scene,
+      revision: scene.revision + 1,
+      bodies: movedBodies,
+      triggers: movedTriggers,
+    },
+    entityId,
+  };
+}
+export function deleteEntityFromScene(
+  scene: SceneDefinition,
+  entityId: string,
+): SceneDraftChange {
+  return {
+    scene: {
+      ...scene,
+      revision: scene.revision + 1,
+      bodies: scene.bodies.filter((body) => body.id !== entityId),
+      triggers: scene.triggers.filter((trigger) => trigger.id !== entityId),
+    },
+    entityId,
   };
 }

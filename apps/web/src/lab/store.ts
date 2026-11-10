@@ -8,7 +8,7 @@ import type {
   PlatformPlacementProperties,
   ProjectilePlacementProperties,
   RampPlacementProperties,
-  TargetPlacementProperties
+  TargetPlacementProperties,
 } from "./authoring.js";
 export interface LabEditorState {
   readonly cameraCenterWorldMeters: Vector2;
@@ -24,14 +24,16 @@ export interface LabEditorState {
 
 export type LabTool =
   | { readonly kind: "select" }
+  | { readonly kind: "move" }
   | { readonly kind: "pan" }
+  | { readonly kind: "delete" }
   | {
       readonly kind: "place";
       readonly entityKind: PlaceableEntityKind;
       readonly projectileProperties?: ProjectilePlacementProperties;
       readonly platformProperties?: PlatformPlacementProperties;
       readonly rampProperties?: RampPlacementProperties;
-      readonly targetProperties?: TargetPlacementProperties
+      readonly targetProperties?: TargetPlacementProperties;
     };
 
 // Share editor state outside React; keep it across canvas remounts.

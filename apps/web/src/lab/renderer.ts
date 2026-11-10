@@ -1,7 +1,12 @@
 import type { SceneDefinition, Snapshot, Vector2 } from "@eureka/contracts";
 
-import { Application, Graphics, Container, Text } from "pixi.js";
-
+import {
+  Application,
+  Container,
+  Graphics,
+  Text,
+  type FederatedPointerEvent,
+} from "pixi.js";
 import {
   screenToWorld,
   worldToScreen,
@@ -9,7 +14,7 @@ import {
 } from "./coordinates.js";
 
 import { labStore } from "./store.js";
-import type { PlacementRequest } from "./authoring.js";
+import type { MoveEntityRequest, PlacementRequest } from "./authoring.js";
 import { OutlineFilter } from "pixi-filters";
 
 interface RenderItem {
@@ -22,7 +27,12 @@ interface RenderItem {
   readonly updateFeedback?: (snapshot: Snapshot) => void;
   readonly selectionGraphic: Container;
 }
-
+interface DragState {
+  readonly entityId: string;
+  readonly pointerId: number; //prevent another pointer from finishing the drag
+  readonly acceptedPositionMeters: Vector2; //restores the object after cancellation
+  readonly pointerOffsetMeters: Vector2; // Preserves the exact point where the object was grabbed.
+}
 export interface LabRenderer {
   updateSnapshot(snapshot: Snapshot): void;
   dispose(): void;
@@ -82,10 +92,6 @@ function createRenderItems(
     graphic.eventMode = "static";
     graphic.cursor = "pointer";
 
-    graphic.on("pointerdown", () => {
-      labStore.getState().selectEntity(trigger.id);
-    });
-
     items.push({
       graphic,
       positionMeters: trigger.pose.positionMeters,
@@ -126,10 +132,6 @@ function createRenderItems(
             .stroke({ color: isGround ? 0x6f6c51 : 0x9b713b, width: 1.5 });
     graphic.eventMode = "static";
 
-    graphic.on("pointerdown", () => {
-      labStore.getState().selectEntity(body.id);
-    });
-
     items.push({
       graphic,
       positionMeters: snapshotBody.pose.positionMeters,
@@ -143,12 +145,13 @@ function createRenderItems(
 
   return items;
 }
-
 export function mountLabRenderer(
   host: HTMLElement,
   scene: SceneDefinition,
   snapshot: Snapshot,
   onPlacementRequested: (request: PlacementRequest) => void,
+  onMoveRequested: (request: MoveEntityRequest) => boolean,
+  onDeleteRequested: (entityId: string) => boolean,
 ): LabRenderer {
   //deep copy of the whole snapshot (independent copy with no sharing of the nested objects)
   //The copied values remain stable no matter how and if the engine changes
@@ -162,7 +165,7 @@ export function mountLabRenderer(
 
   let panStart: Vector2 | null = null; // null when user not panning
   let panCameraStart: Vector2 | null = null; //camera position at the start of pan
-
+  let dragState: DragState | null = null;
   const background = new Graphics();
   background.eventMode = "static";
   background.cursor =
@@ -242,6 +245,139 @@ export function mountLabRenderer(
     resizeAndRender();
   }
 
+  function deleteItem(item: RenderItem, event: FederatedPointerEvent): void {
+    if (event.button !== 0 || !event.isPrimary) {
+      return;
+    }
+
+    const deleted = onDeleteRequested(item.entityId);
+
+    if (deleted) {
+      labStore.getState().setActiveTool({ kind: "select" });
+    }
+
+    event.stopPropagation();
+  }
+
+  function startDrag(item: RenderItem, event: FederatedPointerEvent): void {
+    if (event.button !== 0 || !event.isPrimary || dragState !== null) {
+      return;
+    }
+
+    const pointerWorld = screenToWorld(event.global, getViewport());
+
+    dragState = {
+      entityId: item.entityId,
+      pointerId: event.pointerId,
+      acceptedPositionMeters: { ...item.positionMeters },
+      pointerOffsetMeters: {
+        x: item.positionMeters.x - pointerWorld.x,
+        y: item.positionMeters.y - pointerWorld.y,
+      },
+    };
+
+    item.graphic.cursor = "grabbing";
+    event.stopPropagation();
+  }
+
+  function handleItemPointerDown(
+    item: RenderItem,
+    event: FederatedPointerEvent,
+  ): void {
+    const activeTool = labStore.getState().activeTool;
+
+    if (activeTool.kind === "delete") {
+      deleteItem(item, event);
+      return;
+    }
+
+    labStore.getState().selectEntity(item.entityId);
+
+    if (activeTool.kind === "move") {
+      startDrag(item, event);
+    }
+  }
+
+  function previewDrag(event: FederatedPointerEvent): void {
+    if (dragState === null || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const item = renderItems.get(dragState.entityId);
+
+    if (item === undefined) {
+      dragState = null;
+      return;
+    }
+
+    const pointerWorld = screenToWorld(event.global, getViewport());
+
+    item.positionMeters = {
+      x: pointerWorld.x + dragState.pointerOffsetMeters.x,
+      y: pointerWorld.y + dragState.pointerOffsetMeters.y,
+    };
+
+    resizeAndRender();
+  }
+  function cancelActiveDrag(): void {
+    if (dragState === null) {
+      return;
+    }
+
+    const cancelledDrag = dragState;
+    dragState = null;
+
+    const item = renderItems.get(cancelledDrag.entityId);
+
+    if (item !== undefined) {
+      item.positionMeters = { ...cancelledDrag.acceptedPositionMeters };
+      item.graphic.cursor = "pointer";
+    }
+
+    resizeAndRender();
+  }
+
+  function cancelPointerDrag(event: FederatedPointerEvent): void {
+    if (dragState?.pointerId === event.pointerId) {
+      cancelActiveDrag();
+    }
+  }
+  function finishDrag(event: FederatedPointerEvent): void {
+    if (dragState === null || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+
+    const completedDrag = dragState;
+    dragState = null;
+
+    const item = renderItems.get(completedDrag.entityId);
+
+    if (item === undefined) {
+      return;
+    }
+
+    item.graphic.cursor = "pointer";
+
+    const positionChanged =
+      item.positionMeters.x !== completedDrag.acceptedPositionMeters.x ||
+      item.positionMeters.y !== completedDrag.acceptedPositionMeters.y;
+
+    if (!positionChanged) {
+      resizeAndRender();
+      return;
+    }
+
+    const accepted = onMoveRequested({
+      entityId: item.entityId,
+      positionMeters: { ...item.positionMeters },
+    });
+
+    if (!accepted) {
+      item.positionMeters = { ...completedDrag.acceptedPositionMeters };
+    }
+
+    resizeAndRender();
+  }
   const initialize = async (): Promise<void> => {
     await application.init({
       antialias: true,
@@ -269,12 +405,24 @@ export function mountLabRenderer(
     for (const item of itemsToRender) {
       renderItems.set(item.entityId, item);
     }
+    for (const item of renderItems.values()) {
+      item.graphic.cursor = "pointer";
+
+      item.graphic.on("pointerdown", (event: FederatedPointerEvent) => {
+        handleItemPointerDown(item, event);
+      });
+
+      item.graphic.on("pointerup", finishDrag);
+      item.graphic.on("pointerupoutside", finishDrag);
+      item.graphic.on("pointercancel", cancelPointerDrag);
+    }
 
     application.stage.addChild(
       ...Array.from(renderItems.values(), (item) => item.graphic),
     );
     application.stage.addChildAt(background, 0);
     application.stage.eventMode = "static";
+    application.stage.on("globalpointermove", previewDrag);
     application.stage.on("pointerdowncapture", (event) => {
       const activeTool = labStore.getState().activeTool;
 
@@ -361,10 +509,12 @@ export function mountLabRenderer(
     // one-canvas ownership even across development remounts.
     host.replaceChildren(application.canvas);
     window.addEventListener("resize", resizeAndRender);
+    window.addEventListener("blur", cancelActiveDrag);
     unsubscribeFromStore = labStore.subscribe((state, previousState) => {
       if (state.activeTool !== previousState.activeTool) {
         background.cursor =
           state.activeTool.kind === "pan" ? "grab" : "default";
+        cancelActiveDrag();
       }
 
       if (
@@ -392,6 +542,8 @@ export function mountLabRenderer(
 
     disposed = true;
     window.removeEventListener("resize", resizeAndRender);
+    window.removeEventListener("blur", cancelActiveDrag);
+    dragState = null;
     unsubscribeFromStore?.();
 
     if (initialized) {
