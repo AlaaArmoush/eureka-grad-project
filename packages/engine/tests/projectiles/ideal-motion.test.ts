@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEngine } from "../../src/index.js";
-import { makeScene } from "./scene-fixtures.js";
+import { TIME_STEP, makeScene } from "./scene-fixtures.js";
 import { expectNear, unwrap } from "../test-support.js";
 import {
   measureLanding,
@@ -8,6 +8,7 @@ import {
 } from "./projectile-test-support.js";
 
 const REFERENCE_GRAVITY = 9.81;
+const LUNAR_GRAVITY = 1.62;
 
 // Independently calculated samples for the 20 m/s, 30-degree launch.
 const referenceSamples = [
@@ -53,6 +54,132 @@ describe("ideal projectile motion", () => {
           Math.hypot(velocity.x - 10 * Math.sqrt(3), velocity.y - vy),
           0,
           1e-9
+        );
+      } finally {
+        expect(engine.dispose().ok).toBe(true);
+      }
+    }
+  );
+
+  // Protect the externally forced momentum change and conserved mechanical
+  // energy for representative ideal variants before any surface contact.
+  it.each([
+    {
+      name: "reference launch",
+      speed: 20,
+      angleDegrees: 30,
+      heightMeters: 0,
+      gravity: REFERENCE_GRAVITY,
+      durationSeconds: 1
+    },
+    {
+      name: "horizontal cliff launch",
+      speed: 10,
+      angleDegrees: 0,
+      heightMeters: 20,
+      gravity: REFERENCE_GRAVITY,
+      durationSeconds: 1
+    },
+    {
+      name: "45-degree sweep launch",
+      speed: 20,
+      angleDegrees: 45,
+      heightMeters: 0,
+      gravity: REFERENCE_GRAVITY,
+      durationSeconds: 1
+    },
+    {
+      name: "75-degree complementary launch",
+      speed: 30,
+      angleDegrees: 75,
+      heightMeters: 0,
+      gravity: REFERENCE_GRAVITY,
+      durationSeconds: 0.5
+    },
+    {
+      name: "lunar-gravity launch",
+      speed: 10,
+      angleDegrees: 45,
+      heightMeters: 0,
+      gravity: LUNAR_GRAVITY,
+      durationSeconds: 1
+    }
+  ])(
+    "balances ideal momentum and energy for the $name",
+    ({
+      speed,
+      angleDegrees,
+      heightMeters,
+      gravity,
+      durationSeconds
+    }) => {
+      const angleRadians = angleDegrees * Math.PI / 180;
+      const initialVx = speed * Math.cos(angleRadians);
+      const initialVy = speed * Math.sin(angleRadians);
+      const initialEnergy =
+        0.5 * speed * speed + gravity * heightMeters;
+      const ticks = Math.round(durationSeconds / TIME_STEP);
+      const scene = makeScene(
+        speed,
+        angleDegrees,
+        heightMeters,
+        false,
+        {
+          gravityMetersPerSecondSquared: { x: 0, y: -gravity }
+        }
+      );
+      const engine = unwrap(createEngine(scene));
+
+      try {
+        unwrap(engine.advance(ticks));
+        const snapshot = unwrap(engine.getSnapshot());
+        const projectile = snapshot.bodies.find(
+          (body) => body.id === "projectile"
+        );
+
+        if (projectile === undefined) {
+          throw new Error("Snapshot omitted the projectile.");
+        }
+
+        const actualTime = ticks * TIME_STEP;
+        const velocity = projectile.velocity.linearMetersPerSecond;
+        const position = projectile.pose.positionMeters;
+        const expectedX = initialVx * actualTime;
+        const expectedY =
+          heightMeters +
+          initialVy * actualTime -
+          0.5 * gravity * actualTime ** 2;
+        const actualEnergy =
+          0.5 * (velocity.x ** 2 + velocity.y ** 2) +
+          gravity * position.y;
+        const positionScale = Math.max(
+          Math.hypot(expectedX, expectedY),
+          1
+        );
+        const momentumScale = Math.max(speed, 1);
+        const energyScale = Math.max(Math.abs(initialEnergy), 1);
+
+        // The lunar-gravity row and the four ordinary rows each protect the
+        // independently calculated position, not only an invariant.
+        expectNear(
+          Math.hypot(position.x - expectedX, position.y - expectedY),
+          0,
+          1e-9 * positionScale
+        );
+
+        // Gravity is the only external force before contact.
+        expectNear(velocity.x, initialVx, 1e-9 * momentumScale);
+        expectNear(
+          velocity.y,
+          initialVy - gravity * actualTime,
+          1e-9 * momentumScale
+        );
+
+        // K + U remains constant for uniform gravity without contact or drag.
+        expectNear(
+          actualEnergy,
+          initialEnergy,
+          1e-9 * energyScale
         );
       } finally {
         expect(engine.dispose().ok).toBe(true);
