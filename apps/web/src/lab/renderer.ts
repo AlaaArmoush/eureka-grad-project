@@ -152,6 +152,7 @@ export function mountLabRenderer(
   onPlacementRequested: (request: PlacementRequest) => void,
   onMoveRequested: (request: MoveEntityRequest) => boolean,
   onDeleteRequested: (entityId: string) => boolean,
+  initialTrailSnapshots: readonly Snapshot[] = [],
 ): LabRenderer {
   //deep copy of the whole snapshot (independent copy with no sharing of the nested objects)
   //The copied values remain stable no matter how and if the engine changes
@@ -162,7 +163,13 @@ export function mountLabRenderer(
   //                          id(for renderer), item
   const renderItems = new Map<string, RenderItem>();
   let unsubscribeFromStore: (() => void) | undefined;
+  const trailSnapshots = structuredClone(initialTrailSnapshots);
 
+  const trailGraphic = new Graphics({
+    label: "selected-projectile-trail",
+  });
+
+  trailGraphic.eventMode = "none";
   let panStart: Vector2 | null = null; // null when user not panning
   let panCameraStart: Vector2 | null = null; //camera position at the start of pan
   let dragState: DragState | null = null;
@@ -187,6 +194,54 @@ export function mountLabRenderer(
       centerWorldMeters: editorState.cameraCenterWorldMeters,
     };
   }
+  function redrawSelectedTrail(viewport: ViewportTransform): void {
+    trailGraphic.clear();
+
+    const selectedEntityId = labStore.getState().selectedEntityId;
+
+    const selectedProjectile = scene.bodies.find(
+      (body) => body.id === selectedEntityId && body.kind === "dynamic",
+    );
+
+    if (selectedProjectile === undefined) {
+      return;
+    }
+
+    const trailPoints: Vector2[] = [];
+
+    for (const trailSnapshot of trailSnapshots) {
+      const snapshotBody = trailSnapshot.bodies.find(
+        (body) => body.id === selectedProjectile.id,
+      );
+
+      if (snapshotBody !== undefined) {
+        trailPoints.push(snapshotBody.pose.positionMeters);
+      }
+    }
+
+    const [firstPointMeters, ...remainingPoints] = trailPoints;
+
+    if (firstPointMeters === undefined) {
+      return;
+    }
+
+    const firstPoint = worldToScreen(firstPointMeters, viewport);
+
+    trailGraphic.moveTo(firstPoint.x, firstPoint.y);
+
+    for (const pointMeters of remainingPoints) {
+      const point = worldToScreen(pointMeters, viewport);
+      trailGraphic.lineTo(point.x, point.y);
+    }
+
+    trailGraphic.stroke({
+      color: 0x555449,
+      width: 1.7,
+      alpha: 0.86,
+      cap: "round",
+      join: "round",
+    });
+  }
   const resizeAndRender = (): void => {
     const width = Math.max(1, host.clientWidth);
     const height = Math.max(1, host.clientHeight);
@@ -197,6 +252,7 @@ export function mountLabRenderer(
     const editorState = labStore.getState();
 
     const viewport = getViewport();
+    redrawSelectedTrail(viewport);
 
     for (const item of renderItems.values()) {
       const screenPosition = worldToScreen(item.positionMeters, viewport);
@@ -416,8 +472,8 @@ export function mountLabRenderer(
       item.graphic.on("pointerupoutside", finishDrag);
       item.graphic.on("pointercancel", cancelPointerDrag);
     }
-
     application.stage.addChild(
+      trailGraphic,
       ...Array.from(renderItems.values(), (item) => item.graphic),
     );
     application.stage.addChildAt(background, 0);

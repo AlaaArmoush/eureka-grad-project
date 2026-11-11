@@ -19,12 +19,14 @@ export function LabCanvas(props: {
   onPlacementRequested(request: PlacementRequest): void;
   onMoveRequested(request: MoveEntityRequest): boolean;
   onDeleteRequested(entityId: string): boolean;
+  sampleSnapshots?: readonly Snapshot[] | undefined;
 }) {
   const toSetDisplayedSnapshot = props.setDisplayedSnapshot;
   const setActiveController = props.setActiveController;
   const onPlacementRequested = props.onPlacementRequested;
   const onMoveRequested = props.onMoveRequested;
   const onDeleteRequested = props.onDeleteRequested;
+  const sampleSnapshots = props.sampleSnapshots;
   const scene = props.scene;
   const hostRef = useRef<HTMLDivElement>(null);
 
@@ -56,21 +58,38 @@ export function LabCanvas(props: {
       return;
     }
 
+    const sampleSnapshot =
+      sampleSnapshots === undefined
+        ? undefined
+        : sampleSnapshots[sampleSnapshots.length - 1];
+
+    const initialViewSnapshot = sampleSnapshot ?? initialSnapshotResult.value;
+
     const renderer = mountLabRenderer(
       host,
       scene,
-      initialSnapshotResult.value,
+      initialViewSnapshot,
       onPlacementRequested,
       onMoveRequested,
       onDeleteRequested,
+      sampleSnapshots ?? [],
     );
+
+    function consumeLiveSnapshot(nextSnapshot: Snapshot): void {
+      if (sampleSnapshot !== undefined) {
+        return;
+      }
+
+      renderer.updateSnapshot(nextSnapshot);
+      toSetDisplayedSnapshot(structuredClone(nextSnapshot));
+    }
+
     const controllerResult = createLabController(
       engine,
       scene,
-      renderer.updateSnapshot,
+      consumeLiveSnapshot,
       renderer.dispose,
     );
-
     if (!controllerResult.ok) {
       console.error("Controller creation failed", controllerResult.diagnostics);
       renderer.dispose();
@@ -79,16 +98,12 @@ export function LabCanvas(props: {
     }
 
     const controller = controllerResult.value;
-    const readoutResult = controller.copySnapshot();
-
-    if (!readoutResult.ok) {
-      console.error("Readout copy failed", readoutResult.diagnostics);
-      controller.dispose();
-      return;
-    }
 
     setActiveController(controller);
-    toSetDisplayedSnapshot(readoutResult.value);
+
+    if (sampleSnapshot !== undefined) {
+      toSetDisplayedSnapshot(structuredClone(sampleSnapshot));
+    }
 
     return () => {
       setActiveController(null);
@@ -101,6 +116,7 @@ export function LabCanvas(props: {
     onPlacementRequested,
     onMoveRequested,
     onDeleteRequested,
+    sampleSnapshots,
   ]);
   return (
     <div

@@ -38,6 +38,16 @@ export function App() {
   const selectedBody = displayedSnapshot.bodies.find(
     (body) => body.id === selectedEntityId,
   );
+  let activeSampleSnapshots;
+
+  if (
+    editableScene.id === PROJECTILE_LAB_MOCK.scene.id &&
+    editableScene.revision === PROJECTILE_LAB_MOCK.scene.revision
+  ) {
+    activeSampleSnapshots = PROJECTILE_LAB_MOCK.trailSnapshots;
+  } else {
+    activeSampleSnapshots = undefined;
+  }
 
   const visibleEvents = displayedSnapshot.events.filter((event) => {
     if (selectedEntityId === null) {
@@ -360,6 +370,7 @@ export function App() {
             {labVisible ? (
               <LabCanvas
                 scene={editableScene}
+                sampleSnapshots={activeSampleSnapshots}
                 setDisplayedSnapshot={setDisplayedSnapshot}
                 setActiveController={setActiveController}
                 onPlacementRequested={handlePlacementRequested}

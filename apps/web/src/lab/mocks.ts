@@ -7,38 +7,23 @@ import type { Diagnostic, SceneDefinition, Snapshot } from "@eureka/contracts";
 export interface LabMock {
   readonly scene: SceneDefinition;
   readonly snapshot: Snapshot;
+  readonly trailSnapshots?: readonly Snapshot[];
   readonly invalidInputDiagnostic: Diagnostic;
 }
-
 const FIXED_TIME_STEP_SECONDS = 1 / 60;
-const EVENT_TICK = 60;
-const EVENT_TIME_SECONDS = EVENT_TICK * FIXED_TIME_STEP_SECONDS;
+const OBSERVATION_TICK = 60;
+
+const INITIAL_SPEED_METERS_PER_SECOND = 20;
+const LAUNCH_ANGLE_RADIANS = Math.PI / 6;
 
 const INITIAL_VELOCITY_METERS_PER_SECOND = {
-  x: 10,
-  y: 5,
+  x: INITIAL_SPEED_METERS_PER_SECOND * Math.cos(LAUNCH_ANGLE_RADIANS),
+  y: INITIAL_SPEED_METERS_PER_SECOND * Math.sin(LAUNCH_ANGLE_RADIANS),
 } as const;
 
 const GRAVITY_METERS_PER_SECOND_SQUARED = {
   x: 0,
-  y: -10,
-} as const;
-
-const EVENT_POSITION_METERS = {
-  x: INITIAL_VELOCITY_METERS_PER_SECOND.x * EVENT_TIME_SECONDS,
-  y:
-    INITIAL_VELOCITY_METERS_PER_SECOND.y * EVENT_TIME_SECONDS +
-    0.5 *
-      GRAVITY_METERS_PER_SECOND_SQUARED.y *
-      EVENT_TIME_SECONDS *
-      EVENT_TIME_SECONDS,
-} as const;
-
-const EVENT_VELOCITY_METERS_PER_SECOND = {
-  x: INITIAL_VELOCITY_METERS_PER_SECOND.x,
-  y:
-    INITIAL_VELOCITY_METERS_PER_SECOND.y +
-    GRAVITY_METERS_PER_SECOND_SQUARED.y * EVENT_TIME_SECONDS,
+  y: -9.81,
 } as const;
 
 const scene = {
@@ -159,113 +144,73 @@ const scene = {
     },
   ],
 } as const satisfies SceneDefinition;
+function createFlightSnapshot(tick: number): Snapshot {
+  const simulationTimeSeconds = tick * FIXED_TIME_STEP_SECONDS;
 
-const snapshot = {
-  contractVersion: 1,
-  engineVersion: "mock",
-  engineBuild: "handwritten-projectile-sample",
-  tick: EVENT_TICK,
-  simulationTimeSeconds: EVENT_TIME_SECONDS,
-  bodies: [
-    {
-      id: "projectile",
-      pose: {
-        positionMeters: EVENT_POSITION_METERS,
-        angleRadians: 0,
+  const projectilePositionMeters = {
+    x: INITIAL_VELOCITY_METERS_PER_SECOND.x * simulationTimeSeconds,
+    y:
+      INITIAL_VELOCITY_METERS_PER_SECOND.y * simulationTimeSeconds +
+      0.5 *
+        GRAVITY_METERS_PER_SECOND_SQUARED.y *
+        simulationTimeSeconds *
+        simulationTimeSeconds,
+  };
+
+  const projectileVelocityMetersPerSecond = {
+    x: INITIAL_VELOCITY_METERS_PER_SECOND.x,
+    y:
+      INITIAL_VELOCITY_METERS_PER_SECOND.y +
+      GRAVITY_METERS_PER_SECOND_SQUARED.y * simulationTimeSeconds,
+  };
+
+  return {
+    contractVersion: 1,
+    engineVersion: "mock",
+    engineBuild: "independent-projectile-flight",
+    tick,
+    simulationTimeSeconds,
+    bodies: scene.bodies.map((body) => ({
+      id: body.id,
+      pose:
+        body.id === "projectile"
+          ? {
+              positionMeters: projectilePositionMeters,
+              angleRadians: 0,
+            }
+          : {
+              positionMeters: { ...body.pose.positionMeters },
+              angleRadians: body.pose.angleRadians,
+            },
+      velocity:
+        body.id === "projectile"
+          ? {
+              linearMetersPerSecond: projectileVelocityMetersPerSecond,
+              angularRadiansPerSecond: 0,
+            }
+          : {
+              linearMetersPerSecond: { x: 0, y: 0 },
+              angularRadiansPerSecond: 0,
+            },
+    })),
+    projectileReadouts: [
+      {
+        bodyId: "projectile",
+        flightTimeSeconds: simulationTimeSeconds,
+        horizontalDisplacementMeters: projectilePositionMeters.x,
+        heightMeters: projectilePositionMeters.y,
       },
-      velocity: {
-        linearMetersPerSecond: EVENT_VELOCITY_METERS_PER_SECOND,
-        angularRadiansPerSecond: 0,
-      },
-    },
-    {
-      id: "landing-platform",
-      pose: {
-        positionMeters: {
-          x: 10,
-          y: -0.35,
-        },
-        angleRadians: 0,
-      },
-      velocity: {
-        linearMetersPerSecond: {
-          x: 0,
-          y: 0,
-        },
-        angularRadiansPerSecond: 0,
-      },
-    },
-    {
-      id: "default-ground",
-      pose: {
-        positionMeters: {
-          x: 5,
-          y: -2,
-        },
-        angleRadians: 0,
-      },
-      velocity: {
-        linearMetersPerSecond: {
-          x: 0,
-          y: 0,
-        },
-        angularRadiansPerSecond: 0,
-      },
-    },
-    {
-      id: "ramp",
-      pose: {
-        positionMeters: {
-          x: 3,
-          y: -0.75,
-        },
-        angleRadians: Math.PI / 6,
-      },
-      velocity: {
-        linearMetersPerSecond: {
-          x: 0,
-          y: 0,
-        },
-        angularRadiansPerSecond: 0,
-      },
-    },
-  ],
-  projectileReadouts: [
-    {
-      bodyId: "projectile",
-      flightTimeSeconds: EVENT_TIME_SECONDS,
-      horizontalDisplacementMeters: EVENT_POSITION_METERS.x,
-      heightMeters: EVENT_POSITION_METERS.y,
-    },
-  ],
-  events: [
-    {
-      id: "target-entry-60",
-      kind: "targetEntered",
-      tick: EVENT_TICK,
-      timeSeconds: EVENT_TIME_SECONDS,
-      bodyId: "projectile",
-      targetId: "target",
-    },
-    {
-      id: "ground-contact-60",
-      kind: "groundContact",
-      tick: EVENT_TICK,
-      timeSeconds: EVENT_TIME_SECONDS,
-      bodyId: "projectile",
-      surfaceBodyId: "landing-platform",
-      pointMeters: {
-        x: 10,
-        y: -0.1,
-      },
-      normal: {
-        x: 0,
-        y: 1,
-      },
-    },
-  ],
-  diagnostics: [],
-} as const satisfies Snapshot;
+    ],
+    events: [],
+    diagnostics: [],
+  };
+}
+// time from 0 - 0.1 - 0.2 ---> 1
+const projectileTrailSnapshots = [0, 6, 12, 18, 24, 30, 36, 42, 48, 54, 60].map(
+  createFlightSnapshot,
+);
+
+const snapshot = createFlightSnapshot(OBSERVATION_TICK);
 
 const invalidInputDiagnostic = {
   code: "NONFINITE_NUMBER",
@@ -277,6 +222,7 @@ const invalidInputDiagnostic = {
 export const PROJECTILE_LAB_MOCK = {
   scene,
   snapshot,
+  trailSnapshots: projectileTrailSnapshots,
   invalidInputDiagnostic,
 } as const satisfies LabMock;
 // before passing
