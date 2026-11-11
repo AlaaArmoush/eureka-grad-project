@@ -250,8 +250,13 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
   }
 
   const initialBodies = scene.bodies.map(createMutableBody);
+
   const fixedTimeStepSeconds = scene.numericalProfile.fixedTimeStepSeconds;
-  const acceleration = {
+  const substepCount = scene.numericalProfile.substeps;
+  const internalTimeStepSeconds = fixedTimeStepSeconds / substepCount;
+  const halfInternalTimeStepSeconds = 0.5 * internalTimeStepSeconds;
+
+  const gravityAcceleration = {
     ...scene.environment.gravityMetersPerSecondSquared
   };
 
@@ -381,50 +386,57 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
         }
       }
 
-      const halfTimeStepSquared =
-        0.5 * fixedTimeStepSeconds * fixedTimeStepSeconds;
+      // Complete every fixed internal substep before committing the outer tick.
+      for (let substepIndex = 0; substepIndex < substepCount; substepIndex += 1) {
+        for (const body of nextBodies) {
+          // Static bodies participate in commands but are not integrated.
+          if (body.kind === "static") {
+            continue;
+          }
 
-      // Update each dynamic body
-      for (const body of nextBodies) {
-        if (body.kind === "static") {
-          continue;
+          const velocity = body.velocity.linearMetersPerSecond;
+          const position = body.pose.positionMeters;
+
+          // First half kick: advance velocity to the substep midpoint.
+          const halfKickedVelocityX =
+            velocity.x + gravityAcceleration.x * halfInternalTimeStepSeconds;
+          const halfKickedVelocityY =
+            velocity.y + gravityAcceleration.y * halfInternalTimeStepSeconds;
+
+          // Drift using the midpoint velocity.
+          const nextPositionX = position.x + halfKickedVelocityX * internalTimeStepSeconds;
+          const nextPositionY = position.y + halfKickedVelocityY * internalTimeStepSeconds;
+
+          // Second half kick: advance velocity to the substep endpoint.
+          const nextVelocityX =
+            halfKickedVelocityX +
+            gravityAcceleration.x * halfInternalTimeStepSeconds;
+          const nextVelocityY =
+            halfKickedVelocityY +
+            gravityAcceleration.y * halfInternalTimeStepSeconds;
+
+          const nextTimeSeconds = (tick + 1) * fixedTimeStepSeconds;
+
+          // Reject the disposable tick copy if integration becomes nonfinite.
+          if (
+            !Number.isFinite(nextPositionX) ||
+            !Number.isFinite(nextPositionY) ||
+            !Number.isFinite(nextVelocityX) ||
+            !Number.isFinite(nextVelocityY) ||
+            !Number.isFinite(nextTimeSeconds)
+          ) {
+            return failure(
+              "NONFINITE_STATE",
+              "",
+              `Advancing tick ${tick + 1} produced a nonfinite value.`
+            );
+          }
+
+          position.x = nextPositionX;
+          position.y = nextPositionY;
+          velocity.x = nextVelocityX;
+          velocity.y = nextVelocityY;
         }
-
-        const nextPositionX =
-          body.pose.positionMeters.x +
-          body.velocity.linearMetersPerSecond.x * fixedTimeStepSeconds +
-          acceleration.x * halfTimeStepSquared;
-        const nextPositionY =
-          body.pose.positionMeters.y +
-          body.velocity.linearMetersPerSecond.y * fixedTimeStepSeconds +
-          acceleration.y * halfTimeStepSquared;
-        const nextVelocityX =
-          body.velocity.linearMetersPerSecond.x +
-          acceleration.x * fixedTimeStepSeconds;
-        const nextVelocityY =
-          body.velocity.linearMetersPerSecond.y +
-          acceleration.y * fixedTimeStepSeconds;
-        const nextTimeSeconds = (tick + 1) * fixedTimeStepSeconds;
-
-        // Rejection happens here
-        if (
-          !Number.isFinite(nextPositionX) ||
-          !Number.isFinite(nextPositionY) ||
-          !Number.isFinite(nextVelocityX) ||
-          !Number.isFinite(nextVelocityY) ||
-          !Number.isFinite(nextTimeSeconds)
-        ) {
-          return failure(
-            "NONFINITE_STATE",
-            "",
-            `Advancing tick ${tick + 1} produced a nonfinite value.`
-          );
-        }
-
-        body.pose.positionMeters.x = nextPositionX;
-        body.pose.positionMeters.y = nextPositionY;
-        body.velocity.linearMetersPerSecond.x = nextVelocityX;
-        body.velocity.linearMetersPerSecond.y = nextVelocityY;
       }
 
       // Accept the checked state and move to the next tick.
