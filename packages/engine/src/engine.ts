@@ -12,6 +12,7 @@ import {
   type EngineResult,
   type EngineStatus
 } from "./diagnostics.js";
+import { integrateSmoothMotion } from "./mechanics.js";
 import { validateCommand, validateScene } from "./validation.js";
 
 export interface CommandAcceptance {
@@ -154,7 +155,7 @@ function makeSnapshot(
   return {
     contractVersion: 1,
     engineVersion: "0.0.0",
-    engineBuild: "constant-gravity-v1",
+    engineBuild: "linear-drag-v1",
     tick,
     simulationTimeSeconds: tick * fixedTimeStepSeconds,
     bodies: bodies.map((body) => ({
@@ -226,9 +227,7 @@ function applyCommand(command: Command, bodies: MutableBodyState[]): void {
 
   if (payload.changes.velocity !== undefined) {
     body.velocity = {
-      linearMetersPerSecond: {
-        ...payload.changes.velocity.linearMetersPerSecond
-      },
+      linearMetersPerSecond: { ...payload.changes.velocity.linearMetersPerSecond },
       angularRadiansPerSecond: payload.changes.velocity.angularRadiansPerSecond
     };
   }
@@ -241,24 +240,15 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
     return validation;
   }
 
-  if (scene.environment.linearDragKilogramsPerSecond !== 0) {
-    return failure(
-      "UNSUPPORTED_SCENE_FEATURE",
-      "environment.linearDragKilogramsPerSecond",
-      "Linear drag is frozen in the contract but implemented at Topic 1."
-    );
-  }
-
   const initialBodies = scene.bodies.map(createMutableBody);
 
   const fixedTimeStepSeconds = scene.numericalProfile.fixedTimeStepSeconds;
   const substepCount = scene.numericalProfile.substeps;
   const internalTimeStepSeconds = fixedTimeStepSeconds / substepCount;
-  const halfInternalTimeStepSeconds = 0.5 * internalTimeStepSeconds;
 
-  const gravityAcceleration = {
-    ...scene.environment.gravityMetersPerSecondSquared
-  };
+  const gravityAcceleration = { ...scene.environment.gravityMetersPerSecondSquared };
+
+  const linearDragKilogramsPerSecond = scene.environment.linearDragKilogramsPerSecond;
 
   let bodies = cloneBodies(initialBodies);
   let tick = 0;
@@ -397,32 +387,23 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
           const velocity = body.velocity.linearMetersPerSecond;
           const position = body.pose.positionMeters;
 
-          // First half kick: advance velocity to the substep midpoint.
-          const halfKickedVelocityX =
-            velocity.x + gravityAcceleration.x * halfInternalTimeStepSeconds;
-          const halfKickedVelocityY =
-            velocity.y + gravityAcceleration.y * halfInternalTimeStepSeconds;
-
-          // Drift using the midpoint velocity.
-          const nextPositionX = position.x + halfKickedVelocityX * internalTimeStepSeconds;
-          const nextPositionY = position.y + halfKickedVelocityY * internalTimeStepSeconds;
-
-          // Second half kick: advance velocity to the substep endpoint.
-          const nextVelocityX =
-            halfKickedVelocityX +
-            gravityAcceleration.x * halfInternalTimeStepSeconds;
-          const nextVelocityY =
-            halfKickedVelocityY +
-            gravityAcceleration.y * halfInternalTimeStepSeconds;
+          const nextMotion = integrateSmoothMotion({
+            positionMeters: position,
+            velocityMetersPerSecond: velocity,
+            massKilograms: body.massKilograms,
+            gravityMetersPerSecondSquared: gravityAcceleration,
+            linearDragKilogramsPerSecond,
+            timeStepSeconds: internalTimeStepSeconds
+          });
 
           const nextTimeSeconds = (tick + 1) * fixedTimeStepSeconds;
 
           // Reject the disposable tick copy if integration becomes nonfinite.
           if (
-            !Number.isFinite(nextPositionX) ||
-            !Number.isFinite(nextPositionY) ||
-            !Number.isFinite(nextVelocityX) ||
-            !Number.isFinite(nextVelocityY) ||
+            !Number.isFinite(nextMotion.positionMeters.x) ||
+            !Number.isFinite(nextMotion.positionMeters.y) ||
+            !Number.isFinite(nextMotion.velocityMetersPerSecond.x) ||
+            !Number.isFinite(nextMotion.velocityMetersPerSecond.y) ||
             !Number.isFinite(nextTimeSeconds)
           ) {
             return failure(
@@ -432,10 +413,10 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
             );
           }
 
-          position.x = nextPositionX;
-          position.y = nextPositionY;
-          velocity.x = nextVelocityX;
-          velocity.y = nextVelocityY;
+          position.x = nextMotion.positionMeters.x;
+          position.y = nextMotion.positionMeters.y;
+          velocity.x = nextMotion.velocityMetersPerSecond.x;
+          velocity.y = nextMotion.velocityMetersPerSecond.y;
         }
       }
 
