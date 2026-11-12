@@ -11,6 +11,9 @@ import {
   type EngineResult
 } from "./diagnostics.js";
 
+// Contact geometry owns cross-body circle/static-box overlap checks.
+import { findInitialSurfaceOverlap } from "./contacts.js";
+
 function checkId(value: string, path: string): EngineFailure | undefined {
   if (value.trim().length === 0) {
     return failure("EMPTY_ID", path, "ID must not be empty.");
@@ -81,10 +84,10 @@ function validateMaterial(
   return checkFinite(material.restitution, restitutionPath) ??
     (material.restitution < 0 || material.restitution > 1
       ? failure(
-          "OUT_OF_RANGE",
-          restitutionPath,
-          "Restitution must be between zero and one."
-        )
+        "OUT_OF_RANGE",
+        restitutionPath,
+        "Restitution must be between zero and one."
+      )
       : undefined);
 }
 
@@ -152,17 +155,17 @@ export function validateScene(
 
     const kindFailure = body.kind === "dynamic"
       ? checkPositive(body.shape.radiusMeters, `${bodyPath}.shape.radiusMeters`) ??
-        checkPositive(body.massKilograms, `${bodyPath}.massKilograms`) ??
-        validateVector(
-          body.velocity.linearMetersPerSecond,
-          `${bodyPath}.velocity.linearMetersPerSecond`
-        ) ??
-        checkFinite(
-          body.velocity.angularRadiansPerSecond,
-          `${bodyPath}.velocity.angularRadiansPerSecond`
-        )
+      checkPositive(body.massKilograms, `${bodyPath}.massKilograms`) ??
+      validateVector(
+        body.velocity.linearMetersPerSecond,
+        `${bodyPath}.velocity.linearMetersPerSecond`
+      ) ??
+      checkFinite(
+        body.velocity.angularRadiansPerSecond,
+        `${bodyPath}.velocity.angularRadiansPerSecond`
+      )
       : checkPositive(body.shape.widthMeters, `${bodyPath}.shape.widthMeters`) ??
-        checkPositive(body.shape.heightMeters, `${bodyPath}.shape.heightMeters`);
+      checkPositive(body.shape.heightMeters, `${bodyPath}.shape.heightMeters`);
 
     if (kindFailure !== undefined) {
       return kindFailure;
@@ -194,6 +197,21 @@ export function validateScene(
     }
 
     entityIds.add(trigger.id);
+  }
+
+  // Reject strict penetration before any engine state is created.
+  const initialOverlap = findInitialSurfaceOverlap(scene.bodies);
+
+  if (initialOverlap !== undefined) {
+    return failure(
+      "INVALID_INITIAL_OVERLAP",
+      `bodies[${initialOverlap.bodyIndex}].pose.positionMeters`,
+      (
+        `Body "${initialOverlap.bodyId}" initially overlaps ` +
+        `static surface "${initialOverlap.surfaceBodyId}".`
+      ),
+      initialOverlap.bodyId
+    );
   }
 
   return { ok: true, value: scene };
