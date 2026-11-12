@@ -1,15 +1,6 @@
-import type {
-  Command,
-  Material,
-  SceneDefinition,
-  Vector2
-} from "@eureka/contracts";
+import type { Command, Material, SceneDefinition, Vector2 } from "@eureka/contracts";
 
-import {
-  failure,
-  type EngineFailure,
-  type EngineResult
-} from "./diagnostics.js";
+import { failure, type EngineFailure, type EngineResult } from "./diagnostics.js";
 
 // Contact geometry owns cross-body circle/static-box overlap checks.
 import { findInitialSurfaceOverlap } from "./contacts.js";
@@ -37,21 +28,14 @@ function checkPositive(value: number, path: string): EngineFailure | undefined {
       : undefined);
 }
 
-function checkNonnegative(
-  value: number,
-  path: string
-): EngineFailure | undefined {
+function checkNonnegative(value: number, path: string): EngineFailure | undefined {
   return checkFinite(value, path) ??
     (value < 0
       ? failure("OUT_OF_RANGE", path, "Value must be nonnegative.")
       : undefined);
 }
 
-function checkSafeInteger(
-  value: number,
-  path: string,
-  minimum?: number
-): EngineFailure | undefined {
+function checkSafeInteger(value: number, path: string, minimum?: number): EngineFailure | undefined {
   if (
     !Number.isSafeInteger(value) ||
     (minimum !== undefined && value < minimum)
@@ -75,10 +59,7 @@ function validateVector(value: Vector2, path: string): EngineFailure | undefined
     checkFinite(value.y, `${path}.y`);
 }
 
-function validateMaterial(
-  material: Material,
-  path: string
-): EngineFailure | undefined {
+function validateMaterial(material: Material, path: string): EngineFailure | undefined {
   const restitutionPath = `${path}.restitution`;
 
   return checkFinite(material.restitution, restitutionPath) ??
@@ -91,9 +72,7 @@ function validateMaterial(
       : undefined);
 }
 
-export function validateScene(
-  scene: SceneDefinition
-): EngineResult<SceneDefinition> {
+export function validateScene(scene: SceneDefinition): EngineResult<SceneDefinition> {
   const sceneFailure =
     checkId(scene.id, "id") ??
     checkSafeInteger(scene.revision, "revision", 0) ??

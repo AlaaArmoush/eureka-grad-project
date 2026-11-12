@@ -18,12 +18,7 @@ import {
   type MovingCircleState
 } from "./contacts.js";
 
-import {
-  failure,
-  type EngineFailure,
-  type EngineResult,
-  type EngineStatus
-} from "./diagnostics.js";
+import { failure, type EngineFailure, type EngineResult, type EngineStatus } from "./diagnostics.js";
 import { integrateSmoothMotion } from "./mechanics.js";
 import { validateCommand, validateScene } from "./validation.js";
 
@@ -207,17 +202,6 @@ function makeSnapshot(
   };
 }
 
-function referencedBodyId(command: Command): string | undefined {
-  switch (command.payload.kind) {
-    case "editBody":
-    case "launchBody":
-    case "setForceInteraction":
-      return command.payload.bodyId;
-    case "endForceInteraction":
-      return undefined;
-  }
-}
-
 function applyCommand(command: Command, bodies: MutableBodyState[]): void {
   const payload = command.payload;
 
@@ -293,9 +277,7 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
 
   const linearDragKilogramsPerSecond = scene.environment.linearDragKilogramsPerSecond;
 
-  function collectInsideTargetPairs(
-    currentBodies: readonly MutableBodyState[]
-  ): Set<string> {
+  function collectInsideTargetPairs(currentBodies: readonly MutableBodyState[]): Set<string> {
     const pairs = new Set<string>();
 
     for (const body of currentBodies) {
@@ -316,10 +298,7 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
   }
 
   // Evaluate the existing smooth solver from a body's current state.
-  function smoothMotion(
-    body: MutableDynamicBody,
-    timeStepSeconds: number
-  ) {
+  function smoothMotion(body: MutableDynamicBody, timeStepSeconds: number) {
     return integrateSmoothMotion({
       positionMeters: body.pose.positionMeters,
       velocityMetersPerSecond: body.velocity.linearMetersPerSecond,
@@ -366,7 +345,7 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
       return failure(
         "UNSUPPORTED_COMMAND",
         "payload.kind",
-        "Force interactions are frozen in the contract but implemented at Topic 1."
+        "Force interactions are not supported by this engine yet."
       );
     }
 
@@ -386,12 +365,10 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
       );
     }
 
-    const bodyId = referencedBodyId(command);
-    const targetBody = bodyId === undefined
-      ? undefined
-      : bodies.find((body) => body.id === bodyId);
+    const bodyId = command.payload.bodyId;
+    const targetBody = bodies.find((body) => body.id === bodyId);
 
-    if (bodyId !== undefined && targetBody === undefined) {
+    if (targetBody === undefined) {
       return failure(
         "UNKNOWN_ENTITY_ID",
         "payload.bodyId",

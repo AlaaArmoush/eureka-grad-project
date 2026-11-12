@@ -16,9 +16,7 @@ interface SmoothMotionStepResult {
 }
 
 // Update position and velocity for one physics step
-export function integrateSmoothMotion(
-  input: SmoothMotionStepInput
-): SmoothMotionStepResult {
+export function integrateSmoothMotion(input: SmoothMotionStepInput): SmoothMotionStepResult {
   const halfTimeStepSeconds = 0.5 * input.timeStepSeconds;
   const hasLinearDrag = input.linearDragKilogramsPerSecond > 0;
 

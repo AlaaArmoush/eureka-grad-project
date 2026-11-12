@@ -119,14 +119,12 @@ export function findInitialSurfaceOverlap(bodies: readonly Body[]): InitialSurfa
 
 // Describes the first non-solid target entry during one internal substep.
 export interface TargetEntryCandidate {
-  readonly kind: "targetEntry";
   readonly timeOffsetSeconds: number;
   readonly bodyId: string;
   readonly targetId: string;
 }
 
 export interface StaticContactCandidate {
-  readonly kind: "staticContact";
   readonly timeOffsetSeconds: number;
   readonly bodyId: string;
   readonly surfaceBodyId: string;
@@ -211,11 +209,7 @@ function findFirstTouchTime(
 }
 
 // Positive clearance means separated; zero is exact tangency.
-function targetClearanceMeters(
-  circle: MovingCircleState,
-  target: TargetTrigger,
-  positionMeters: Vector2
-): number {
+function targetClearanceMeters(circle: MovingCircleState, target: TargetTrigger, positionMeters: Vector2): number {
   return (
     Math.hypot(
       positionMeters.x - target.pose.positionMeters.x,
@@ -226,10 +220,7 @@ function targetClearanceMeters(
 }
 
 // Tracks whether a pair is already overlapping so entry fires only once.
-export function isCircleInsideTarget(
-  circle: MovingCircleState,
-  target: TargetTrigger
-): boolean {
+export function isCircleInsideTarget(circle: MovingCircleState, target: TargetTrigger): boolean {
   return (
     targetClearanceMeters(circle, target, circle.positionMeters) <=
     CONTACT_TOLERANCE_METERS
@@ -258,7 +249,6 @@ export function findTargetEntryCandidate(
   return timeOffsetSeconds === undefined
     ? undefined
     : {
-      kind: "targetEntry",
       timeOffsetSeconds,
       bodyId: circle.id,
       targetId: target.id
@@ -299,7 +289,6 @@ export function findStaticContactCandidate(
   );
 
   return {
-    kind: "staticContact",
     timeOffsetSeconds,
     bodyId: circle.id,
     surfaceBodyId: surface.id,

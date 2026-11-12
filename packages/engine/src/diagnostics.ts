@@ -41,12 +41,7 @@ export interface EngineFailure {
   readonly diagnostics: readonly EngineDiagnostic[];
 }
 
-export function failure(
-  code: EngineDiagnosticCode,
-  path: string,
-  message: string,
-  entityId?: string
-): EngineFailure {
+export function failure(code: EngineDiagnosticCode, path: string, message: string, entityId?: string): EngineFailure {
   const diagnostic: EngineDiagnostic =
     entityId === undefined
       ? { code, path, message }
