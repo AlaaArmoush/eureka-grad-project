@@ -1,5 +1,4 @@
-import type { Command, Material, SceneDefinition, Vector2 } from "@eureka/contracts";
-
+import type { Body, Command, Material, SceneDefinition, Vector2 } from "@eureka/contracts";
 import { failure, type EngineFailure, type EngineResult } from "./diagnostics.js";
 
 // Contact geometry owns cross-body circle/static-box overlap checks.
@@ -70,6 +69,25 @@ function validateMaterial(material: Material, path: string): EngineFailure | und
         "Restitution must be between zero and one."
       )
       : undefined);
+}
+
+// Reject a proposed placement that starts a projectile inside a static body.
+export function validateBodyPlacements(bodies: readonly Body[]): EngineFailure | undefined {
+  const initialOverlap = findInitialSurfaceOverlap(bodies);
+
+  if (initialOverlap === undefined) {
+    return undefined;
+  }
+
+  return failure(
+    "INVALID_INITIAL_OVERLAP",
+    `bodies[${initialOverlap.bodyIndex}].pose.positionMeters`,
+    (
+      `Body "${initialOverlap.bodyId}" initially overlaps ` +
+      `static surface "${initialOverlap.surfaceBodyId}".`
+    ),
+    initialOverlap.bodyId
+  );
 }
 
 export function validateScene(scene: SceneDefinition): EngineResult<SceneDefinition> {
@@ -178,22 +196,8 @@ export function validateScene(scene: SceneDefinition): EngineResult<SceneDefinit
     entityIds.add(trigger.id);
   }
 
-  // Reject strict penetration before any engine state is created.
-  const initialOverlap = findInitialSurfaceOverlap(scene.bodies);
-
-  if (initialOverlap !== undefined) {
-    return failure(
-      "INVALID_INITIAL_OVERLAP",
-      `bodies[${initialOverlap.bodyIndex}].pose.positionMeters`,
-      (
-        `Body "${initialOverlap.bodyId}" initially overlaps ` +
-        `static surface "${initialOverlap.surfaceBodyId}".`
-      ),
-      initialOverlap.bodyId
-    );
-  }
-
-  return { ok: true, value: scene };
+  // Reject initial overlaps before accepting the scene.
+  return validateBodyPlacements(scene.bodies) ?? { ok: true, value: scene };
 }
 
 export function validateCommand(command: Command): EngineFailure | undefined {
