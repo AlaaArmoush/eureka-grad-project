@@ -8,8 +8,8 @@ import { createEngine } from "@eureka/engine";
 import type { MoveEntityRequest, PlacementRequest } from "./authoring.js";
 // Creates and types the lab lifetime coordinator.
 import { createLabController, type LabController } from "./controller.js";
-// Owns the mounted renderer and shares its static velocity display settings.
-import { mountLabRenderer, VELOCITY_ARROW_SCALE, type LabRenderer } from "./renderer.js";
+// Owns the mounted renderer.
+import { mountLabRenderer, type LabRenderer } from "./renderer.js";
 
 // setDisplayedSnapshot SO THE CHILD CAN SEND BACK INFORMATION TO THE PARENT USING THAT FUNCTION
 export function LabCanvas(props: {
@@ -142,7 +142,7 @@ export function LabCanvas(props: {
 
   return (
     <>
-      {/* Keep the dedicated Pixi host separate from the HTML legend. */}
+      {/* Keep this host dedicated to Pixi. */}
       <div
         aria-label="Eureka physics canvas"
         data-pixi-host
@@ -154,21 +154,7 @@ export function LabCanvas(props: {
           width: "100%",
         }}
       />
-      {/* Explain drawn length without covering objects or intercepting input. */}
-      <p
-        style={{
-          margin: 0,
-          minHeight: 40,
-          padding: "8px 24px",
-          backgroundColor: "#e6ddc9",
-          borderTop: "1px solid #c7bca2",
-          color: "#625f51",
-        }}
-      >
-        Velocity scale: {VELOCITY_ARROW_SCALE.pixelsPerMeterPerSecond} px per m/s,
-        {" "}limited to {VELOCITY_ARROW_SCALE.minimumLengthPixels}–{VELOCITY_ARROW_SCALE.maximumLengthPixels} px
-        {" "}(reduced to fit small canvases). Zero velocity has no arrow. Use readouts for exact speed.
-      </p>
+
     </>
   );
 }

@@ -13,6 +13,7 @@ import type {
 export interface LabEditorState {
   readonly cameraCenterWorldMeters: Vector2;
   readonly pixelsPerMeter: number;
+  readonly cameraInitialized: boolean;
   readonly selectedEntityId: string | null;
 
   setCamera(centerWorldMeters: Vector2, pixelsPerMeter: number): void;
@@ -42,8 +43,9 @@ export const labStore = createStore<LabEditorState>()((set) => ({
     x: 5,
     y: 0,
   },
-  // Pixels per metre. A narrower browser shows less world, not smaller objects.
+  // Startup framing may reduce this scale; later resizing preserves zoom.
   pixelsPerMeter: 48,
+  cameraInitialized: false,
   selectedEntityId: null,
 
   setCamera: (cameraCenterWorldMeters, pixelsPerMeter) => {
@@ -64,6 +66,7 @@ export const labStore = createStore<LabEditorState>()((set) => ({
         ...cameraCenterWorldMeters,
       },
       pixelsPerMeter,
+      cameraInitialized: true,
     });
   },
 

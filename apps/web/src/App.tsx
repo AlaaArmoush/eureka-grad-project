@@ -22,6 +22,21 @@ import type { Snapshot, SceneDefinition } from "@eureka/contracts";
 import "./App.css";
 import { PropertiesPanel } from "./lab/PropertiesPanel";
 
+// Round displayed measurements while preserving the snapshot.
+function formatMeasurement(value: number | undefined): string {
+  if (value === undefined) {
+    return "—";
+  }
+
+  const text = value.toFixed(4);
+
+  if (text === "-0.0000") {
+    return "0.0000";
+  }
+
+  return text;
+}
+
 export function App() {
   const [displayedSnapshot, setDisplayedSnapshot] = useState<Snapshot>(
     PROJECTILE_LAB_MOCK.snapshot,
@@ -38,6 +53,14 @@ export function App() {
   const selectedBody = displayedSnapshot.bodies.find(
     (body) => body.id === selectedEntityId,
   );
+
+  // Calculate speed without changing the snapshot.
+  let selectedSpeedMetersPerSecond: number | undefined = undefined;
+
+  if (selectedBody !== undefined) {
+    const velocity = selectedBody.velocity.linearMetersPerSecond;
+    selectedSpeedMetersPerSecond = Math.hypot(velocity.x, velocity.y);
+  }
   let activeSampleSnapshots;
 
   if (
@@ -384,15 +407,34 @@ export function App() {
           <section className="measurements">
             <h2>Measurements and display</h2>
 
-            <h3>Current velocity</h3>
+            <h3>Current measurements</h3>
             <p>
-              <strong>vx: </strong>
-              {selectedBody?.velocity.linearMetersPerSecond.x ?? "—"} m/s
+              Snapshot tick {displayedSnapshot.tick} · Values rounded to four decimal places.
             </p>
-            <p>
-              <strong>vy: </strong>
-              {selectedBody?.velocity.linearMetersPerSecond.y ?? "—"} m/s
-            </p>
+
+            {selectedBody === undefined && (
+              <p>Select a projectile or solid body to see its values.</p>
+            )}
+
+            <dl className="measurement-values">
+              <dt>x (m)</dt>
+              <dd>{formatMeasurement(selectedBody?.pose.positionMeters.x)}</dd>
+
+              <dt>y (m)</dt>
+              <dd>{formatMeasurement(selectedBody?.pose.positionMeters.y)}</dd>
+
+              <dt>vx (m/s)</dt>
+              <dd>{formatMeasurement(selectedBody?.velocity.linearMetersPerSecond.x)}</dd>
+
+              <dt>vy (m/s)</dt>
+              <dd>{formatMeasurement(selectedBody?.velocity.linearMetersPerSecond.y)}</dd>
+
+              <dt>Speed |v| (m/s)</dt>
+              <dd>{formatMeasurement(selectedSpeedMetersPerSecond)}</dd>
+
+              <dt>t (s)</dt>
+              <dd>{formatMeasurement(displayedSnapshot.simulationTimeSeconds)}</dd>
+            </dl>
 
             <h3>Recent events</h3>
             {visibleEvents.length === 0 ? (
@@ -421,12 +463,11 @@ export function App() {
 
             <h3>Display options</h3>
             <div className="display-options">
-              {["Trail", "Velocity", "Components", "Prediction", "Normals"].map(
-                (option) => (
-                  <label key={option}>
-                    <input type="checkbox" disabled /> {option}
-                  </label>
-                ),
+              {["Trail", "Velocity", "Components", "Prediction"].map((option) => (
+                <label key={option}>
+                  <input type="checkbox" disabled /> {option}
+                </label>
+              ),
               )}
             </div>
           </section>

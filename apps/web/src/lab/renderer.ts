@@ -2,6 +2,7 @@ import type { SceneDefinition, Snapshot, Vector2 } from "@eureka/contracts";
 
 import {
   Application,
+  Bounds,
   Container,
   Graphics,
   Text,
@@ -154,6 +155,44 @@ function createRenderItems(
 
   return items;
 }
+
+// Draw an open-headed arrow between two screen positions.
+function drawVelocityArrow(graphic: Graphics, start: Vector2, tip: Vector2, widthPixels: number): void {
+  const lengthPixels = Math.hypot(tip.x - start.x, tip.y - start.y);
+
+  if (lengthPixels === 0) {
+    return;
+  }
+
+  // Keep the head inside short arrows without moving the tip.
+  const headLengthPixels = Math.min(8, lengthPixels / 2);
+  const reverseAngle = Math.atan2(start.y - tip.y, start.x - tip.x);
+
+  const leftWingTip = {
+    x: tip.x + headLengthPixels * Math.cos(reverseAngle - 0.45),
+    y: tip.y + headLengthPixels * Math.sin(reverseAngle - 0.45),
+  };
+
+  const rightWingTip = {
+    x: tip.x + headLengthPixels * Math.cos(reverseAngle + 0.45),
+    y: tip.y + headLengthPixels * Math.sin(reverseAngle + 0.45),
+  };
+
+  // Back the blue strokes with paper for contrast.
+  for (const stroke of [
+    { color: 0xe8e0cd, width: 4 },
+    { color: 0x357ea0, width: widthPixels },
+  ]) {
+    graphic
+      .moveTo(start.x, start.y)
+      .lineTo(tip.x, tip.y)
+      .moveTo(leftWingTip.x, leftWingTip.y)
+      .lineTo(tip.x, tip.y)
+      .lineTo(rightWingTip.x, rightWingTip.y)
+      .stroke({ ...stroke, cap: "round", join: "round" });
+  }
+}
+
 export function mountLabRenderer(
   host: HTMLElement,
   scene: SceneDefinition,
@@ -182,12 +221,24 @@ export function mountLabRenderer(
     label: "selected-projectile-velocity",
   });
   velocityGraphic.eventMode = "none";
+
+  const horizontalVelocityGraphic = new Graphics({
+    label: "selected-projectile-horizontal-velocity",
+  });
+  const verticalVelocityGraphic = new Graphics({
+    label: "selected-projectile-vertical-velocity",
+  });
+  verticalVelocityGraphic.eventMode = "none";
+  horizontalVelocityGraphic.eventMode = "none";
+
   trailGraphic.eventMode = "none";
   let panStart: Vector2 | null = null; // null when user not panning
   let panCameraStart: Vector2 | null = null; //camera position at the start of pan
   let dragState: DragState | null = null;
   const background = new Graphics();
   background.eventMode = "static";
+  let backgroundWidth = 0;
+  let backgroundHeight = 0;
   background.cursor =
     labStore.getState().activeTool.kind === "pan" ? "grab" : "default";
   const selectedFilter = new OutlineFilter({
@@ -207,14 +258,19 @@ export function mountLabRenderer(
       centerWorldMeters: editorState.cameraCenterWorldMeters,
     };
   }
-  function redrawSelectedTrail(viewport: ViewportTransform): void {
-    trailGraphic.clear();
 
-    const selectedEntityId = labStore.getState().selectedEntityId;
-
-    const selectedProjectile = currentScene.bodies.find(
+  // Use the same selected dynamic body for every projectile-only overlay.
+  function getSelectedProjectile(selectedEntityId: string | null) {
+    return currentScene.bodies.find(
       (body) => body.id === selectedEntityId && body.kind === "dynamic",
     );
+  }
+
+  function redrawSelectedTrail(
+    viewport: ViewportTransform,
+    selectedProjectile: ReturnType<typeof getSelectedProjectile>,
+  ): void {
+    trailGraphic.clear();
 
     if (selectedProjectile === undefined) {
       return;
@@ -258,19 +314,14 @@ export function mountLabRenderer(
 
 
   // Draw velocity from the selected projectile's authoritative snapshot.
-  function redrawSelectedVelocity(viewport: ViewportTransform): void {
+  function redrawSelectedVelocity(
+    viewport: ViewportTransform,
+    selectedProjectile: ReturnType<typeof getSelectedProjectile>,
+  ): void {
+    // Remove both previous arrows before checking the current selection.
     velocityGraphic.clear();
-
-    const selectedEntityId = labStore.getState().selectedEntityId;
-
-    let selectedProjectile;
-
-    for (const body of currentScene.bodies) {
-      if (body.id === selectedEntityId && body.kind === "dynamic") {
-        selectedProjectile = body;
-        break;
-      }
-    }
+    horizontalVelocityGraphic.clear();
+    verticalVelocityGraphic.clear();
 
     if (selectedProjectile === undefined) {
       return;
@@ -315,33 +366,19 @@ export function mountLabRenderer(
       y: start.y - (velocity.y / speedMetersPerSecond) * lengthPixels,
     };
 
-    // Keep the head readable without extending beyond a short shaft.
-    const headLengthPixels = Math.min(8, lengthPixels / 2);
-    const reverseAngle = Math.atan2(start.y - tip.y, start.x - tip.x);
-
-    const leftWingTip = {
-      x: tip.x + headLengthPixels * Math.cos(reverseAngle - 0.45),
-      y: tip.y + headLengthPixels * Math.sin(reverseAngle - 0.45),
+    // Project the displayed full vector onto the horizontal direction.
+    const horizontalTip = {
+      x: tip.x,
+      y: start.y,
     };
 
-    const rightWingTip = {
-      x: tip.x + headLengthPixels * Math.cos(reverseAngle + 0.45),
-      y: tip.y + headLengthPixels * Math.sin(reverseAngle + 0.45),
+    drawVelocityArrow(horizontalVelocityGraphic, start, horizontalTip, 1);
+    const verticalTip = {
+      x: start.x,
+      y: tip.y,
     };
-
-    // Put paper backing beneath the blue shaft and open V head.
-    for (const stroke of [
-      { color: 0xe8e0cd, width: 4 },
-      { color: 0x357ea0, width: 1.8 },
-    ]) {
-      velocityGraphic
-        .moveTo(start.x, start.y)
-        .lineTo(tip.x, tip.y)
-        .moveTo(leftWingTip.x, leftWingTip.y)
-        .lineTo(tip.x, tip.y)
-        .lineTo(rightWingTip.x, rightWingTip.y)
-        .stroke({ ...stroke, cap: "round", join: "round" });
-    }
+    drawVelocityArrow(verticalVelocityGraphic, start, verticalTip, 1);
+    drawVelocityArrow(velocityGraphic, start, tip, 1.8);
   }
 
   const resizeAndRender = (): void => {
@@ -352,13 +389,18 @@ export function mountLabRenderer(
     if (application.screen.width !== width || application.screen.height !== height) {
       application.renderer.resize(width, height);
     }
-    background.clear().rect(0, 0, width, height).fill({ color: 0, alpha: 0 });
+    if (backgroundWidth !== width || backgroundHeight !== height) {
+      background.clear().rect(0, 0, width, height).fill({ color: 0, alpha: 0 });
+      backgroundWidth = width;
+      backgroundHeight = height;
+    }
 
     const editorState = labStore.getState();
 
     const viewport = getViewport();
-    redrawSelectedTrail(viewport);
-    redrawSelectedVelocity(viewport);
+    const selectedProjectile = getSelectedProjectile(editorState.selectedEntityId);
+    redrawSelectedTrail(viewport, selectedProjectile);
+    redrawSelectedVelocity(viewport, selectedProjectile);
 
     for (const item of renderItems.values()) {
       const screenPosition = worldToScreen(item.positionMeters, viewport);
@@ -597,8 +639,9 @@ export function mountLabRenderer(
       item.graphic.on("pointerupoutside", finishDrag);
       item.graphic.on("pointercancel", cancelPointerDrag);
 
-      const velocityIndex = application.stage.getChildIndex(velocityGraphic);
-      application.stage.addChildAt(item.graphic, velocityIndex);
+      // Keep rebuilt bodies beneath both velocity overlays.
+      const overlayIndex = application.stage.getChildIndex(horizontalVelocityGraphic);
+      application.stage.addChildAt(item.graphic, overlayIndex);
     }
   }
 
@@ -621,7 +664,8 @@ export function mountLabRenderer(
     }
 
     // Establish persistent layers before adding the current scene objects.
-    application.stage.addChild(trailGraphic, velocityGraphic);
+    // Keep the component behind the thicker full arrow.
+    application.stage.addChild(trailGraphic, horizontalVelocityGraphic, verticalVelocityGraphic, velocityGraphic);
     application.stage.addChildAt(background, 0);
     rebuildRenderItems();
     application.stage.eventMode = "static";
@@ -730,6 +774,38 @@ export function mountLabRenderer(
       }
     });
     updateSnapshot(currentSnapshot);
+
+    // Frame startup content once, then preserve the user's camera.
+    const editorState = labStore.getState();
+
+    if (!editorState.cameraInitialized && renderItems.size > 0) {
+      const viewport = getViewport();
+      const bounds = new Bounds();
+
+      for (const item of renderItems.values()) {
+        bounds.addBounds(item.graphic.getBounds());
+      }
+
+      // Include history even when its projectile is not selected.
+      for (const trailSnapshot of trailSnapshots) {
+        for (const body of trailSnapshot.bodies) {
+          const point = worldToScreen(body.pose.positionMeters, viewport);
+          bounds.addFrame(point.x, point.y, point.x, point.y);
+        }
+      }
+
+      const centerWorldMeters = screenToWorld({
+        x: bounds.x + bounds.width / 2,
+        y: bounds.y + bounds.height / 2,
+      }, viewport);
+      const fitRatio = Math.min(
+        1,
+        viewport.widthPixels * 0.9 / bounds.width,
+        viewport.heightPixels * 0.9 / bounds.height,
+      );
+
+      editorState.setCamera(centerWorldMeters, editorState.pixelsPerMeter * fitRatio);
+    }
   };
 
   void initialize().catch((error: unknown) => {
@@ -748,14 +824,15 @@ export function mountLabRenderer(
     window.removeEventListener("blur", cancelActiveDrag);
     dragState = null;
     unsubscribeFromStore?.();
-    // Release these graphics even when initialization is still pending.
-    trailGraphic.destroy();
-    background.destroy();
-    velocityGraphic.destroy();
-
     if (initialized) {
-      application.ticker.stop();
       application.destroy({ removeView: true }, { children: true });
+    } else {
+      // These graphics are not stage children yet, so release them directly.
+      trailGraphic.destroy();
+      background.destroy();
+      velocityGraphic.destroy();
+      horizontalVelocityGraphic.destroy();
+      verticalVelocityGraphic.destroy();
     }
 
     selectedFilter.destroy();
