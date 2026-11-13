@@ -14,10 +14,16 @@ interface MutableBodyBase {
   };
 }
 
+// Keep each projectile's measurement reference with its engine-owned state.
 export interface MutableDynamicBody extends MutableBodyBase {
   readonly kind: "dynamic";
   readonly shape: { readonly kind: "circle"; readonly radiusMeters: number; };
   massKilograms: number;
+  flight: {
+    readonly launchTick: number;
+    readonly launchPositionXMeters: number;
+    readonly firstContactTimeSeconds: number | undefined;
+  };
 }
 
 export interface MutableStaticBody extends MutableBodyBase {
@@ -44,6 +50,11 @@ export function createMutableBody(body: Body): MutableBodyState {
       kind: "dynamic",
       shape: { ...body.shape },
       massKilograms: body.massKilograms,
+      flight: {
+        launchTick: 0,
+        launchPositionXMeters: body.pose.positionMeters.x,
+        firstContactTimeSeconds: undefined
+      },
       velocity: {
         linearMetersPerSecond: { ...body.velocity.linearMetersPerSecond },
         angularRadiansPerSecond: body.velocity.angularRadiansPerSecond
@@ -83,7 +94,8 @@ export function cloneBodies(bodies: readonly MutableBodyState[]): MutableBodySta
         ...sharedState,
         kind: "dynamic",
         shape: { ...body.shape },
-        massKilograms: body.massKilograms
+        massKilograms: body.massKilograms,
+        flight: { ...body.flight }
       };
     }
 

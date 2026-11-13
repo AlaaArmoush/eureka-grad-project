@@ -8,7 +8,7 @@ import {
   type MovingCircleState, type StaticContactCandidate
 } from "./contacts.js";
 import { failure, type EngineFailure, type EngineResult } from "./diagnostics.js";
-import { integrateSmoothMotion } from "./mechanics.js";
+import { integrateSmoothMotion, type ForceInteraction } from "./mechanics.js";
 
 const MAXIMUM_EVENT_ADVANCES_PER_SUBSTEP = 8;
 const EVENT_TIME_TOLERANCE_SECONDS = 1e-12;
@@ -24,6 +24,7 @@ export interface StepSettings {
 interface TickObservations {
   readonly insideTargetPairs: Set<string>;
   readonly events: SnapshotEvent[];
+  readonly userInteractionWorkJoules: number;
 }
 
 interface TickContext {
@@ -33,6 +34,8 @@ interface TickContext {
   readonly staticSurfaces: readonly MutableStaticBody[];
   readonly nextInsideTargetPairs: Set<string>;
   readonly tickEvents: SnapshotEvent[];
+  readonly interactions: readonly ForceInteraction[];
+  userInteractionWorkJoules: number;
 }
 
 interface SelectedStaticContact {
@@ -75,15 +78,24 @@ export function collectInsideTargetPairs(bodies: readonly MutableBodyState[], ta
 }
 
 // Translate a draft body's fields into the existing smooth-motion solver input.
-function smoothMotion(body: MutableDynamicBody, timeStepSeconds: number, settings: StepSettings) {
+function smoothMotion(body: MutableDynamicBody, timeStepSeconds: number, settings: StepSettings, interactions: readonly ForceInteraction[]) {
   return integrateSmoothMotion({
     positionMeters: body.pose.positionMeters,
     velocityMetersPerSecond: body.velocity.linearMetersPerSecond,
     massKilograms: body.massKilograms,
     gravityMetersPerSecondSquared: settings.gravityMetersPerSecondSquared,
     linearDragKilogramsPerSecond: settings.linearDragKilogramsPerSecond,
-    timeStepSeconds
+    timeStepSeconds,
+    angleRadians: body.pose.angleRadians,
+    interactions
   });
+}
+
+// Both a sweep preview and its accepted segment must have finite physical values.
+function isFiniteMotion(motion: ReturnType<typeof integrateSmoothMotion>): boolean {
+  return Number.isFinite(motion.positionMeters.x) && Number.isFinite(motion.positionMeters.y) &&
+    Number.isFinite(motion.velocityMetersPerSecond.x) && Number.isFinite(motion.velocityMetersPerSecond.y) &&
+    Number.isFinite(motion.interactionForceNewtons.x) && Number.isFinite(motion.interactionForceNewtons.y);
 }
 
 // Choose the earliest unhandled contact, retaining the existing time and ID rules.
@@ -180,6 +192,16 @@ function applyStaticContact(body: MutableDynamicBody, earliestContact: SelectedS
 
   const { candidate, surface } = earliestContact;
 
+  // Preserve the first impact time until another explicit launch occurs.
+  const contactTimeSeconds = segmentStartTimeSeconds + candidate.timeOffsetSeconds;
+
+  if (body.flight.firstContactTimeSeconds === undefined) {
+    body.flight = {
+      ...body.flight,
+      firstContactTimeSeconds: contactTimeSeconds
+    };
+  }
+
   // Snap roundoff-sized localization error to exact tangency.
   body.pose.positionMeters.x = candidate.pointMeters.x + candidate.normal.x * body.shape.radiusMeters;
   body.pose.positionMeters.y = candidate.pointMeters.y + candidate.normal.y * body.shape.radiusMeters;
@@ -188,7 +210,7 @@ function applyStaticContact(body: MutableDynamicBody, earliestContact: SelectedS
     id: `groundContact:${tick + 1}:${tickEvents.length}:` + `${candidate.bodyId}:${candidate.surfaceBodyId}`,
     kind: "groundContact",
     tick: tick + 1,
-    timeSeconds: segmentStartTimeSeconds + candidate.timeOffsetSeconds,
+    timeSeconds: contactTimeSeconds,
     bodyId: candidate.bodyId,
     surfaceBodyId: candidate.surfaceBodyId,
     pointMeters: { ...candidate.pointMeters },
@@ -247,11 +269,38 @@ function advanceBodySubstep(body: MutableDynamicBody, substepIndex: number, cont
   let substepElapsedSeconds = 0;
   let eventAdvanceCount = 0;
   const handledSurfaceIds = new Set<string>();
+  const interactions: ForceInteraction[] = [];
+  let maximumInteractionAcceleration = 0;
+  let interactionDampingRate = 0;
+
+  for (const interaction of context.interactions) {
+    if (interaction.bodyId === body.id) {
+      interactions.push(interaction);
+      maximumInteractionAcceleration += interaction.maximumForceNewtons / body.massKilograms;
+      interactionDampingRate += interaction.dampingKilogramsPerSecond / body.massKilograms;
+    }
+  }
 
   while (remainingTimeSeconds > EVENT_TIME_TOLERANCE_SECONDS) {
     const velocity = body.velocity.linearMetersPerSecond;
-    const maximumSpeedMetersPerSecond = Math.hypot(velocity.x, velocity.y) + Math.hypot(gravityAcceleration.x, gravityAcceleration.y) * remainingTimeSeconds;
-    const positionAtTime = (timeSeconds: number) => smoothMotion(body, timeSeconds, settings).positionMeters;
+    const initialSpeed = Math.hypot(velocity.x, velocity.y);
+    let maximumSpeedMetersPerSecond = initialSpeed + (Math.hypot(gravityAcceleration.x, gravityAcceleration.y) + maximumInteractionAcceleration) * remainingTimeSeconds;
+
+    // The sweep also bounds the interaction damping's dependence on the exact
+    // environmental half-drag flow used by the position-at-time calculation.
+    if (interactions.length > 0 && settings.linearDragKilogramsPerSecond > 0 && initialSpeed > 0 && interactionDampingRate > 0) {
+      const dragRate = settings.linearDragKilogramsPerSecond / body.massKilograms;
+      maximumSpeedMetersPerSecond += 0.25 * remainingTimeSeconds ** 2 * dragRate * initialSpeed * interactionDampingRate;
+    }
+
+    const fullMotion = smoothMotion(body, remainingTimeSeconds, settings, interactions);
+
+    // Reject a bad force before passing its trajectory to swept geometry.
+    if (!isFiniteMotion(fullMotion) || !Number.isFinite(maximumSpeedMetersPerSecond)) {
+      return failure("NONFINITE_STATE", "", `Advancing tick ${tick + 1} produced a nonfinite force or motion.`, body.id);
+    }
+
+    const positionAtTime = (timeSeconds: number) => smoothMotion(body, timeSeconds, settings, interactions).positionMeters;
 
     const earliestContact = findEarliestContact(body, staticSurfaces, handledSurfaceIds, remainingTimeSeconds, positionAtTime, maximumSpeedMetersPerSecond);
 
@@ -283,21 +332,25 @@ function advanceBodySubstep(body: MutableDynamicBody, substepIndex: number, cont
       context
     );
 
-    const nextMotion = smoothMotion(body, segmentDurationSeconds, settings);
+    let nextMotion = fullMotion;
+
+    if (segmentDurationSeconds !== remainingTimeSeconds) {
+      nextMotion = smoothMotion(body, segmentDurationSeconds, settings, interactions);
+    }
+
     const nextTimeSeconds = (tick + 1) * fixedTimeStepSeconds;
 
     // Any failure discards this outer tick and all proposed events.
     if (
-      !Number.isFinite(nextMotion.positionMeters.x) ||
-      !Number.isFinite(nextMotion.positionMeters.y) ||
-      !Number.isFinite(nextMotion.velocityMetersPerSecond.x) ||
-      !Number.isFinite(nextMotion.velocityMetersPerSecond.y) ||
+      !isFiniteMotion(nextMotion) ||
       !Number.isFinite(nextTimeSeconds)
     ) {
       // Identify the affected body while rejecting the entire proposed tick.
       return failure("NONFINITE_STATE", "", `Advancing tick ${tick + 1} produced a nonfinite value.`, body.id);
     }
 
+    const previousX = body.pose.positionMeters.x;
+    const previousY = body.pose.positionMeters.y;
     body.pose.positionMeters.x = nextMotion.positionMeters.x;
     body.pose.positionMeters.y = nextMotion.positionMeters.y;
     body.velocity.linearMetersPerSecond.x = nextMotion.velocityMetersPerSecond.x;
@@ -309,6 +362,18 @@ function advanceBodySubstep(body: MutableDynamicBody, substepIndex: number, cont
       eventAdvanceCount += 1;
     } else {
       maintainHandledSupports(body, staticSurfaces, handledSurfaceIds);
+    }
+
+    // Use the accepted physical displacement, excluding support corrections and
+    // unused sweep previews. Environmental drag and gravity are not user work.
+    if (interactions.length > 0) {
+      const force = nextMotion.interactionForceNewtons;
+      context.userInteractionWorkJoules +=
+        force.x * (body.pose.positionMeters.x - previousX) + force.y * (body.pose.positionMeters.y - previousY);
+
+      if (!Number.isFinite(context.userInteractionWorkJoules)) {
+        return failure("NONFINITE_STATE", "userInteractionWorkJoules", `Advancing tick ${tick + 1} produced nonfinite interaction work.`, body.id);
+      }
     }
 
     updateTargetMembership(body, settings.targets, context.nextInsideTargetPairs);
@@ -363,7 +428,10 @@ function sortTickEvents(tickEvents: SnapshotEvent[]): void {
 }
 
 // Mutate only the caller's draft bodies; successful observations are committed by the engine.
-export function simulateTick(bodies: MutableBodyState[], insideTargetPairs: ReadonlySet<string>, tick: number, settings: StepSettings): EngineResult<TickObservations> {
+export function simulateTick(
+  bodies: MutableBodyState[], insideTargetPairs: ReadonlySet<string>, tick: number,
+  settings: StepSettings, interactions: ReadonlyMap<string, ForceInteraction>, userInteractionWorkJoules: number
+): EngineResult<TickObservations> {
   const staticSurfaces: MutableStaticBody[] = [];
 
   for (const body of bodies) {
@@ -373,6 +441,8 @@ export function simulateTick(bodies: MutableBodyState[], insideTargetPairs: Read
   }
 
   staticSurfaces.sort((left, right) => left.id.localeCompare(right.id));
+  const orderedInteractions = Array.from(interactions.values());
+  orderedInteractions.sort((left, right) => left.interactionId.localeCompare(right.interactionId));
 
   const context: TickContext = {
     tick,
@@ -380,7 +450,9 @@ export function simulateTick(bodies: MutableBodyState[], insideTargetPairs: Read
     internalTimeStepSeconds: settings.fixedTimeStepSeconds / settings.substepCount,
     staticSurfaces,
     nextInsideTargetPairs: new Set(insideTargetPairs),
-    tickEvents: []
+    tickEvents: [],
+    interactions: orderedInteractions,
+    userInteractionWorkJoules
   };
 
   for (let substepIndex = 0; substepIndex < settings.substepCount; substepIndex += 1) {
@@ -403,7 +475,8 @@ export function simulateTick(bodies: MutableBodyState[], insideTargetPairs: Read
     ok: true,
     value: {
       insideTargetPairs: context.nextInsideTargetPairs,
-      events: context.tickEvents
+      events: context.tickEvents,
+      userInteractionWorkJoules: context.userInteractionWorkJoules
     }
   };
 }

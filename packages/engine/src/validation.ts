@@ -279,8 +279,8 @@ export function validateCommand(command: Command): EngineFailure | undefined {
           "payload.velocity.angularRadiansPerSecond"
         );
 
-    case "setForceInteraction":
-      return checkId(payload.interactionId, "payload.interactionId") ??
+    case "setForceInteraction": {
+      const interactionFailure = checkId(payload.interactionId, "payload.interactionId") ??
         validateVector(payload.localAnchorMeters, "payload.localAnchorMeters") ??
         validateVector(
           payload.targetPositionMeters,
@@ -294,6 +294,17 @@ export function validateCommand(command: Command): EngineFailure | undefined {
           payload.dampingKilogramsPerSecond,
           "payload.dampingKilogramsPerSecond"
         );
+
+      if (interactionFailure !== undefined) {
+        return interactionFailure;
+      }
+
+      if (payload.maximumForceNewtons !== undefined) {
+        return checkPositive(payload.maximumForceNewtons, "payload.maximumForceNewtons");
+      }
+
+      return undefined;
+    }
 
     case "endForceInteraction":
       return checkId(payload.interactionId, "payload.interactionId");
