@@ -1,15 +1,8 @@
-import type {
-  Command,
-  Material,
-  SceneDefinition,
-  Vector2
-} from "@eureka/contracts";
+import type { Body, Command, Material, SceneDefinition, Vector2 } from "@eureka/contracts";
+import { failure, type EngineFailure, type EngineResult } from "./diagnostics.js";
 
-import {
-  failure,
-  type EngineFailure,
-  type EngineResult
-} from "./diagnostics.js";
+// Contact geometry owns cross-body circle/static-box overlap checks.
+import { findInitialSurfaceOverlap } from "./contacts.js";
 
 function checkId(value: string, path: string): EngineFailure | undefined {
   if (value.trim().length === 0) {
@@ -34,21 +27,14 @@ function checkPositive(value: number, path: string): EngineFailure | undefined {
       : undefined);
 }
 
-function checkNonnegative(
-  value: number,
-  path: string
-): EngineFailure | undefined {
+function checkNonnegative(value: number, path: string): EngineFailure | undefined {
   return checkFinite(value, path) ??
     (value < 0
       ? failure("OUT_OF_RANGE", path, "Value must be nonnegative.")
       : undefined);
 }
 
-function checkSafeInteger(
-  value: number,
-  path: string,
-  minimum?: number
-): EngineFailure | undefined {
+function checkSafeInteger(value: number, path: string, minimum?: number): EngineFailure | undefined {
   if (
     !Number.isSafeInteger(value) ||
     (minimum !== undefined && value < minimum)
@@ -72,25 +58,39 @@ function validateVector(value: Vector2, path: string): EngineFailure | undefined
     checkFinite(value.y, `${path}.y`);
 }
 
-function validateMaterial(
-  material: Material,
-  path: string
-): EngineFailure | undefined {
+function validateMaterial(material: Material, path: string): EngineFailure | undefined {
   const restitutionPath = `${path}.restitution`;
 
   return checkFinite(material.restitution, restitutionPath) ??
     (material.restitution < 0 || material.restitution > 1
       ? failure(
-          "OUT_OF_RANGE",
-          restitutionPath,
-          "Restitution must be between zero and one."
-        )
+        "OUT_OF_RANGE",
+        restitutionPath,
+        "Restitution must be between zero and one."
+      )
       : undefined);
 }
 
-export function validateScene(
-  scene: SceneDefinition
-): EngineResult<SceneDefinition> {
+// Reject a proposed placement that starts a projectile inside a static body.
+export function validateBodyPlacements(bodies: readonly Body[]): EngineFailure | undefined {
+  const initialOverlap = findInitialSurfaceOverlap(bodies);
+
+  if (initialOverlap === undefined) {
+    return undefined;
+  }
+
+  return failure(
+    "INVALID_INITIAL_OVERLAP",
+    `bodies[${initialOverlap.bodyIndex}].pose.positionMeters`,
+    (
+      `Body "${initialOverlap.bodyId}" initially overlaps ` +
+      `static surface "${initialOverlap.surfaceBodyId}".`
+    ),
+    initialOverlap.bodyId
+  );
+}
+
+export function validateScene(scene: SceneDefinition): EngineResult<SceneDefinition> {
   const sceneFailure =
     checkId(scene.id, "id") ??
     checkSafeInteger(scene.revision, "revision", 0) ??
@@ -152,17 +152,17 @@ export function validateScene(
 
     const kindFailure = body.kind === "dynamic"
       ? checkPositive(body.shape.radiusMeters, `${bodyPath}.shape.radiusMeters`) ??
-        checkPositive(body.massKilograms, `${bodyPath}.massKilograms`) ??
-        validateVector(
-          body.velocity.linearMetersPerSecond,
-          `${bodyPath}.velocity.linearMetersPerSecond`
-        ) ??
-        checkFinite(
-          body.velocity.angularRadiansPerSecond,
-          `${bodyPath}.velocity.angularRadiansPerSecond`
-        )
+      checkPositive(body.massKilograms, `${bodyPath}.massKilograms`) ??
+      validateVector(
+        body.velocity.linearMetersPerSecond,
+        `${bodyPath}.velocity.linearMetersPerSecond`
+      ) ??
+      checkFinite(
+        body.velocity.angularRadiansPerSecond,
+        `${bodyPath}.velocity.angularRadiansPerSecond`
+      )
       : checkPositive(body.shape.widthMeters, `${bodyPath}.shape.widthMeters`) ??
-        checkPositive(body.shape.heightMeters, `${bodyPath}.shape.heightMeters`);
+      checkPositive(body.shape.heightMeters, `${bodyPath}.shape.heightMeters`);
 
     if (kindFailure !== undefined) {
       return kindFailure;
@@ -196,7 +196,8 @@ export function validateScene(
     entityIds.add(trigger.id);
   }
 
-  return { ok: true, value: scene };
+  // Reject initial overlaps before accepting the scene.
+  return validateBodyPlacements(scene.bodies) ?? { ok: true, value: scene };
 }
 
 export function validateCommand(command: Command): EngineFailure | undefined {
@@ -278,8 +279,8 @@ export function validateCommand(command: Command): EngineFailure | undefined {
           "payload.velocity.angularRadiansPerSecond"
         );
 
-    case "setForceInteraction":
-      return checkId(payload.interactionId, "payload.interactionId") ??
+    case "setForceInteraction": {
+      const interactionFailure = checkId(payload.interactionId, "payload.interactionId") ??
         validateVector(payload.localAnchorMeters, "payload.localAnchorMeters") ??
         validateVector(
           payload.targetPositionMeters,
@@ -293,6 +294,17 @@ export function validateCommand(command: Command): EngineFailure | undefined {
           payload.dampingKilogramsPerSecond,
           "payload.dampingKilogramsPerSecond"
         );
+
+      if (interactionFailure !== undefined) {
+        return interactionFailure;
+      }
+
+      if (payload.maximumForceNewtons !== undefined) {
+        return checkPositive(payload.maximumForceNewtons, "payload.maximumForceNewtons");
+      }
+
+      return undefined;
+    }
 
     case "endForceInteraction":
       return checkId(payload.interactionId, "payload.interactionId");

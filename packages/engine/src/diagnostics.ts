@@ -11,8 +11,10 @@ export type EngineDiagnosticCode =
   | "OUT_OF_RANGE"
   | "PAST_TARGET_TICK"
   | "UNKNOWN_ENTITY_ID"
+  | "UNRESOLVED_EVENT_LIMIT"
   | "UNSUPPORTED_COMMAND"
-  | "UNSUPPORTED_SCENE_FEATURE";
+  | "UNSUPPORTED_SCENE_FEATURE"
+  | "INVALID_INITIAL_OVERLAP";
 
 export interface EngineDiagnostic {
   readonly code: EngineDiagnosticCode;
@@ -23,15 +25,15 @@ export interface EngineDiagnostic {
 
 export type EngineResult<T> =
   | {
-      readonly ok: true;
-      readonly value: T;
-    }
+    readonly ok: true;
+    readonly value: T;
+  }
   | EngineFailure;
 
 export type EngineStatus =
   | {
-      readonly ok: true;
-    }
+    readonly ok: true;
+  }
   | EngineFailure;
 
 export interface EngineFailure {
@@ -39,12 +41,7 @@ export interface EngineFailure {
   readonly diagnostics: readonly EngineDiagnostic[];
 }
 
-export function failure(
-  code: EngineDiagnosticCode,
-  path: string,
-  message: string,
-  entityId?: string
-): EngineFailure {
+export function failure(code: EngineDiagnosticCode, path: string, message: string, entityId?: string): EngineFailure {
   const diagnostic: EngineDiagnostic =
     entityId === undefined
       ? { code, path, message }
