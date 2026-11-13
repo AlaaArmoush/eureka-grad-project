@@ -4,6 +4,21 @@ import { useState, type RefObject } from "react";
 import type { SceneDefinition, Snapshot } from "@eureka/contracts";
 // Supplies the accepted property-edit operations.
 import type { LabController } from "./controller.js";
+
+// Remember launch text alongside the physical values accepted for this projectile.
+interface AcceptedLaunchInput {
+  readonly sceneId: string;
+  readonly velocityX: number;
+  readonly velocityY: number;
+  readonly speedText: string;
+  readonly angleText: string;
+}
+
+// Hide conversion noise when reconstructing an input from physical values.
+function formatDerivedInput(value: number): string {
+  return String(Number(value.toPrecision(15)));
+}
+
 export function PropertiesPanel(props: {
   controllerRef: RefObject<LabController | null>;
   displayedSnapshot: Snapshot;
@@ -69,6 +84,30 @@ export function PropertiesPanel(props: {
     null,
   );
   const [targetEditError, setTargetEditError] = useState<string | null>(null);
+
+  // Keep accepted launch text across renders and selection changes.
+  const [acceptedLaunchInputs, setAcceptedLaunchInputs] = useState<
+    ReadonlyMap<string, AcceptedLaunchInput>
+  >(() => new Map());
+
+  let launchSpeedInput = formatDerivedInput(selectedProjectileSpeed);
+  let launchAngleInput = formatDerivedInput(selectedProjectileAngleDegrees);
+
+  // Reuse the text only while it still describes this scene's accepted velocity.
+  if (selectedProjectile !== undefined) {
+    const acceptedInput = acceptedLaunchInputs.get(selectedProjectile.id);
+    const velocity = selectedProjectile.velocity.linearMetersPerSecond;
+
+    if (
+      acceptedInput !== undefined &&
+      acceptedInput.sceneId === editableScene.id &&
+      acceptedInput.velocityX === velocity.x &&
+      acceptedInput.velocityY === velocity.y
+    ) {
+      launchSpeedInput = acceptedInput.speedText;
+      launchAngleInput = acceptedInput.angleText;
+    }
+  }
 
   return (
     <section className="properties">
@@ -194,7 +233,30 @@ export function PropertiesPanel(props: {
               return;
             }
 
-            setEditableScene(editResult.value.scene);
+            // Associate the submitted text with the controller's accepted values.
+            const acceptedScene = editResult.value.scene;
+
+            for (const body of acceptedScene.bodies) {
+              if (body.id === selectedProjectile.id && body.kind === "dynamic") {
+                setAcceptedLaunchInputs((previousInputs) => {
+                  const nextInputs = new Map(previousInputs);
+
+                  nextInputs.set(body.id, {
+                    sceneId: acceptedScene.id,
+                    velocityX: body.velocity.linearMetersPerSecond.x,
+                    velocityY: body.velocity.linearMetersPerSecond.y,
+                    speedText,
+                    angleText,
+                  });
+
+                  return nextInputs;
+                });
+
+                break;
+              }
+            }
+
+            setEditableScene(acceptedScene);
             setProjectileEditError(null);
           }}
         >
@@ -216,14 +278,16 @@ export function PropertiesPanel(props: {
 
           <label>
             Launch speed (m/s)
-            <input name="edit-speed" defaultValue={selectedProjectileSpeed} />
+            {/* Preserve accepted speed text instead of exposing conversion noise. */}
+            <input name="edit-speed" defaultValue={launchSpeedInput} />
           </label>
 
           <label>
             Launch angle (°)
+            {/* Preserve accepted degrees while physical data remains in radians. */}
             <input
               name="edit-angle"
-              defaultValue={selectedProjectileAngleDegrees}
+              defaultValue={launchAngleInput}
             />
           </label>
 
@@ -358,9 +422,10 @@ export function PropertiesPanel(props: {
 
           <label>
             Surface angle (°)
+            {/* Format degrees reconstructed from the static body's radians. */}
             <input
               name="edit-static-angle"
-              defaultValue={selectedStaticAngleDegrees}
+              defaultValue={formatDerivedInput(selectedStaticAngleDegrees)}
             />
           </label>
 
