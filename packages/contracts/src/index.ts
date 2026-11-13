@@ -131,6 +131,8 @@ export interface Snapshot {
   readonly simulationTimeSeconds: number;
   readonly bodies: readonly SnapshotBody[];
   readonly projectileReadouts: readonly ProjectileReadout[];
+  // Signed work done on bodies by user force interactions since create/reset; absence means zero.
+  readonly userInteractionWorkJoules?: number;
   readonly events: readonly SnapshotEvent[];
   readonly diagnostics: readonly Diagnostic[];
 }
@@ -161,6 +163,8 @@ export interface SetForceInteractionCommand {
   readonly targetPositionMeters: Vector2;
   readonly stiffnessNewtonsPerMeter: number;
   readonly dampingKilogramsPerSecond: number;
+  // Positive finite magnitude limit; omission uses 100 M L / T² from the scene scales.
+  readonly maximumForceNewtons?: number;
 }
 
 export interface EndForceInteractionCommand {
