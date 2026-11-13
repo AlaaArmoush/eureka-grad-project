@@ -8,8 +8,8 @@ import { createEngine } from "@eureka/engine";
 import type { MoveEntityRequest, PlacementRequest } from "./authoring.js";
 // Creates and types the lab lifetime coordinator.
 import { createLabController, type LabController } from "./controller.js";
-// Mounts and releases the Pixi canvas and its interactions.
-import { mountLabRenderer } from "./renderer.js";
+// Owns the mounted renderer and shares its static velocity display settings.
+import { mountLabRenderer, VELOCITY_ARROW_SCALE, type LabRenderer } from "./renderer.js";
 
 // setDisplayedSnapshot SO THE CHILD CAN SEND BACK INFORMATION TO THE PARENT USING THAT FUNCTION
 export function LabCanvas(props: {
@@ -29,6 +29,8 @@ export function LabCanvas(props: {
   const sampleSnapshots = props.sampleSnapshots;
   const scene = props.scene;
   const hostRef = useRef<HTMLDivElement>(null);
+  // Keep the same Pixi application across accepted authoring edits.
+  const rendererRef = useRef<LabRenderer | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -65,7 +67,9 @@ export function LabCanvas(props: {
 
     const initialViewSnapshot = sampleSnapshot ?? initialSnapshotResult.value;
 
-    const renderer = mountLabRenderer(
+    // Create Pixi once, then update its scene without removing the canvas.
+    const previousRenderer = rendererRef.current;
+    const renderer = previousRenderer ?? mountLabRenderer(
       host,
       scene,
       initialViewSnapshot,
@@ -74,6 +78,12 @@ export function LabCanvas(props: {
       onDeleteRequested,
       sampleSnapshots ?? [],
     );
+
+    rendererRef.current = renderer;
+
+    if (previousRenderer !== null) {
+      renderer.updateScene(scene, initialViewSnapshot, sampleSnapshots ?? []);
+    }
 
     function consumeLiveSnapshot(nextSnapshot: Snapshot): void {
       if (sampleSnapshot !== undefined) {
@@ -93,6 +103,8 @@ export function LabCanvas(props: {
     if (!controllerResult.ok) {
       console.error("Controller creation failed", controllerResult.diagnostics);
       renderer.dispose();
+      // Clear the retained handle after failed controller construction.
+      rendererRef.current = null;
       engine.dispose();
       return;
     }
@@ -107,7 +119,8 @@ export function LabCanvas(props: {
 
     return () => {
       setActiveController(null);
-      controller.dispose();
+      // Retain Pixi for the next authored revision.
+      controller.dispose({ preserveView: true });
     };
   }, [
     scene,
@@ -118,17 +131,44 @@ export function LabCanvas(props: {
     onDeleteRequested,
     sampleSnapshots,
   ]);
+
+  // Release Pixi when this canvas host actually leaves the mounted lab.
+  useEffect(() => {
+    return () => {
+      rendererRef.current?.dispose();
+      rendererRef.current = null;
+    };
+  }, []);
+
   return (
-    <div
-      aria-label="Eureka physics canvas"
-      data-pixi-host
-      ref={hostRef}
-      role="img"
-      style={{
-        height: "360px",
-        overflow: "hidden",
-        width: "100%",
-      }}
-    />
+    <>
+      {/* Keep the dedicated Pixi host separate from the HTML legend. */}
+      <div
+        aria-label="Eureka physics canvas"
+        data-pixi-host
+        ref={hostRef}
+        role="img"
+        style={{
+          height: "360px",
+          overflow: "hidden",
+          width: "100%",
+        }}
+      />
+      {/* Explain drawn length without covering objects or intercepting input. */}
+      <p
+        style={{
+          margin: 0,
+          minHeight: 40,
+          padding: "8px 24px",
+          backgroundColor: "#e6ddc9",
+          borderTop: "1px solid #c7bca2",
+          color: "#625f51",
+        }}
+      >
+        Velocity scale: {VELOCITY_ARROW_SCALE.pixelsPerMeterPerSecond} px per m/s,
+        {" "}limited to {VELOCITY_ARROW_SCALE.minimumLengthPixels}–{VELOCITY_ARROW_SCALE.maximumLengthPixels} px
+        {" "}(reduced to fit small canvases). Zero velocity has no arrow. Use readouts for exact speed.
+      </p>
+    </>
   );
 }

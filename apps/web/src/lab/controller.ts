@@ -42,7 +42,8 @@ export interface LabController {
 
   reset(): EngineStatus;
 
-  dispose(): EngineStatus;
+  // Preserve the view only when the host is replacing the authored scene.
+  dispose(options?: { readonly preserveView?: boolean }): EngineStatus;
 
   copyScene(): SceneDefinition;
 
@@ -135,13 +136,18 @@ export function createLabController(
     return { ok: true };
   }
 
-  function dispose(): EngineStatus {
+  // Release the engine and normally release its view as well.
+  function dispose(options: { readonly preserveView?: boolean } = {}): EngineStatus {
     if (disposed) {
       return { ok: true };
     }
 
     disposed = true;
-    releaseView();
+
+    if (options.preserveView !== true) {
+      releaseView();
+    }
+
     return currentEngine.dispose();
   }
   function placeRamp(

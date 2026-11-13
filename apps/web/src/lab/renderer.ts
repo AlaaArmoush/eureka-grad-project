@@ -17,6 +17,13 @@ import { labStore } from "./store.js";
 import type { MoveEntityRequest, PlacementRequest } from "./authoring.js";
 import { OutlineFilter } from "pixi-filters";
 
+// Keep velocity arrows readable without changing physical values.
+export const VELOCITY_ARROW_SCALE = {
+  pixelsPerMeterPerSecond: 6,
+  minimumLengthPixels: 24,
+  maximumLengthPixels: 144,
+} as const;
+
 interface RenderItem {
   readonly kind: "body" | "target";
   readonly graphic: Container;
@@ -35,6 +42,8 @@ interface DragState {
 }
 export interface LabRenderer {
   updateSnapshot(snapshot: Snapshot): void;
+  // Replace an authored scene without replacing the mounted canvas.
+  updateScene(scene: SceneDefinition, snapshot: Snapshot, trailSnapshots?: readonly Snapshot[]): void;
   dispose(): void;
 }
 function createRenderItems(
@@ -118,18 +127,18 @@ function createRenderItems(
     const graphic =
       body.kind === "dynamic"
         ? new Graphics()
-            .circle(0, 0, body.shape.radiusMeters * pixelsPerMeter)
-            .fill({ color: 0xdd875d })
-            .stroke({ color: 0x9b553b, width: 1.5 })
+          .circle(0, 0, body.shape.radiusMeters * pixelsPerMeter)
+          .fill({ color: 0xdd875d })
+          .stroke({ color: 0x9b553b, width: 1.5 })
         : new Graphics()
-            .rect(
-              (-body.shape.widthMeters * pixelsPerMeter) / 2,
-              (-body.shape.heightMeters * pixelsPerMeter) / 2,
-              body.shape.widthMeters * pixelsPerMeter,
-              body.shape.heightMeters * pixelsPerMeter,
-            )
-            .fill({ color: isGround ? 0xb8c28c : 0xe0b455 })
-            .stroke({ color: isGround ? 0x6f6c51 : 0x9b713b, width: 1.5 });
+          .rect(
+            (-body.shape.widthMeters * pixelsPerMeter) / 2,
+            (-body.shape.heightMeters * pixelsPerMeter) / 2,
+            body.shape.widthMeters * pixelsPerMeter,
+            body.shape.heightMeters * pixelsPerMeter,
+          )
+          .fill({ color: isGround ? 0xb8c28c : 0xe0b455 })
+          .stroke({ color: isGround ? 0x6f6c51 : 0x9b713b, width: 1.5 });
     graphic.eventMode = "static";
 
     items.push({
@@ -154,21 +163,25 @@ export function mountLabRenderer(
   onDeleteRequested: (entityId: string) => boolean,
   initialTrailSnapshots: readonly Snapshot[] = [],
 ): LabRenderer {
-  //deep copy of the whole snapshot (independent copy with no sharing of the nested objects)
-  //The copied values remain stable no matter how and if the engine changes
-  let initialSnapshot = structuredClone(snapshot);
+  // Keep an owned snapshot for later camera and selection redraws.
+  // Keep the accepted scene available to drawing and selection.
+  let currentScene = structuredClone(scene);
+  let currentSnapshot = structuredClone(snapshot);
   const application = new Application();
   let disposed = false;
   let initialized = false;
   //                          id(for renderer), item
   const renderItems = new Map<string, RenderItem>();
   let unsubscribeFromStore: (() => void) | undefined;
-  const trailSnapshots = structuredClone(initialTrailSnapshots);
+  // Replace history when an authored revision changes the displayed scene.
+  let trailSnapshots = structuredClone(initialTrailSnapshots);
 
-  const trailGraphic = new Graphics({
-    label: "selected-projectile-trail",
+  const trailGraphic = new Graphics({ label: "selected-projectile-trail", });
+  // Keep the velocity overlay outside pointer hit-testing.
+  const velocityGraphic = new Graphics({
+    label: "selected-projectile-velocity",
   });
-
+  velocityGraphic.eventMode = "none";
   trailGraphic.eventMode = "none";
   let panStart: Vector2 | null = null; // null when user not panning
   let panCameraStart: Vector2 | null = null; //camera position at the start of pan
@@ -199,7 +212,7 @@ export function mountLabRenderer(
 
     const selectedEntityId = labStore.getState().selectedEntityId;
 
-    const selectedProjectile = scene.bodies.find(
+    const selectedProjectile = currentScene.bodies.find(
       (body) => body.id === selectedEntityId && body.kind === "dynamic",
     );
 
@@ -242,17 +255,110 @@ export function mountLabRenderer(
       join: "round",
     });
   }
+
+
+  // Draw velocity from the selected projectile's authoritative snapshot.
+  function redrawSelectedVelocity(viewport: ViewportTransform): void {
+    velocityGraphic.clear();
+
+    const selectedEntityId = labStore.getState().selectedEntityId;
+
+    let selectedProjectile;
+
+    for (const body of currentScene.bodies) {
+      if (body.id === selectedEntityId && body.kind === "dynamic") {
+        selectedProjectile = body;
+        break;
+      }
+    }
+
+    if (selectedProjectile === undefined) {
+      return;
+    }
+
+    let snapshotBody;
+
+    for (const body of currentSnapshot.bodies) {
+      if (body.id === selectedProjectile.id) {
+        snapshotBody = body;
+        break;
+      }
+    }
+
+    if (snapshotBody === undefined) {
+      return;
+    }
+
+    const position = snapshotBody.pose.positionMeters;
+    const velocity = snapshotBody.velocity.linearMetersPerSecond;
+    const speedMetersPerSecond = Math.hypot(velocity.x, velocity.y);
+
+    if (speedMetersPerSecond === 0) {
+      return;
+    }
+
+    // Bound screen length independently of zoom and leave room on small canvases.
+    const maximumLengthPixels = Math.min(
+      VELOCITY_ARROW_SCALE.maximumLengthPixels,
+      Math.min(viewport.widthPixels, viewport.heightPixels) * 0.35,
+    );
+    const minimumLengthPixels = Math.min(VELOCITY_ARROW_SCALE.minimumLengthPixels, maximumLengthPixels);
+    const lengthPixels = Math.min(
+      maximumLengthPixels,
+      Math.max(minimumLengthPixels, speedMetersPerSecond * VELOCITY_ARROW_SCALE.pixelsPerMeterPerSecond),
+    );
+
+    // Keep the authoritative anchor and reverse world y once for screen direction.
+    const start = worldToScreen(position, viewport);
+    const tip = {
+      x: start.x + (velocity.x / speedMetersPerSecond) * lengthPixels,
+      y: start.y - (velocity.y / speedMetersPerSecond) * lengthPixels,
+    };
+
+    // Keep the head readable without extending beyond a short shaft.
+    const headLengthPixels = Math.min(8, lengthPixels / 2);
+    const reverseAngle = Math.atan2(start.y - tip.y, start.x - tip.x);
+
+    const leftWingTip = {
+      x: tip.x + headLengthPixels * Math.cos(reverseAngle - 0.45),
+      y: tip.y + headLengthPixels * Math.sin(reverseAngle - 0.45),
+    };
+
+    const rightWingTip = {
+      x: tip.x + headLengthPixels * Math.cos(reverseAngle + 0.45),
+      y: tip.y + headLengthPixels * Math.sin(reverseAngle + 0.45),
+    };
+
+    // Put paper backing beneath the blue shaft and open V head.
+    for (const stroke of [
+      { color: 0xe8e0cd, width: 4 },
+      { color: 0x357ea0, width: 1.8 },
+    ]) {
+      velocityGraphic
+        .moveTo(start.x, start.y)
+        .lineTo(tip.x, tip.y)
+        .moveTo(leftWingTip.x, leftWingTip.y)
+        .lineTo(tip.x, tip.y)
+        .lineTo(rightWingTip.x, rightWingTip.y)
+        .stroke({ ...stroke, cap: "round", join: "round" });
+    }
+  }
+
   const resizeAndRender = (): void => {
     const width = Math.max(1, host.clientWidth);
     const height = Math.max(1, host.clientHeight);
 
-    application.renderer.resize(width, height);
+    // Resize the canvas only when its actual display dimensions change.
+    if (application.screen.width !== width || application.screen.height !== height) {
+      application.renderer.resize(width, height);
+    }
     background.clear().rect(0, 0, width, height).fill({ color: 0, alpha: 0 });
 
     const editorState = labStore.getState();
 
     const viewport = getViewport();
     redrawSelectedTrail(viewport);
+    redrawSelectedVelocity(viewport);
 
     for (const item of renderItems.values()) {
       const screenPosition = worldToScreen(item.positionMeters, viewport);
@@ -272,13 +378,43 @@ export function mountLabRenderer(
 
     application.render();
   };
+
+  // Apply an authored revision without another asynchronous Pixi initialization.
+  function updateScene(
+    nextScene: SceneDefinition,
+    nextSnapshot: Snapshot,
+    nextTrailSnapshots: readonly Snapshot[] = [],
+  ): void {
+    if (disposed) {
+      return;
+    }
+
+    currentScene = structuredClone(nextScene);
+    currentSnapshot = structuredClone(nextSnapshot);
+    trailSnapshots = structuredClone(nextTrailSnapshots);
+
+    // Discard pointer previews belonging to the previous revision.
+    dragState = null;
+    panStart = null;
+    panCameraStart = null;
+
+    if (!initialized) {
+      return;
+    }
+
+    background.cursor = labStore.getState().activeTool.kind === "pan" ? "grab" : "default";
+    rebuildRenderItems();
+    resizeAndRender();
+  }
+
   function updateSnapshot(nextSnapshot: Snapshot): void {
     if (disposed) {
       return;
     }
 
+    currentSnapshot = structuredClone(nextSnapshot);
+
     if (!initialized) {
-      initialSnapshot = structuredClone(nextSnapshot);
       return;
     }
     for (const item of renderItems.values()) {
@@ -434,6 +570,38 @@ export function mountLabRenderer(
 
     resizeAndRender();
   }
+
+  // Replace authoring graphics synchronously inside the existing application.
+  function rebuildRenderItems(): void {
+    const nextItems = createRenderItems(
+      currentScene,
+      currentSnapshot,
+      labStore.getState().pixelsPerMeter,
+    );
+
+    for (const item of renderItems.values()) {
+      item.graphic.destroy({ children: true });
+    }
+
+    renderItems.clear();
+
+    for (const item of nextItems) {
+      renderItems.set(item.entityId, item);
+      item.graphic.cursor = "pointer";
+
+      item.graphic.on("pointerdown", (event: FederatedPointerEvent) => {
+        handleItemPointerDown(item, event);
+      });
+
+      item.graphic.on("pointerup", finishDrag);
+      item.graphic.on("pointerupoutside", finishDrag);
+      item.graphic.on("pointercancel", cancelPointerDrag);
+
+      const velocityIndex = application.stage.getChildIndex(velocityGraphic);
+      application.stage.addChildAt(item.graphic, velocityIndex);
+    }
+  }
+
   const initialize = async (): Promise<void> => {
     await application.init({
       antialias: true,
@@ -452,31 +620,10 @@ export function mountLabRenderer(
       return;
     }
 
-    const itemsToRender = createRenderItems(
-      scene,
-      initialSnapshot,
-      labStore.getState().pixelsPerMeter,
-    );
-
-    for (const item of itemsToRender) {
-      renderItems.set(item.entityId, item);
-    }
-    for (const item of renderItems.values()) {
-      item.graphic.cursor = "pointer";
-
-      item.graphic.on("pointerdown", (event: FederatedPointerEvent) => {
-        handleItemPointerDown(item, event);
-      });
-
-      item.graphic.on("pointerup", finishDrag);
-      item.graphic.on("pointerupoutside", finishDrag);
-      item.graphic.on("pointercancel", cancelPointerDrag);
-    }
-    application.stage.addChild(
-      trailGraphic,
-      ...Array.from(renderItems.values(), (item) => item.graphic),
-    );
+    // Establish persistent layers before adding the current scene objects.
+    application.stage.addChild(trailGraphic, velocityGraphic);
     application.stage.addChildAt(background, 0);
+    rebuildRenderItems();
     application.stage.eventMode = "static";
     application.stage.on("globalpointermove", previewDrag);
     application.stage.on("pointerdowncapture", (event) => {
@@ -575,14 +722,14 @@ export function mountLabRenderer(
 
       if (
         state.cameraCenterWorldMeters !==
-          previousState.cameraCenterWorldMeters ||
+        previousState.cameraCenterWorldMeters ||
         state.pixelsPerMeter !== previousState.pixelsPerMeter ||
         state.selectedEntityId !== previousState.selectedEntityId
       ) {
         resizeAndRender();
       }
     });
-    updateSnapshot(initialSnapshot);
+    updateSnapshot(currentSnapshot);
   };
 
   void initialize().catch((error: unknown) => {
@@ -601,6 +748,10 @@ export function mountLabRenderer(
     window.removeEventListener("blur", cancelActiveDrag);
     dragState = null;
     unsubscribeFromStore?.();
+    // Release these graphics even when initialization is still pending.
+    trailGraphic.destroy();
+    background.destroy();
+    velocityGraphic.destroy();
 
     if (initialized) {
       application.ticker.stop();
@@ -612,6 +763,7 @@ export function mountLabRenderer(
 
   return {
     updateSnapshot,
+    updateScene,
     dispose,
   };
 }
