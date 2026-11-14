@@ -44,6 +44,14 @@ interface DragState {
   readonly acceptedPositionMeters: Vector2; //restores the object after cancellation
   readonly pointerOffsetMeters: Vector2; // Preserves the exact point where the object was grabbed.
 }
+
+interface PanState {
+  readonly pointerId: number;
+  readonly buttonMask: number;
+  readonly startPixels: Vector2;
+  readonly cameraCenterWorldMeters: Vector2;
+  readonly pixelsPerMeter: number;
+}
 export interface LabRenderer {
   updateSnapshot(snapshot: Snapshot): void;
   // Replace an authored scene without replacing the mounted canvas.
@@ -149,8 +157,7 @@ export function mountLabRenderer(
   horizontalVelocityGraphic.eventMode = "none";
 
   trailGraphic.eventMode = "none";
-  let panStart: Vector2 | null = null; // null when user not panning
-  let panCameraStart: Vector2 | null = null; //camera position at the start of pan
+  let panState: PanState | null = null;
   let dragState: DragState | null = null;
   const background = new Graphics();
   background.eventMode = "static";
@@ -174,6 +181,33 @@ export function mountLabRenderer(
       pixelsPerMeter: editorState.pixelsPerMeter,
       centerWorldMeters: editorState.cameraCenterWorldMeters,
     };
+  }
+
+  // Both pan gestures share one camera origin and leave the selected tool unchanged.
+  function stopPan(): void {
+    panState = null;
+    host.classList.remove("is-panning");
+    background.cursor = labStore.getState().activeTool.kind === "pan" ? "grab" : "default";
+  }
+
+  function finishPan(event: FederatedPointerEvent): void {
+    if (panState?.pointerId === event.pointerId &&
+      (event.type === "pointercancel" || (event.buttons & panState.buttonMask) === 0)) {
+      stopPan();
+    }
+  }
+
+  // Cancel temporary pointer work when the browser loses focus.
+  function cancelInteractions(): void {
+    stopPan();
+    cancelActiveDrag();
+  }
+
+  // Reserve middle-click on this canvas for panning rather than browser autoscroll or paste.
+  function preventMiddleMouseDefault(event: MouseEvent): void {
+    if (event.button === 1) {
+      event.preventDefault();
+    }
   }
 
   // Use the same selected dynamic body for every projectile-only overlay.
@@ -435,8 +469,7 @@ export function mountLabRenderer(
 
     // Discard pointer previews belonging to the previous revision.
     dragState = null;
-    panStart = null;
-    panCameraStart = null;
+    stopPan();
 
     if (!initialized) {
       return;
@@ -514,6 +547,9 @@ export function mountLabRenderer(
     item: RenderItem,
     event: FederatedPointerEvent,
   ): void {
+    if (event.button !== 0 || !event.isPrimary || panState !== null) {
+      return;
+    }
     const activeTool = labStore.getState().activeTool;
 
     if (activeTool.kind === "delete") {
@@ -696,6 +732,7 @@ export function mountLabRenderer(
 
   function handleWheel(event: WheelEvent): void {
     event.preventDefault();
+    stopPan();
     cancelActiveDrag();
     const viewport = getViewport();
     const rect = application.canvas.getBoundingClientRect();
@@ -749,16 +786,32 @@ export function mountLabRenderer(
     application.stage.on("pointerdowncapture", (event) => {
       const activeTool = labStore.getState().activeTool;
 
-      if (event.button !== 0 || !event.isPrimary) return;
-      if (activeTool.kind === "pan") {
-        panStart = { x: event.global.x, y: event.global.y };
-        panCameraStart = { ...labStore.getState().cameraCenterWorldMeters };
+      if (!event.isPrimary) {
+        return;
+      }
+      if (panState !== null) {
+        event.stopImmediatePropagation();
+        return;
+      }
+      if (event.button === 1 || (event.button === 0 && activeTool.kind === "pan")) {
+        cancelActiveDrag();
+        const editorState = labStore.getState();
+        panState = {
+          pointerId: event.pointerId,
+          // Held-button flags use 4 for middle and 1 for left.
+          buttonMask: event.button === 1 ? 4 : 1,
+          startPixels: { x: event.global.x, y: event.global.y },
+          cameraCenterWorldMeters: { ...editorState.cameraCenterWorldMeters },
+          pixelsPerMeter: editorState.pixelsPerMeter,
+        };
+        host.classList.add("is-panning");
         background.cursor = "grabbing";
+        event.preventDefault();
         event.stopImmediatePropagation();
         return;
       }
 
-      if (activeTool.kind !== "place") {
+      if (event.button !== 0 || activeTool.kind !== "place") {
         return;
       }
 
@@ -803,48 +856,43 @@ export function mountLabRenderer(
       event.stopImmediatePropagation();
     });
     application.stage.on("globalpointermove", (event) => {
-      if (panStart === null || panCameraStart === null) {
+      if (panState === null || panState.pointerId !== event.pointerId) {
+        return;
+      }
+      if ((event.buttons & panState.buttonMask) === 0) {
+        stopPan();
         return;
       }
 
-      const p = labStore.getState().pixelsPerMeter;
-      const dx = event.global.x - panStart.x;
-      const dy = event.global.y - panStart.y;
-
-      labStore
-        .getState()
-        .setCamera(
-          { x: panCameraStart.x - dx / p, y: panCameraStart.y + dy / p },
-          p,
-        );
+      const { startPixels, cameraCenterWorldMeters, pixelsPerMeter } = panState;
+      const dx = event.global.x - startPixels.x;
+      const dy = event.global.y - startPixels.y;
+      labStore.getState().setCamera({
+        x: cameraCenterWorldMeters.x - dx / pixelsPerMeter,
+        y: cameraCenterWorldMeters.y + dy / pixelsPerMeter,
+      }, pixelsPerMeter);
     });
 
-    const stopPan = (): void => {
-      panStart = null;
-      panCameraStart = null;
-      background.cursor =
-        labStore.getState().activeTool.kind === "pan" ? "grab" : "default";
-    };
-
-    application.stage.on("pointerup", stopPan);
-    application.stage.on("pointerupoutside", stopPan);
-    application.stage.on("pointercancel", stopPan);
+    application.stage.on("pointerup", finishPan);
+    application.stage.on("pointerupoutside", finishPan);
+    application.stage.on("pointercancel", finishPan);
     // This host is dedicated to Pixi, so replacing its children enforces
     // one-canvas ownership even across development remounts.
     host.replaceChildren(application.canvas);
     resizeObserver.observe(host);
     host.addEventListener("wheel", handleWheel, { passive: false });
-    window.addEventListener("blur", cancelActiveDrag);
+    host.addEventListener("mousedown", preventMiddleMouseDefault);
+    host.addEventListener("auxclick", preventMiddleMouseDefault);
+    window.addEventListener("blur", cancelInteractions);
     unsubscribeFromStore = labStore.subscribe((state, previousState) => {
       if (state.cameraFitRequest !== previousState.cameraFitRequest) {
+        stopPan();
         cancelActiveDrag();
         fitScene();
         return;
       }
       if (state.activeTool !== previousState.activeTool) {
         stopPan();
-        background.cursor =
-          state.activeTool.kind === "pan" ? "grab" : "default";
         cancelActiveDrag();
       }
 
@@ -878,7 +926,10 @@ export function mountLabRenderer(
     disposed = true;
     resizeObserver.disconnect();
     host.removeEventListener("wheel", handleWheel);
-    window.removeEventListener("blur", cancelActiveDrag);
+    host.removeEventListener("mousedown", preventMiddleMouseDefault);
+    host.removeEventListener("auxclick", preventMiddleMouseDefault);
+    window.removeEventListener("blur", cancelInteractions);
+    stopPan();
     dragState = null;
     unsubscribeFromStore?.();
     if (initialized) {

@@ -139,6 +139,7 @@ svg { flex-shrink: 0; stroke-width: 1.4; }
 .zoom-readout { display: flex; align-items: center; padding: 0 7px; font: 10px var(--font-mono); color: var(--text-2); }
 [data-pixi-host], .closed-lab { width: 100%; height: clamp(440px, 53vh, 620px); min-height: 440px; overflow: hidden; }
 [data-pixi-host] canvas { display: block; touch-action: none; }
+[data-pixi-host].is-panning canvas { cursor: grabbing !important; }
 .closed-lab { display: flex; flex-direction: column; align-items: center; justify-content: center; color: #6c6b5c; font: 18px Kalam, cursive; }
 .canvas-legend { display: flex; flex-wrap: wrap; gap: 8px 20px; padding: 9px 22px; border-top: 1px solid #c7bca2; background: #e6ddc9; color: #625f51; font: 14px Kalam, cursive; }
 .canvas-legend > span { display: inline-flex; align-items: center; gap: 8px; }

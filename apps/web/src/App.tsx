@@ -266,7 +266,6 @@ export function App() {
                     >
                       <PanelLeft size={14} />Scene
                     </button>
-                    <span>SI units</span>
                   </div>
                 </header>
                 <div className={`canvas-workbench${sceneOutlineOpen ? " outline-open" : ""}`}>
