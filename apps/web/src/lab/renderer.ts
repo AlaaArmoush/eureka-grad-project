@@ -25,6 +25,8 @@ export const VELOCITY_ARROW_SCALE = {
   maximumLengthPixels: 144,
 } as const;
 
+export const IDEAL_PREDICTION_DURATION_SECONDS = 2;
+
 interface RenderItem {
   readonly kind: "body" | "target";
   readonly graphic: Container;
@@ -71,7 +73,7 @@ function createRenderItems(
       },
     });
     function updateFeedback(nextSnapshot: Snapshot): void {
-      const hasEntered = nextSnapshot.events.some(
+      const hasEntered = labStore.getState().overlayVisibility.events && nextSnapshot.events.some(
         (event) =>
           event.kind === "targetEntered" &&
           event.targetId === trigger.id &&
@@ -216,12 +218,12 @@ export function mountLabRenderer(
   let trailSnapshots = structuredClone(initialTrailSnapshots);
 
   const trailGraphic = new Graphics({ label: "selected-projectile-trail", });
-  // Keep the velocity overlay outside pointer hit-testing.
+  const predictionGraphic = new Graphics({ label: "selected-projectile-ideal-prediction" });
+  predictionGraphic.eventMode = "none";
   const velocityGraphic = new Graphics({
     label: "selected-projectile-velocity",
   });
   velocityGraphic.eventMode = "none";
-
   const horizontalVelocityGraphic = new Graphics({
     label: "selected-projectile-horizontal-velocity",
   });
@@ -266,13 +268,77 @@ export function mountLabRenderer(
     );
   }
 
+  // Predict free flight from the scene's initial conditions.
+  function redrawSelectedPrediction(
+    viewport: ViewportTransform,
+    selectedProjectile: ReturnType<typeof getSelectedProjectile>,
+  ): void {
+    predictionGraphic.clear();
+
+    if (!predictionGraphic.visible || selectedProjectile === undefined || selectedProjectile.kind !== "dynamic") {
+      return;
+    }
+
+    const position = selectedProjectile.pose.positionMeters;
+    const velocity = selectedProjectile.velocity.linearMetersPerSecond;
+    const gravity = currentScene.environment.gravityMetersPerSecondSquared;
+    const screenPoints: Vector2[] = [];
+    const intervalCount = 100;
+
+    // Calculate 101 independent positions, including both endpoints.
+    for (let index = 0; index <= intervalCount; index += 1) {
+      const timeSeconds = IDEAL_PREDICTION_DURATION_SECONDS * index / intervalCount;
+      const halfTimeSquared = 0.5 * timeSeconds * timeSeconds;
+      const pointMeters = {
+        x: position.x + velocity.x * timeSeconds + gravity.x * halfTimeSquared,
+        y: position.y + velocity.y * timeSeconds + gravity.y * halfTimeSquared,
+      };
+      const point = worldToScreen(pointMeters, viewport);
+      screenPoints.push(point);
+
+      if (index === 0) {
+        predictionGraphic.moveTo(point.x, point.y);
+      } else {
+        predictionGraphic.lineTo(point.x, point.y);
+      }
+    }
+
+    // Put a faint backing beneath the dashed reference.
+    predictionGraphic.stroke({
+      color: 0xdd875d,
+      width: 7,
+      alpha: 0.08,
+      cap: "round",
+      join: "round",
+    });
+
+    predictionGraphic.beginPath();
+
+    // Draw two intervals, then leave two intervals empty.
+    for (const [index, point] of screenPoints.entries()) {
+      if (index === 0 || Math.floor((index - 1) / 2) % 2 !== 0) {
+        predictionGraphic.moveTo(point.x, point.y);
+      } else {
+        predictionGraphic.lineTo(point.x, point.y);
+      }
+    }
+
+    predictionGraphic.stroke({
+      color: 0xb86f4c,
+      width: 1.7,
+      alpha: 0.9,
+      cap: "round",
+      join: "round",
+    });
+  }
+
   function redrawSelectedTrail(
     viewport: ViewportTransform,
     selectedProjectile: ReturnType<typeof getSelectedProjectile>,
   ): void {
     trailGraphic.clear();
 
-    if (selectedProjectile === undefined) {
+    if (!trailGraphic.visible || selectedProjectile === undefined) {
       return;
     }
 
@@ -318,12 +384,12 @@ export function mountLabRenderer(
     viewport: ViewportTransform,
     selectedProjectile: ReturnType<typeof getSelectedProjectile>,
   ): void {
-    // Remove both previous arrows before checking the current selection.
+    // Remove previous arrows before checking selection and visibility.
     velocityGraphic.clear();
     horizontalVelocityGraphic.clear();
     verticalVelocityGraphic.clear();
 
-    if (selectedProjectile === undefined) {
+    if (selectedProjectile === undefined || (!velocityGraphic.visible && !horizontalVelocityGraphic.visible)) {
       return;
     }
 
@@ -372,13 +438,18 @@ export function mountLabRenderer(
       y: start.y,
     };
 
-    drawVelocityArrow(horizontalVelocityGraphic, start, horizontalTip, 1);
     const verticalTip = {
       x: start.x,
       y: tip.y,
     };
-    drawVelocityArrow(verticalVelocityGraphic, start, verticalTip, 1);
-    drawVelocityArrow(velocityGraphic, start, tip, 1.8);
+    if (horizontalVelocityGraphic.visible) {
+      drawVelocityArrow(horizontalVelocityGraphic, start, horizontalTip, 1);
+      drawVelocityArrow(verticalVelocityGraphic, start, verticalTip, 1);
+    }
+
+    if (velocityGraphic.visible) {
+      drawVelocityArrow(velocityGraphic, start, tip, 1.8);
+    }
   }
 
   const resizeAndRender = (): void => {
@@ -397,12 +468,21 @@ export function mountLabRenderer(
 
     const editorState = labStore.getState();
 
+    // Apply editor choices without changing the physical snapshot.
+    trailGraphic.visible = editorState.overlayVisibility.trail;
+    predictionGraphic.visible = editorState.overlayVisibility.prediction;
+    velocityGraphic.visible = editorState.overlayVisibility.velocity;
+    horizontalVelocityGraphic.visible = editorState.overlayVisibility.components;
+    verticalVelocityGraphic.visible = editorState.overlayVisibility.components;
+
     const viewport = getViewport();
     const selectedProjectile = getSelectedProjectile(editorState.selectedEntityId);
     redrawSelectedTrail(viewport, selectedProjectile);
     redrawSelectedVelocity(viewport, selectedProjectile);
+    redrawSelectedPrediction(viewport, selectedProjectile);
 
     for (const item of renderItems.values()) {
+      item.updateFeedback?.(currentSnapshot);
       const screenPosition = worldToScreen(item.positionMeters, viewport);
 
       item.graphic.position.set(screenPosition.x, screenPosition.y);
@@ -471,8 +551,6 @@ export function mountLabRenderer(
 
         item.positionMeters = { ...body.pose.positionMeters };
         item.angleRadians = body.pose.angleRadians;
-      } else {
-        item.updateFeedback?.(nextSnapshot);
       }
     }
 
@@ -663,9 +741,11 @@ export function mountLabRenderer(
       return;
     }
 
-    // Establish persistent layers before adding the current scene objects.
-    // Keep the component behind the thicker full arrow.
-    application.stage.addChild(trailGraphic, horizontalVelocityGraphic, verticalVelocityGraphic, velocityGraphic);
+    // Keep paths behind bodies and velocity arrows.
+    application.stage.addChild(
+      trailGraphic, predictionGraphic,
+      horizontalVelocityGraphic, verticalVelocityGraphic, velocityGraphic,
+    );
     application.stage.addChildAt(background, 0);
     rebuildRenderItems();
     application.stage.eventMode = "static";
@@ -768,7 +848,8 @@ export function mountLabRenderer(
         state.cameraCenterWorldMeters !==
         previousState.cameraCenterWorldMeters ||
         state.pixelsPerMeter !== previousState.pixelsPerMeter ||
-        state.selectedEntityId !== previousState.selectedEntityId
+        state.selectedEntityId !== previousState.selectedEntityId ||
+        state.overlayVisibility !== previousState.overlayVisibility
       ) {
         resizeAndRender();
       }
@@ -833,6 +914,7 @@ export function mountLabRenderer(
       velocityGraphic.destroy();
       horizontalVelocityGraphic.destroy();
       verticalVelocityGraphic.destroy();
+      predictionGraphic.destroy();
     }
 
     selectedFilter.destroy();

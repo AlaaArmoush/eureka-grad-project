@@ -304,7 +304,29 @@ body {
 .display-options {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: 8px 16px;
+}
+
+.display-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.display-options input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.path-swatch {
+  width: 22px;
+  border-top: 2px solid #555449;
+}
+
+.path-swatch.prediction {
+  border-top: 2px dashed #b86f4c;
 }
 
 .measurement-columns {

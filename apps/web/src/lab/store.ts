@@ -10,13 +10,24 @@ import type {
   RampPlacementProperties,
   TargetPlacementProperties,
 } from "./authoring.js";
+
+export interface OverlayVisibility {
+  readonly trail: boolean;
+  readonly velocity: boolean;
+  readonly components: boolean;
+  readonly prediction: boolean;
+  readonly events: boolean;
+}
+
 export interface LabEditorState {
   readonly cameraCenterWorldMeters: Vector2;
   readonly pixelsPerMeter: number;
   readonly cameraInitialized: boolean;
   readonly selectedEntityId: string | null;
+  readonly overlayVisibility: OverlayVisibility;
 
   setCamera(centerWorldMeters: Vector2, pixelsPerMeter: number): void;
+  setOverlayVisible(overlay: keyof OverlayVisibility, visible: boolean): void;
 
   selectEntity(entityId: string | null): void;
   readonly activeTool: LabTool;
@@ -47,6 +58,20 @@ export const labStore = createStore<LabEditorState>()((set) => ({
   pixelsPerMeter: 48,
   cameraInitialized: false,
   selectedEntityId: null,
+  overlayVisibility: {
+    trail: true,
+    velocity: true,
+    components: true,
+    prediction: true,
+    events: true,
+  },
+
+  // Keep display choices across authored edits and canvas remounts.
+  setOverlayVisible: (overlay, visible) => {
+    set((state) => ({
+      overlayVisibility: { ...state.overlayVisibility, [overlay]: visible },
+    }));
+  },
 
   setCamera: (cameraCenterWorldMeters, pixelsPerMeter) => {
     if (

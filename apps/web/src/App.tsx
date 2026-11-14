@@ -22,6 +22,14 @@ import type { Snapshot, SceneDefinition } from "@eureka/contracts";
 import "./App.css";
 import { PropertiesPanel } from "./lab/PropertiesPanel";
 
+const OVERLAY_OPTIONS = [
+  { key: "trail", label: "Trail" },
+  { key: "velocity", label: "Velocity" },
+  { key: "components", label: "Components" },
+  { key: "prediction", label: "Ideal prediction (ignores obstacles)" },
+  { key: "events", label: "Target entry" },
+] as const;
+
 // Round displayed measurements while preserving the snapshot.
 function formatMeasurement(value: number | undefined): string {
   if (value === undefined) {
@@ -50,6 +58,7 @@ export function App() {
     (state) => state.selectedEntityId,
   );
   const activeTool = useStore(labStore, (state) => state.activeTool);
+  const overlayVisibility = useStore(labStore, (state) => state.overlayVisibility);
   const selectedBody = displayedSnapshot.bodies.find(
     (body) => body.id === selectedEntityId,
   );
@@ -103,6 +112,7 @@ export function App() {
       if (event.key !== "Escape") {
         return;
       }
+
       const target = event.target;
       if (target instanceof HTMLElement) {
         if (
@@ -463,12 +473,21 @@ export function App() {
 
             <h3>Display options</h3>
             <div className="display-options">
-              {["Trail", "Velocity", "Components", "Prediction"].map((option) => (
-                <label key={option}>
-                  <input type="checkbox" disabled /> {option}
+              {OVERLAY_OPTIONS.map((option) => (
+                <label key={option.key}>
+                  <input
+                    type="checkbox"
+                    checked={overlayVisibility[option.key]}
+                    onChange={(event) => {
+                      labStore.getState().setOverlayVisible(option.key, event.currentTarget.checked);
+                    }}
+                  />
+                  {(option.key === "trail" || option.key === "prediction") && (
+                    <span aria-hidden="true" className={`path-swatch ${option.key}`} />
+                  )}
+                  {option.label}
                 </label>
-              ),
-              )}
+              ))}
             </div>
           </section>
         </section>
