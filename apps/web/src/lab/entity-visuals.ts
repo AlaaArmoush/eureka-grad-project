@@ -2,7 +2,7 @@
 import type { Body, TargetTrigger, Vector2 } from "@eureka/contracts";
 import { Circle, Container, Graphics, Polygon } from "pixi.js";
 import { notebookLabel } from "./sketchbook.js";
-import { paintEntity, pencilEllipse, pencilLine, sceneColors } from "./materials.js";
+import { paintEntity, pencilEllipse, sceneColors } from "./materials.js";
 
 export function createEntityVisual(entity: Body | TargetTrigger) {
   const graphic = new Container({ eventMode: "static", cursor: "pointer" });
@@ -16,25 +16,24 @@ export function createEntityVisual(entity: Body | TargetTrigger) {
   graphic.addChild(selection, geometry, caption);
   let paintKey = "";
 
-  function update(scale: number, angle: number, selected: boolean, entered: boolean, labels: boolean, position: Vector2, viewportWidth: number): void {
-    const key = [scale, selected, entered].join(":");
+  function update(scale: number, angle: number, selected: boolean, entered: boolean, labels: boolean, position: Vector2, viewportWidth: number, moveMode: boolean): void {
+    const key = [scale, selected, entered, moveMode].join(":");
     const shape = entity.shape;
+    const selectionColor = moveMode ? sceneColors.velocity : color;
+    const selectionWash = moveMode ? 0x7da8b3 : 0xc5a25f;
     if (key !== paintKey) {
       paintKey = key;
       paintEntity(geometry, entity, scale, entered);
       selection.clear();
       if (selected && shape.kind === "circle") {
         const radius = shape.radiusMeters * scale + 8;
-        selection.circle(0, 0, radius).stroke({ color: 0xc5a25f, width: 6, alpha: .2 });
-        pencilEllipse(selection, 0, 0, radius, radius - 1, color, 1);
+        selection.circle(0, 0, radius).stroke({ color: selectionWash, width: 6, alpha: .2 });
+        pencilEllipse(selection, 0, 0, radius, radius - 1, selectionColor, 1);
       } else if (selected && shape.kind === "box") {
         const x = shape.widthMeters * scale / 2 + 5;
         const y = shape.heightMeters * scale / 2 + 5;
-        selection.rect(-x, -y, x * 2, y * 2).stroke({ color: 0xc5a25f, width: 5, alpha: .18 });
-        for (const side of [-1, 1]) {
-          pencilLine(selection, -x, side * y, x, side * y, sceneColors.ink, 1);
-          pencilLine(selection, side * x, -y, side * x, y, sceneColors.ink, 1);
-        }
+        selection.rect(-x, -y, x * 2, y * 2).stroke({ color: selectionWash, width: 5, alpha: .18 });
+        selection.rect(-x, -y, x * 2, y * 2).stroke({ color: moveMode ? selectionColor : sceneColors.ink, width: 1, alpha: .85 });
       }
     }
     // Only the geometry rotates. Labels and their pixel offsets remain upright.
@@ -64,7 +63,10 @@ export function createEntityVisual(entity: Body | TargetTrigger) {
       const halfHeight = scale * (Math.abs(Math.sin(angle)) * shape.widthMeters + Math.abs(Math.cos(angle)) * shape.heightMeters) / 2;
       x = -Math.min(shape.widthMeters * scale / 2, 55);
       y = isGround || isRamp ? -halfHeight - 40 : halfHeight + 10;
-      if (isGround) x = 22 - position.x;
+      if (isGround) {
+        x = 22 - position.x;
+        y = -halfHeight - 64;
+      }
     }
     caption.position.set(Math.max(12 - position.x, Math.min(viewportWidth - caption.width - 12 - position.x, x)), y);
   }

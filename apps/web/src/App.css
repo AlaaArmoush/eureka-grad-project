@@ -127,7 +127,14 @@ svg { flex-shrink: 0; stroke-width: 1.4; }
 .placement-submenu { position: absolute; left: calc(100% + 14px); top: 0; z-index: 5; width: 250px; max-height: 440px; overflow-y: auto; display: grid; gap: 11px; margin: 0; padding: 16px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 28px #202e3629; }
 .canvas-page { position: relative; min-width: 0; background: #e8e0cd; }
 .canvas-heading { position: absolute; z-index: 2; top: 16px; left: 24px; right: 16px; display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; pointer-events: none; }
-.canvas-heading > span { padding: 0 8px; background: #d8ccac80; color: #555449; font: 21px/1.4 Kalam, cursive; transform: rotate(-1deg); }
+.canvas-heading > span {
+  padding: 1px 12px 3px;
+  background: #d8ccac99;
+  color: #555449;
+  font: 21px/1.4 Kalam, cursive;
+  transform: rotate(-1deg);
+  clip-path: polygon(1% 5%, 19% 1%, 38% 5%, 62% 0, 82% 4%, 99% 1%, 100% 93%, 79% 99%, 57% 95%, 32% 100%, 0 95%);
+}
 .canvas-tools { pointer-events: auto; }
 .canvas-toolbar { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 2px; padding: 4px; max-width: 320px; border: 1px solid var(--line); border-radius: 6px; background: #f3f4f1f5; }
 .toolbar-divider { height: 16px; margin: 0 3px; border-left: 1px solid var(--line); }

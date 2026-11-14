@@ -71,7 +71,11 @@ export function createNotebookGrid() {
         const value = index * halfStep;
         const x = worldToScreen({ x: value, y: 0 }, viewport).x;
         const major = index % 2 === 0;
-        line(x, 0, x, height, major ? 0x81988f : 0x91a19a, major ? .8 : .6, major ? .65 : .35);
+        if (major) {
+          pencilLine(lines, x, 0, x, height, 0x81988f, .85, .6);
+        } else {
+          line(x, 0, x, height, 0x91a19a, .55, .32);
+        }
         if (major && x > 24 && x < width - 72) {
           label(format(value), x + 4, xAxisVisible ? origin.y - 23 : height - 54);
           if (xAxisVisible) line(x, origin.y - 3, x, origin.y + 3, sceneColors.ink);
@@ -81,7 +85,11 @@ export function createNotebookGrid() {
         const value = index * halfStep;
         const y = worldToScreen({ x: 0, y: value }, viewport).y;
         const major = index % 2 === 0;
-        line(0, y, width, y, major ? 0x81988f : 0x91a19a, major ? .8 : .6, major ? .65 : .35);
+        if (major) {
+          pencilLine(lines, 0, y, width, y, 0x81988f, .85, .6);
+        } else {
+          line(0, y, width, y, 0x91a19a, .55, .32);
+        }
         if (major && index !== 0 && y > 100 && y < height - 70) {
           label(format(value), yAxisVisible ? origin.x - 29 : 10, y - 9);
           if (yAxisVisible) line(origin.x - 3, y, origin.x + 3, y, sceneColors.ink);

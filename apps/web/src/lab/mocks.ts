@@ -15,6 +15,7 @@ const OBSERVATION_TICK = 60;
 
 const INITIAL_SPEED_METERS_PER_SECOND = 20;
 const LAUNCH_ANGLE_RADIANS = Math.PI / 6;
+const INITIAL_HEIGHT_METERS = 1.75;
 
 const INITIAL_VELOCITY_METERS_PER_SECOND = {
   x: INITIAL_SPEED_METERS_PER_SECOND * Math.cos(LAUNCH_ANGLE_RADIANS),
@@ -59,7 +60,7 @@ const scene = {
       pose: {
         positionMeters: {
           x: 0,
-          y: 0,
+          y: INITIAL_HEIGHT_METERS,
         },
         angleRadians: 0,
       },
@@ -82,7 +83,7 @@ const scene = {
       pose: {
         positionMeters: {
           x: 10,
-          y: -0.35,
+          y: 1.4,
         },
         angleRadians: 0,
       },
@@ -101,7 +102,7 @@ const scene = {
       pose: {
         positionMeters: {
           x: 5,
-          y: -2,
+          y: -0.25,
         },
         angleRadians: 0,
       },
@@ -120,7 +121,7 @@ const scene = {
       pose: {
         positionMeters: {
           x: 3,
-          y: -0.75,
+          y: 1,
         },
         angleRadians: Math.PI / 6,
       },
@@ -137,7 +138,7 @@ const scene = {
       pose: {
         positionMeters: {
           x: 10,
-          y: 0,
+          y: INITIAL_HEIGHT_METERS,
         },
         angleRadians: 0,
       },
@@ -150,6 +151,7 @@ function createFlightSnapshot(tick: number): Snapshot {
   const projectilePositionMeters = {
     x: INITIAL_VELOCITY_METERS_PER_SECOND.x * simulationTimeSeconds,
     y:
+      INITIAL_HEIGHT_METERS +
       INITIAL_VELOCITY_METERS_PER_SECOND.y * simulationTimeSeconds +
       0.5 *
         GRAVITY_METERS_PER_SECOND_SQUARED.y *

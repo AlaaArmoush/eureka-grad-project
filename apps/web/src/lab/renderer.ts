@@ -418,6 +418,8 @@ export function mountLabRenderer(
     const editorState = labStore.getState();
 
     // Apply editor choices without changing the physical snapshot.
+    background.cursor = editorState.activeTool.kind === "pan" ? "grab" :
+      editorState.activeTool.kind === "place" || editorState.activeTool.kind === "delete" ? "crosshair" : "default";
     trailGraphic.visible = editorState.overlayVisibility.trail;
     predictionGraphic.visible = editorState.overlayVisibility.prediction;
     velocityGraphic.visible = editorState.overlayVisibility.velocity;
@@ -436,6 +438,9 @@ export function mountLabRenderer(
     redrawSelectedPrediction(viewport, selectedProjectile);
 
     for (const item of renderItems.values()) {
+      item.graphic.cursor = dragState?.entityId === item.entityId ? "grabbing" :
+        editorState.activeTool.kind === "move" ? "move" : editorState.activeTool.kind === "pan" ? "grab" :
+          editorState.activeTool.kind === "delete" || editorState.activeTool.kind === "place" ? "crosshair" : "pointer";
       const entered = editorState.overlayVisibility.events && currentSnapshot.events.some(
         (event) => event.kind === "targetEntered" && event.targetId === item.entityId && event.tick === currentSnapshot.tick,
       );
@@ -447,6 +452,7 @@ export function mountLabRenderer(
         editorState.overlayVisibility.labels,
         worldToScreen(item.positionMeters, viewport),
         width,
+        editorState.activeTool.kind === "move",
       );
     }
 
@@ -540,6 +546,7 @@ export function mountLabRenderer(
     };
 
     item.graphic.cursor = "grabbing";
+    resizeAndRender();
     event.stopPropagation();
   }
 
@@ -566,6 +573,10 @@ export function mountLabRenderer(
 
   function previewDrag(event: FederatedPointerEvent): void {
     if (dragState === null || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+    if (labStore.getState().activeTool.kind !== "move" || (event.buttons & 1) === 0) {
+      cancelActiveDrag();
       return;
     }
 
@@ -892,12 +903,16 @@ export function mountLabRenderer(
         stopPan();
         cancelActiveDrag();
       }
+      if (dragState !== null && state.selectedEntityId !== dragState.entityId) {
+        cancelActiveDrag();
+      }
 
       if (
         state.cameraCenterWorldMeters !==
         previousState.cameraCenterWorldMeters ||
         state.pixelsPerMeter !== previousState.pixelsPerMeter ||
         state.selectedEntityId !== previousState.selectedEntityId ||
+        state.activeTool !== previousState.activeTool ||
         state.overlayVisibility !== previousState.overlayVisibility
       ) {
         resizeAndRender();

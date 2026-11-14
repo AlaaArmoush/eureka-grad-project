@@ -29,8 +29,8 @@ export function createPaperTexture(): Texture {
   for (let y = 0; y < 512; y++) {
     for (let x = 0; x < 512; x++) {
       const index = (y * 512 + x) * 4;
-      const grain = (random() - .5) * 8;
-      const pulp = Math.sin(x * Math.PI / 64) * Math.sin(y * Math.PI / 128) * 1.6;
+      const grain = (random() - .5) * 13;
+      const pulp = Math.sin(x * Math.PI / 128) * Math.sin(y * Math.PI / 128) * 3;
       pixels.data[index] = 232 + grain + pulp;
       pixels.data[index + 1] = 224 + grain + pulp;
       pixels.data[index + 2] = 205 + grain + pulp;
@@ -39,25 +39,34 @@ export function createPaperTexture(): Texture {
   }
   context.putImageData(pixels, 0, 0);
   // Short fibers soften the grain without a conspicuous repeating illustration.
-  for (let index = 0; index < 900; index++) {
+  for (let index = 0; index < 1300; index++) {
     const x = random() * 512;
     const y = random() * 512;
-    context.strokeStyle = index % 3 === 0 ? "rgba(113, 94, 65, .075)" : "rgba(255, 251, 229, .20)";
+    context.strokeStyle = index % 3 === 0 ? "rgba(113, 94, 65, .11)" : "rgba(255, 251, 229, .27)";
     context.lineWidth = .5;
     context.beginPath();
     context.moveTo(x, y);
-    context.lineTo(x + 1 + random() * 3, y + random() - .5);
+    context.lineTo(x + 1 + random() * 5, y + random() - .5);
     context.stroke();
   }
   return Texture.from(canvas, true);
 }
 
 export function paintPaper(g: Graphics, width: number, height: number): void {
-  // A quiet page gutter. The actual paper texture lives beneath the grid.
-  for (let index = 0; index < 16; index++) {
-    g.rect(index, 0, 1, height).fill({ color: 0x7a684e, alpha: .055 * (1 - index / 16) });
+  // Page details stay in screen space; the calibrated grid moves with the camera.
+  for (let index = 0; index < 28; index++) {
+    g.rect(index, 0, 1, height).fill({ color: 0x7a684e, alpha: .11 * (1 - index / 28) });
+  }
+  g.moveTo(37, 0).lineTo(37, height).stroke({ color: 0xb56e65, width: 1, alpha: .28 });
+  g.moveTo(40, 0).lineTo(40, height).stroke({ color: 0xb56e65, width: .6, alpha: .12 });
+  for (let y = 102; y < height - 36; y += 112) {
+    g.ellipse(12, y + 1, 3.5, 4).fill({ color: 0x8d7e67, alpha: .2 });
+    g.ellipse(12, y, 2.5, 3).fill({ color: 0xd6cbb5, alpha: .8 });
   }
   g.rect(.5, .5, width - 1, height - 1).stroke({ color: 0xa99c81, width: 1, alpha: .25 });
+  g.poly([width - 19, height, width, height - 19, width, height]).fill({ color: 0xb3a489, alpha: .18 });
+  g.moveTo(width - 19, height).lineTo(width - 17, height - 18).lineTo(width, height - 19)
+    .stroke({ color: 0xa99c81, width: .8, alpha: .35 });
 }
 
 // Small, fixed irregularities suggest pencil pressure without animation or drift.
@@ -79,16 +88,9 @@ export function pencilLine(g: Graphics, x1: number, y1: number, x2: number, y2: 
 }
 
 export function pencilEllipse(g: Graphics, x: number, y: number, radiusX: number, radiusY: number, color: number, width = 1.2): void {
+  // Soft ink follows the exact ellipse without a second, uneven perimeter.
+  g.ellipse(x, y, radiusX, radiusY).stroke({ color, width: width + 1.2, alpha: .10 });
   g.ellipse(x, y, radiusX, radiusY).stroke({ color, width, alpha: .78 });
-  for (let index = 0; index <= 56; index++) {
-    const angle = index / 56 * Math.PI * 2;
-    const offset = Math.sin(angle * 3 + .6) * .45 + Math.cos(angle * 5) * .2;
-    const px = x + Math.cos(angle) * (radiusX + offset + .7);
-    const py = y + Math.sin(angle) * (radiusY + offset + .4);
-    if (index === 0) g.moveTo(px, py);
-    else g.lineTo(px, py);
-  }
-  g.closePath().stroke({ color, width: .65, alpha: .35 });
 }
 
 function hatchRect(g: Graphics, width: number, height: number, color: number, spacing = 9): void {
@@ -102,14 +104,36 @@ function hatchRect(g: Graphics, width: number, height: number, color: number, sp
     const to = Math.min(right, start + bottom - top);
     g.moveTo(from, bottom - (from - start)).lineTo(to, bottom - (to - start));
   }
-  g.stroke({ color, width: .75, alpha: .3, cap: "round" });
+  g.stroke({ color, width: .75, alpha: .24, cap: "round" });
+}
+
+// Ground and static bodies share uneven pigment deposits within their exact rectangle.
+function paintPigmentGrain(g: Graphics, width: number, height: number, color: number): void {
+  if (width < 6 || height < 5) {
+    return;
+  }
+  for (let index = 0; index < 9; index++) {
+    const fraction = (index + .5) / 9;
+    const y = -height / 2 + 2 + fraction * (height - 4);
+    const inset = 1 + (Math.sin(index * 2.4) + 1) * Math.min(6, width * .035);
+    const thickness = Math.min(2.5, Math.max(.5, height / 28));
+    const lift = Math.min(thickness, height / 2 - 1 - y);
+    g.poly([
+      -width / 2 + inset, y,
+      -width * .18, y - thickness * .4,
+      width * .21, y + thickness * .25,
+      width / 2 - inset, y - thickness * .2,
+      width / 2 - inset, y + lift,
+      -width / 2 + inset, y + lift,
+    ]).fill({ color: index % 3 === 0 ? 0xfff4cf : color, alpha: index % 3 === 0 ? .12 : .045 });
+  }
 }
 
 function paintTarget(g: Graphics, radius: number, entered: boolean): void {
   const green = sceneColors.target;
   // A translucent watercolor ring keeps the projectile visible inside the sensor.
-  g.circle(0, 0, radius).fill({ color: 0x85ad72, alpha: .24 });
-  g.circle(0, 0, radius * .7).fill({ color: 0x85ad72, alpha: .12 });
+  g.circle(0, 0, radius).fill({ color: 0x79a991, alpha: .18 });
+  g.circle(0, 0, radius * .7).fill({ color: 0xa6c2a3, alpha: .10 });
   pencilEllipse(g, 0, 0, radius, radius, green, 1.3);
   g.circle(0, 0, radius * .46).stroke({ color: green, width: .9, alpha: .6 });
   for (let index = 0; index < 4; index++) {
@@ -125,43 +149,44 @@ function paintTarget(g: Graphics, radius: number, entered: boolean): void {
 }
 
 function paintBall(g: Graphics, radius: number): void {
-  g.ellipse(1.5, radius + 2, radius * 1.1, Math.max(1, radius * .25)).fill({ color: 0x7b6550, alpha: .10 });
-  g.circle(0, 0, radius).fill(0xdd875d);
-  g.ellipse(-radius * .18, -radius * .15, radius * .68, radius * .73).fill({ color: 0xf3bb7d, alpha: .65 });
+  g.ellipse(1, radius + 2, radius * 1.05, Math.max(1, radius * .22)).fill({ color: 0x7b6550, alpha: .06 });
+  g.circle(0, 0, radius).fill(sceneColors.projectile);
+  // A quiet shaded rim and upper-left wash give the pigment some depth.
+  g.moveTo(0, -radius).arc(0, 0, radius, -Math.PI / 2, Math.PI / 2)
+    .quadraticCurveTo(radius * .65, 0, 0, -radius).closePath().fill({ color: 0x874e3c, alpha: .16 });
+  g.ellipse(-radius * .18, -radius * .20, radius * .62, radius * .66).fill({ color: 0xf3bd88, alpha: .40 });
   // Colored-pencil strokes stay inside the mathematically circular body.
   for (let index = 0; index < 6; index++) {
     const y = radius * (-.15 + index * .17);
     const extent = Math.sqrt(Math.max(0, radius * radius - y * y)) * .82;
-    pencilLine(g, -.05 * radius, y, extent, y - .16 * radius, sceneColors.reference, .65, .42);
+    pencilLine(g, -.05 * radius, y, extent, y - .16 * radius, sceneColors.reference, .65, .28);
   }
   pencilEllipse(g, 0, 0, radius, radius, 0x9b553b, 1.1);
-  g.arc(-radius * .03, -radius * .03, radius * .7, Math.PI * 1.04, Math.PI * 1.48).stroke({ color: 0xf4d4ac, width: 1.5, alpha: .8, cap: "round" });
+  g.arc(-radius * .03, -radius * .03, radius * .7, Math.PI * 1.04, Math.PI * 1.48).stroke({ color: 0xffdfae, width: 1.2, alpha: .7, cap: "round" });
 }
 
 function paintGround(g: Graphics, width: number, height: number): void {
-  g.rect(-width / 2, -height / 2 + 3, width, height).fill({ color: 0x74654a, alpha: .06 });
-  g.rect(-width / 2, -height / 2, width, height).fill({ color: 0xb8c28c, alpha: .9 });
-  g.rect(-width / 2, -height / 2 + 2, width, height * .28).fill({ color: 0xd8d0ac, alpha: .65 });
+  g.rect(-width / 2, -height / 2 + 3, width, height).fill({ color: 0x74654a, alpha: .04 });
+  g.rect(-width / 2, -height / 2, width, height).fill({ color: 0xafbd91, alpha: .92 });
+  g.rect(-width / 2, -height / 2 + 2, width, height * .24).fill({ color: 0xe5ddb3, alpha: .38 });
+  paintPigmentGrain(g, width, height, 0x736e51);
   hatchRect(g, width, height, 0x736e51, 10);
-  pencilLine(g, -width / 2, -height / 2, width / 2, -height / 2, 0x6f6c51, 1.8);
-  pencilLine(g, -width / 2, height / 2, width / 2, height / 2, 0x7c7559, 1);
-  pencilLine(g, -width / 2, -height / 2, -width / 2, height / 2, 0x7c7559, 1);
-  pencilLine(g, width / 2, -height / 2, width / 2, height / 2, 0x7c7559, 1);
+  g.rect(-width / 2, -height / 2, width, height).stroke({ color: 0x72775b, width: 1, alpha: .8 });
+  g.moveTo(-width / 2, -height / 2).lineTo(width / 2, -height / 2).stroke({ color: 0x636b50, width: 1.6, alpha: .9 });
 }
 
 function paintSurface(g: Graphics, width: number, height: number, ramp: boolean): void {
-  const edge = ramp ? 0x9b713b : 0x48798a;
-  const pigment = ramp ? 0xe0b455 : 0x83b3c3;
-  g.rect(-width / 2 + 1.5, -height / 2 + 3, width, height).fill({ color: 0x6d6251, alpha: .08 });
-  g.rect(-width / 2, -height / 2, width, height).fill({ color: pigment, alpha: .88 });
+  const edge = ramp ? 0x957040 : 0x4e7a87;
+  const pigment = ramp ? 0xdbb568 : 0x83adba;
+  g.rect(-width / 2 + 1, -height / 2 + 2, width, height).fill({ color: 0x6d6251, alpha: .05 });
+  g.rect(-width / 2, -height / 2, width, height).fill({ color: pigment, alpha: .92 });
   if (width > 2 && height > 2) {
-    g.rect(-width / 2 + 1, -height / 2 + 1, width - 2, Math.min(height - 2, Math.max(1, height * .35))).fill({ color: ramp ? 0xf5d69a : 0xc0d8d1, alpha: .55 });
+    g.rect(-width / 2 + 1, -height / 2 + 1, width - 2, Math.min(height - 2, Math.max(1, height * .25))).fill({ color: ramp ? 0xffdf9c : 0xc7dedc, alpha: .4 });
   }
+  paintPigmentGrain(g, width, height, edge);
   hatchRect(g, width, height, edge, 8);
-  pencilLine(g, -width / 2, -height / 2, width / 2, -height / 2, edge, 1.6);
-  pencilLine(g, -width / 2, height / 2, width / 2, height / 2, edge, 1.2);
-  pencilLine(g, -width / 2, -height / 2, -width / 2, height / 2, edge, 1.2);
-  pencilLine(g, width / 2, -height / 2, width / 2, height / 2, edge, 1.2);
+  g.rect(-width / 2, -height / 2, width, height).stroke({ color: edge, width: 1.1, alpha: .85 });
+  g.moveTo(-width / 2, -height / 2).lineTo(width / 2, -height / 2).stroke({ color: edge, width: 1.4, alpha: .9 });
   if (width > 38 && height > 9) {
     for (const x of [-width / 2 + 7, width / 2 - 7]) {
       g.circle(x, 0, 1.4).fill({ color: edge, alpha: .65 });
