@@ -17,12 +17,16 @@ export interface OverlayVisibility {
   readonly components: boolean;
   readonly prediction: boolean;
   readonly events: boolean;
+  readonly grid: boolean;
+  readonly labels: boolean;
 }
 
 export interface LabEditorState {
   readonly cameraCenterWorldMeters: Vector2;
   readonly pixelsPerMeter: number;
   readonly cameraInitialized: boolean;
+  readonly cameraFitRequest: number;
+  fitCamera(): void;
   readonly selectedEntityId: string | null;
   readonly overlayVisibility: OverlayVisibility;
 
@@ -57,13 +61,17 @@ export const labStore = createStore<LabEditorState>()((set) => ({
   // Startup framing may reduce this scale; later resizing preserves zoom.
   pixelsPerMeter: 48,
   cameraInitialized: false,
-  selectedEntityId: null,
+  cameraFitRequest: 0,
+  fitCamera: () => set((state) => ({ cameraFitRequest: state.cameraFitRequest + 1 })),
+  selectedEntityId: "projectile",
   overlayVisibility: {
     trail: true,
     velocity: true,
     components: true,
     prediction: true,
     events: true,
+    grid: true,
+    labels: true,
   },
 
   // Keep display choices across authored edits and canvas remounts.

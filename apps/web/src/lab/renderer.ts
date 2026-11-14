@@ -5,7 +5,8 @@ import {
   Bounds,
   Container,
   Graphics,
-  Text,
+  TilingSprite,
+  type Texture,
   type FederatedPointerEvent,
 } from "pixi.js";
 import {
@@ -16,7 +17,9 @@ import {
 
 import { labStore } from "./store.js";
 import type { MoveEntityRequest, PlacementRequest } from "./authoring.js";
-import { OutlineFilter } from "pixi-filters";
+import { createPaperTexture } from "./materials.js";
+import { createNotebookGrid } from "./sketchbook.js";
+import { createEntityVisual } from "./entity-visuals.js";
 
 // Keep velocity arrows readable without changing physical values.
 export const VELOCITY_ARROW_SCALE = {
@@ -32,10 +35,8 @@ interface RenderItem {
   readonly graphic: Container;
   positionMeters: Vector2;
   angleRadians: number;
-  readonly sourcePixelsPerMeter: number;
   readonly entityId: string;
-  readonly updateFeedback?: (snapshot: Snapshot) => void;
-  readonly selectionGraphic: Container;
+  readonly updateAppearance: ReturnType<typeof createEntityVisual>["update"];
 }
 interface DragState {
   readonly entityId: string;
@@ -52,110 +53,24 @@ export interface LabRenderer {
 function createRenderItems(
   scene: SceneDefinition,
   snapshot: Snapshot,
-  pixelsPerMeter: number,
 ): readonly RenderItem[] {
-  const items: RenderItem[] = [];
-
-  for (const trigger of scene.triggers) {
-    const radiusPixels = trigger.shape.radiusMeters * pixelsPerMeter;
-
-    const graphic = new Container();
-    const ring = new Graphics();
-    const centreMarker = new Graphics();
-
-    const label = new Text({
-      text: "Target",
-      style: {
-        fontFamily: "Inter, system-ui, sans-serif",
-        fontSize: 12,
-        fontWeight: "500",
-        fill: 0x3b8066,
-      },
-    });
-    function updateFeedback(nextSnapshot: Snapshot): void {
-      const hasEntered = labStore.getState().overlayVisibility.events && nextSnapshot.events.some(
-        (event) =>
-          event.kind === "targetEntered" &&
-          event.targetId === trigger.id &&
-          event.tick === nextSnapshot.tick,
-      );
-
-      const color = hasEntered ? 0x16776e : 0x3b8066;
-      ring
-        .clear()
-        .circle(0, 0, radiusPixels)
-        .fill({
-          color,
-          alpha: hasEntered ? 0.16 : 0.08,
-        })
-        .stroke({ color, width: 2 });
-
-      centreMarker.clear().circle(0, 0, 2).fill({ color });
-
-      label.text = hasEntered ? "Target Entered" : "Target";
-      label.style.fill = color;
+  return [...scene.triggers, ...scene.bodies].map((entity) => {
+    const pose = entity.kind === "target"
+      ? entity.pose
+      : snapshot.bodies.find((body) => body.id === entity.id)?.pose;
+    if (pose === undefined) {
+      throw new Error(`Snapshot omitted scene body "${entity.id}".`);
     }
-
-    updateFeedback(snapshot);
-    label.anchor.set(0.5, 1);
-    label.position.set(0, -radiusPixels - 8);
-
-    graphic.addChild(ring, centreMarker, label);
-    graphic.eventMode = "static";
-    graphic.cursor = "pointer";
-
-    items.push({
-      graphic,
-      positionMeters: trigger.pose.positionMeters,
-      angleRadians: trigger.pose.angleRadians,
-      sourcePixelsPerMeter: pixelsPerMeter,
-      entityId: trigger.id,
-      selectionGraphic: ring,
-      kind: "target",
-      updateFeedback,
-    });
-  }
-
-  for (const body of scene.bodies) {
-    const snapshotBody = snapshot.bodies.find(
-      (candidate) => candidate.id === body.id,
-    );
-
-    if (snapshotBody === undefined) {
-      throw new Error(`Snapshot omitted scene body "${body.id}".`);
-    }
-
-    const isGround = body.id.toLowerCase().includes("ground");
-
-    const graphic =
-      body.kind === "dynamic"
-        ? new Graphics()
-          .circle(0, 0, body.shape.radiusMeters * pixelsPerMeter)
-          .fill({ color: 0xdd875d })
-          .stroke({ color: 0x9b553b, width: 1.5 })
-        : new Graphics()
-          .rect(
-            (-body.shape.widthMeters * pixelsPerMeter) / 2,
-            (-body.shape.heightMeters * pixelsPerMeter) / 2,
-            body.shape.widthMeters * pixelsPerMeter,
-            body.shape.heightMeters * pixelsPerMeter,
-          )
-          .fill({ color: isGround ? 0xb8c28c : 0xe0b455 })
-          .stroke({ color: isGround ? 0x6f6c51 : 0x9b713b, width: 1.5 });
-    graphic.eventMode = "static";
-
-    items.push({
-      graphic,
-      positionMeters: snapshotBody.pose.positionMeters,
-      angleRadians: snapshotBody.pose.angleRadians,
-      sourcePixelsPerMeter: pixelsPerMeter,
-      entityId: snapshotBody.id,
-      selectionGraphic: graphic,
-      kind: "body",
-    });
-  }
-
-  return items;
+    const visual = createEntityVisual(entity);
+    return {
+      kind: entity.kind === "target" ? "target" : "body",
+      graphic: visual.graphic,
+      positionMeters: pose.positionMeters,
+      angleRadians: pose.angleRadians,
+      entityId: entity.id,
+      updateAppearance: visual.update,
+    };
+  });
 }
 
 // Draw an open-headed arrow between two screen positions.
@@ -243,11 +158,11 @@ export function mountLabRenderer(
   let backgroundHeight = 0;
   background.cursor =
     labStore.getState().activeTool.kind === "pan" ? "grab" : "default";
-  const selectedFilter = new OutlineFilter({
-    color: 0xd87149,
-    thickness: 2,
-    alpha: 1,
-    quality: 0.8,
+  const notebook = createNotebookGrid();
+  let paperTexture: Texture | undefined;
+  let paper: TilingSprite | undefined;
+  const resizeObserver = new ResizeObserver(() => {
+    if (initialized && !disposed) resizeAndRender();
   });
 
   function getViewport(): ViewportTransform {
@@ -476,26 +391,29 @@ export function mountLabRenderer(
     verticalVelocityGraphic.visible = editorState.overlayVisibility.components;
 
     const viewport = getViewport();
+    if (paper !== undefined) {
+      paper.width = width;
+      paper.height = height;
+    }
+    notebook.update(viewport, editorState.overlayVisibility.grid);
     const selectedProjectile = getSelectedProjectile(editorState.selectedEntityId);
     redrawSelectedTrail(viewport, selectedProjectile);
     redrawSelectedVelocity(viewport, selectedProjectile);
     redrawSelectedPrediction(viewport, selectedProjectile);
 
     for (const item of renderItems.values()) {
-      item.updateFeedback?.(currentSnapshot);
-      const screenPosition = worldToScreen(item.positionMeters, viewport);
-
-      item.graphic.position.set(screenPosition.x, screenPosition.y);
-      item.graphic.scale.set(
-        editorState.pixelsPerMeter / item.sourcePixelsPerMeter,
+      const entered = editorState.overlayVisibility.events && currentSnapshot.events.some(
+        (event) => event.kind === "targetEntered" && event.targetId === item.entityId && event.tick === currentSnapshot.tick,
       );
-      item.graphic.rotation = -item.angleRadians;
-
-      if (editorState.selectedEntityId === item.entityId) {
-        item.selectionGraphic.filters = selectedFilter;
-      } else {
-        item.selectionGraphic.filters = [];
-      }
+      item.updateAppearance(
+        editorState.pixelsPerMeter,
+        item.angleRadians,
+        editorState.selectedEntityId === item.entityId,
+        entered,
+        editorState.overlayVisibility.labels,
+        worldToScreen(item.positionMeters, viewport),
+        width,
+      );
     }
 
     application.render();
@@ -696,7 +614,6 @@ export function mountLabRenderer(
     const nextItems = createRenderItems(
       currentScene,
       currentSnapshot,
-      labStore.getState().pixelsPerMeter,
     );
 
     for (const item of renderItems.values()) {
@@ -723,7 +640,83 @@ export function mountLabRenderer(
     }
   }
 
+  function fitScene(): void {
+    const bounds = new Bounds();
+    const include = (x: number, y: number, halfWidth = 0, halfHeight = 0) => {
+      bounds.addFrame(x - halfWidth, y - halfHeight, x + halfWidth, y + halfHeight);
+    };
+    // Frame physical geometry, never text bounds or decorative selection strokes.
+    for (const entity of [...currentScene.bodies, ...currentScene.triggers]) {
+      const pose = entity.kind === "target" ? entity.pose : currentSnapshot.bodies.find((body) => body.id === entity.id)?.pose;
+      if (pose === undefined) continue;
+      if (entity.shape.kind === "circle") {
+        include(pose.positionMeters.x, pose.positionMeters.y, entity.shape.radiusMeters, entity.shape.radiusMeters);
+      } else {
+        const shape = entity.shape;
+        const cosine = Math.abs(Math.cos(pose.angleRadians));
+        const sine = Math.abs(Math.sin(pose.angleRadians));
+        const halfWidth = (shape.widthMeters * cosine + shape.heightMeters * sine) / 2;
+        const halfHeight = (shape.widthMeters * sine + shape.heightMeters * cosine) / 2;
+        // The long default ground establishes height without shrinking the experiment.
+        include(pose.positionMeters.x, pose.positionMeters.y, entity.id === "default-ground" ? 0 : halfWidth, halfHeight);
+      }
+      if (entity.kind === "dynamic") include(entity.pose.positionMeters.x, entity.pose.positionMeters.y);
+    }
+    for (const snapshot of trailSnapshots) {
+      for (const body of snapshot.bodies) {
+        if (currentScene.bodies.some((entity) => entity.id === body.id && entity.kind === "dynamic")) {
+          include(body.pose.positionMeters.x, body.pose.positionMeters.y);
+        }
+      }
+    }
+    // Include the already-drawn reference, using the same prediction as the viewport.
+    if (predictionGraphic.visible && getSelectedProjectile(labStore.getState().selectedEntityId) !== undefined) {
+      const reference = predictionGraphic.getBounds();
+      const viewport = getViewport();
+      const first = screenToWorld({ x: reference.x, y: reference.y }, viewport);
+      const last = screenToWorld({ x: reference.x + reference.width, y: reference.y + reference.height }, viewport);
+      include(first.x, first.y);
+      include(last.x, last.y);
+    }
+    if (currentScene.bodies.length + currentScene.triggers.length === 0) {
+      labStore.getState().setCamera({ x: 0, y: 0 }, 48);
+      return;
+    }
+    const scale = Math.max(.01, Math.min(
+      96,
+      Math.max(1, application.screen.width - 100) / Math.max(1, bounds.width),
+      Math.max(1, application.screen.height - 180) / Math.max(1, bounds.height),
+    ));
+    labStore.getState().setCamera({
+      x: bounds.x + bounds.width / 2,
+      // Reserve more room for the title/tools above the diagram.
+      y: bounds.y + bounds.height / 2 + 25 / scale,
+    }, scale);
+  }
+
+  function handleWheel(event: WheelEvent): void {
+    event.preventDefault();
+    cancelActiveDrag();
+    const viewport = getViewport();
+    const rect = application.canvas.getBoundingClientRect();
+    const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const world = screenToWorld(pointer, viewport);
+    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.heightPixels : 1);
+    const scale = Math.max(12, Math.min(192, viewport.pixelsPerMeter * Math.exp(-delta * .001)));
+    labStore.getState().setCamera({
+      x: world.x - (pointer.x - viewport.widthPixels / 2) / scale,
+      y: world.y + (pointer.y - viewport.heightPixels / 2) / scale,
+    }, scale);
+  }
+
   const initialize = async (): Promise<void> => {
+    // The local handwriting font must be ready before Pixi measures captions.
+    try {
+      await document.fonts.load('17px "Kalam"');
+    } catch {
+      // Retain a usable canvas if the local font fails to load.
+    }
+    if (disposed) return;
     await application.init({
       antialias: true,
       autoDensity: true,
@@ -741,6 +734,9 @@ export function mountLabRenderer(
       return;
     }
 
+    paperTexture = createPaperTexture();
+    paper = new TilingSprite({ texture: paperTexture, width: host.clientWidth, height: host.clientHeight, eventMode: "none" });
+    application.stage.addChild(paper, notebook.root);
     // Keep paths behind bodies and velocity arrows.
     application.stage.addChild(
       trailGraphic, predictionGraphic,
@@ -752,6 +748,15 @@ export function mountLabRenderer(
     application.stage.on("globalpointermove", previewDrag);
     application.stage.on("pointerdowncapture", (event) => {
       const activeTool = labStore.getState().activeTool;
+
+      if (event.button !== 0 || !event.isPrimary) return;
+      if (activeTool.kind === "pan") {
+        panStart = { x: event.global.x, y: event.global.y };
+        panCameraStart = { ...labStore.getState().cameraCenterWorldMeters };
+        background.cursor = "grabbing";
+        event.stopImmediatePropagation();
+        return;
+      }
 
       if (activeTool.kind !== "place") {
         return;
@@ -797,16 +802,7 @@ export function mountLabRenderer(
       // Prevent the object underneath from being selected instead.
       event.stopImmediatePropagation();
     });
-    background.on("pointerdown", (event) => {
-      if (labStore.getState().activeTool.kind !== "pan") {
-        return;
-      }
-      panStart = { x: event.global.x, y: event.global.y };
-      panCameraStart = { ...labStore.getState().cameraCenterWorldMeters };
-      background.cursor = "grabbing";
-    });
-
-    background.on("pointermove", (event) => {
+    application.stage.on("globalpointermove", (event) => {
       if (panStart === null || panCameraStart === null) {
         return;
       }
@@ -830,15 +826,23 @@ export function mountLabRenderer(
         labStore.getState().activeTool.kind === "pan" ? "grab" : "default";
     };
 
-    background.on("pointerup", stopPan);
-    background.on("pointerupoutside", stopPan);
+    application.stage.on("pointerup", stopPan);
+    application.stage.on("pointerupoutside", stopPan);
+    application.stage.on("pointercancel", stopPan);
     // This host is dedicated to Pixi, so replacing its children enforces
     // one-canvas ownership even across development remounts.
     host.replaceChildren(application.canvas);
-    window.addEventListener("resize", resizeAndRender);
+    resizeObserver.observe(host);
+    host.addEventListener("wheel", handleWheel, { passive: false });
     window.addEventListener("blur", cancelActiveDrag);
     unsubscribeFromStore = labStore.subscribe((state, previousState) => {
+      if (state.cameraFitRequest !== previousState.cameraFitRequest) {
+        cancelActiveDrag();
+        fitScene();
+        return;
+      }
       if (state.activeTool !== previousState.activeTool) {
+        stopPan();
         background.cursor =
           state.activeTool.kind === "pan" ? "grab" : "default";
         cancelActiveDrag();
@@ -856,42 +860,13 @@ export function mountLabRenderer(
     });
     updateSnapshot(currentSnapshot);
 
-    // Frame startup content once, then preserve the user's camera.
-    const editorState = labStore.getState();
-
-    if (!editorState.cameraInitialized && renderItems.size > 0) {
-      const viewport = getViewport();
-      const bounds = new Bounds();
-
-      for (const item of renderItems.values()) {
-        bounds.addBounds(item.graphic.getBounds());
-      }
-
-      // Include history even when its projectile is not selected.
-      for (const trailSnapshot of trailSnapshots) {
-        for (const body of trailSnapshot.bodies) {
-          const point = worldToScreen(body.pose.positionMeters, viewport);
-          bounds.addFrame(point.x, point.y, point.x, point.y);
-        }
-      }
-
-      const centerWorldMeters = screenToWorld({
-        x: bounds.x + bounds.width / 2,
-        y: bounds.y + bounds.height / 2,
-      }, viewport);
-      const fitRatio = Math.min(
-        1,
-        viewport.widthPixels * 0.9 / bounds.width,
-        viewport.heightPixels * 0.9 / bounds.height,
-      );
-
-      editorState.setCamera(centerWorldMeters, editorState.pixelsPerMeter * fitRatio);
-    }
+    if (!labStore.getState().cameraInitialized) fitScene();
   };
 
   void initialize().catch((error: unknown) => {
     if (!disposed) {
       console.error("Failed to initialize the Pixi canvas.", error);
+      dispose();
     }
   });
 
@@ -901,7 +876,8 @@ export function mountLabRenderer(
     }
 
     disposed = true;
-    window.removeEventListener("resize", resizeAndRender);
+    resizeObserver.disconnect();
+    host.removeEventListener("wheel", handleWheel);
     window.removeEventListener("blur", cancelActiveDrag);
     dragState = null;
     unsubscribeFromStore?.();
@@ -915,9 +891,10 @@ export function mountLabRenderer(
       horizontalVelocityGraphic.destroy();
       verticalVelocityGraphic.destroy();
       predictionGraphic.destroy();
+      notebook.root.destroy({ children: true });
     }
 
-    selectedFilter.destroy();
+    paperTexture?.destroy(true);
   }
 
   return {

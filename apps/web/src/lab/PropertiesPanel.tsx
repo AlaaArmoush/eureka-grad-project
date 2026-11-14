@@ -111,38 +111,17 @@ export function PropertiesPanel(props: {
 
   return (
     <section className="properties">
-      <h2>Properties</h2>
-      <p>
-        <strong> Selected Object: </strong>
-        {selectedEntityId ?? "None"}
-      </p>
-      <p>
-        <strong>Type: </strong>
-        {selectedDefinition?.kind ?? "None"}
-      </p>
-      <p>
-        <strong>Shape: </strong>
-        {selectedDefinition?.shape.kind ?? "None"}
-      </p>
-      {selectedDefinition === undefined && (
-        <p className="dimension-readout">
-          <strong>Dimensions:</strong>
-          No object selected
-        </p>
+      <header className="property-identity">
+        <h2>{selectedDefinition === undefined ? "Your scene, your question." : selectedDefinition.kind === "dynamic" ? "Projectile" : selectedDefinition.kind === "target" ? "Target zone" : selectedDefinition.id.toLowerCase().includes("ground") ? "Ground" : selectedDefinition.id.toLowerCase().includes("ramp") ? "Inclined plane" : "Platform"}</h2>
+        <p>{selectedDefinition === undefined ? "Select an object on the page or open the scene outline." : `${selectedDefinition.kind === "dynamic" ? "Dynamic body" : selectedDefinition.kind === "target" ? "Pass-through sensor" : "Fixed surface"} · ${selectedDefinition.shape.kind}`}</p>
+      </header>
+      {selectedPose !== undefined && (
+        <dl className="property-position">
+          <dt>Horizontal position</dt><dd>{selectedPose.positionMeters.x.toFixed(3)} m</dd>
+          <dt>Vertical position</dt><dd>{selectedPose.positionMeters.y.toFixed(3)} m</dd>
+          <dt>Rotation</dt><dd>{(selectedPose.angleRadians * 180 / Math.PI).toFixed(2)}°</dd>
+        </dl>
       )}
-      <p>
-        <strong>Selected Object position:</strong>
-      </p>
-      <ul>
-        <li>
-          <strong>x(m):</strong>
-          {selectedPose?.positionMeters.x ?? "Please select an Object"}
-        </li>
-        <li>
-          <strong>y(m):</strong>
-          {selectedPose?.positionMeters.y ?? "Please select an Object"}
-        </li>
-      </ul>
       {selectedProjectile !== undefined && (
         <form
           className="property-editor-inline"

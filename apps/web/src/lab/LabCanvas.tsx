@@ -149,7 +149,6 @@ export function LabCanvas(props: {
         ref={hostRef}
         role="img"
         style={{
-          height: "360px",
           overflow: "hidden",
           width: "100%",
         }}

@@ -32,8 +32,7 @@ export function ObjectLibrary() {
 
   return (
     <>
-      <h2>Objects Library</h2>
-      <h3>Tools</h3>
+      <h2>Objects</h2>
       <ul className="tools">
         <li>
           <button
