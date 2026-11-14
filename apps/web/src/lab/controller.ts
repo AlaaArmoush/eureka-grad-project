@@ -1,22 +1,40 @@
 // Supplies commands and portable renderer snapshots.
 import type {
   Command,
-  Snapshot
+  SceneDefinition,
+  Snapshot,
+  Vector2,
 } from "@eureka/contracts";
-
 // Supplies the headless engine boundary and typed results.
-import type {
-  AdvanceReceipt,
-  CommandAcceptance,
-  Engine,
-  EngineResult,
-  EngineStatus
+import {
+  validateScene,
+  type AdvanceReceipt,
+  type CommandAcceptance,
+  type Engine,
+  type EngineResult,
+  type EngineStatus,
 } from "@eureka/engine";
 
+// Supplies the pure scene changes
+import {
+  addPlatformToScene,
+  addProjectileToScene,
+  addRampToScene,
+  addTargetToScene,
+  type SceneDraftChange,
+  type ProjectilePlacementProperties,
+  type PlatformPlacementProperties,
+  type RampPlacementProperties,
+  type TargetPlacementProperties,
+  updateProjectileInScene,
+  updateStaticBodyInScene,
+  updateTargetInScene,
+  moveEntityInScene,
+  deleteEntityFromScene,
+} from "./authoring.js";
+
 export interface LabController {
-  enqueue(
-    command: Command
-  ): EngineResult<CommandAcceptance>;
+  enqueue(command: Command): EngineResult<CommandAcceptance>;
 
   stepOnce(): EngineResult<AdvanceReceipt>;
 
@@ -24,20 +42,58 @@ export interface LabController {
 
   reset(): EngineStatus;
 
-  dispose(): EngineStatus;
+  // Preserve the view only when the host is replacing the authored scene.
+  dispose(options?: { readonly preserveView?: boolean }): EngineStatus;
+
+  copyScene(): SceneDefinition;
+
+  placeRamp(
+    positionMeters: Vector2,
+    properties?: RampPlacementProperties,
+  ): EngineResult<SceneDraftChange>;
+  placeProjectile(
+    positionMeters: Vector2,
+    properties?: ProjectilePlacementProperties,
+  ): EngineResult<SceneDraftChange>;
+  placePlatform(
+    positionMeters: Vector2,
+    properties?: PlatformPlacementProperties,
+  ): EngineResult<SceneDraftChange>;
+  placeTarget(
+    positionMeters: Vector2,
+    properties?: TargetPlacementProperties,
+  ): EngineResult<SceneDraftChange>;
+  updateProjectileProperties(
+    projectileId: string,
+    properties: ProjectilePlacementProperties,
+  ): EngineResult<SceneDraftChange>;
+  updateStaticBodyProperties(
+    bodyId: string,
+    properties: RampPlacementProperties,
+  ): EngineResult<SceneDraftChange>;
+
+  updateTargetProperties(
+    targetId: string,
+    properties: TargetPlacementProperties,
+  ): EngineResult<SceneDraftChange>;
+  moveEntityWhilePaused(
+    entityId: string,
+    positionMeters: Vector2,
+  ): EngineResult<SceneDraftChange>;
+  deleteEntity(entityId: string): EngineResult<SceneDraftChange>;
 }
 
-export type SnapshotConsumer = (
-  snapshot: Snapshot
-) => void;
+export type SnapshotConsumer = (snapshot: Snapshot) => void;
 
 export function createLabController(
   engine: Engine,
+  initialScene: SceneDefinition,
   consumeSnapshot: SnapshotConsumer,
-  releaseView: () => void
+  releaseView: () => void,
 ): EngineResult<LabController> {
-  const initialSnapshot = engine.getSnapshot();
-
+  const currentEngine = engine;
+  let currentScene = structuredClone(initialScene);
+  const initialSnapshot = currentEngine.getSnapshot();
   if (!initialSnapshot.ok) {
     return initialSnapshot;
   }
@@ -47,13 +103,13 @@ export function createLabController(
   let disposed = false;
 
   function stepOnce(): EngineResult<AdvanceReceipt> {
-    const advanceResult = engine.advance(1);
+    const advanceResult = currentEngine.advance(1);
 
     if (!advanceResult.ok) {
       return advanceResult;
     }
 
-    const snapshotResult = engine.getSnapshot();
+    const snapshotResult = currentEngine.getSnapshot();
 
     if (!snapshotResult.ok) {
       return snapshotResult;
@@ -64,13 +120,13 @@ export function createLabController(
   }
 
   function reset(): EngineStatus {
-    const resetResult = engine.reset();
+    const resetResult = currentEngine.reset();
 
     if (!resetResult.ok) {
       return resetResult;
     }
 
-    const snapshotResult = engine.getSnapshot();
+    const snapshotResult = currentEngine.getSnapshot();
 
     if (!snapshotResult.ok) {
       return snapshotResult;
@@ -80,16 +136,347 @@ export function createLabController(
     return { ok: true };
   }
 
-  function dispose(): EngineStatus {
+  // Release the engine and normally release its view as well.
+  function dispose(options: { readonly preserveView?: boolean } = {}): EngineStatus {
     if (disposed) {
       return { ok: true };
     }
 
     disposed = true;
-    releaseView();
-    return engine.dispose();
-  }
 
+    if (options.preserveView !== true) {
+      releaseView();
+    }
+
+    return currentEngine.dispose();
+  }
+  function placeRamp(
+    positionMeters: Vector2,
+    properties?: RampPlacementProperties,
+  ): EngineResult<SceneDraftChange> {
+    const sceneChange = addRampToScene(
+      currentScene,
+      positionMeters,
+      properties,
+    );
+
+    const validationResult = validateScene(sceneChange.scene);
+
+    if (!validationResult.ok) {
+      return validationResult;
+    }
+
+    currentScene = structuredClone(sceneChange.scene);
+
+    return {
+      ok: true,
+      value: structuredClone(sceneChange),
+    };
+  }
+  function placeProjectile(
+    positionMeters: Vector2,
+    properties?: ProjectilePlacementProperties,
+  ): EngineResult<SceneDraftChange> {
+    const sceneChange = addProjectileToScene(
+      currentScene,
+      positionMeters,
+      properties,
+    );
+    const validationResult = validateScene(sceneChange.scene);
+
+    if (!validationResult.ok) {
+      return validationResult;
+    }
+
+    currentScene = structuredClone(sceneChange.scene);
+
+    return {
+      ok: true,
+      value: structuredClone(sceneChange),
+    };
+  }
+  function placePlatform(
+    positionMeters: Vector2,
+    properties?: PlatformPlacementProperties,
+  ): EngineResult<SceneDraftChange> {
+    const sceneChange = addPlatformToScene(
+      currentScene,
+      positionMeters,
+      properties,
+    );
+
+    const validationResult = validateScene(sceneChange.scene);
+
+    if (!validationResult.ok) {
+      return validationResult;
+    }
+
+    currentScene = structuredClone(sceneChange.scene);
+
+    return {
+      ok: true,
+      value: structuredClone(sceneChange),
+    };
+  }
+  function placeTarget(
+    positionMeters: Vector2,
+    properties?: TargetPlacementProperties,
+  ): EngineResult<SceneDraftChange> {
+    const sceneChange = addTargetToScene(
+      currentScene,
+      positionMeters,
+      properties,
+    );
+
+    const validationResult = validateScene(sceneChange.scene);
+
+    if (!validationResult.ok) {
+      return validationResult;
+    }
+
+    currentScene = structuredClone(sceneChange.scene);
+
+    return {
+      ok: true,
+      value: structuredClone(sceneChange),
+    };
+  }
+  function updateProjectileProperties(
+    projectileId: string,
+    properties: ProjectilePlacementProperties,
+  ): EngineResult<SceneDraftChange> {
+    const selectedBody = currentScene.bodies.find(
+      (body) => body.id === projectileId,
+    );
+
+    if (selectedBody === undefined) {
+      return {
+        ok: false,
+        diagnostics: [
+          {
+            code: "UNKNOWN_ENTITY_ID",
+            path: "projectileId",
+            message: `Body "${projectileId}" does not exist.`,
+            entityId: projectileId,
+          },
+        ],
+      };
+    }
+
+    if (selectedBody.kind !== "dynamic") {
+      return {
+        ok: false,
+        diagnostics: [
+          {
+            code: "INVALID_BODY_KIND",
+            path: "projectileId",
+            message: "Only a dynamic projectile can use these properties.",
+            entityId: projectileId,
+          },
+        ],
+      };
+    }
+
+    if (
+      !Number.isFinite(properties.launchSpeedMetersPerSecond) ||
+      properties.launchSpeedMetersPerSecond < 0
+    ) {
+      return {
+        ok: false,
+        diagnostics: [
+          {
+            code: "OUT_OF_RANGE",
+            path: "properties.launchSpeedMetersPerSecond",
+            message: "Launch speed must be finite and nonnegative.",
+            entityId: projectileId,
+          },
+        ],
+      };
+    }
+
+    const sceneChange = updateProjectileInScene(
+      currentScene,
+      projectileId,
+      properties,
+    );
+
+    const validationResult = validateScene(sceneChange.scene);
+
+    if (!validationResult.ok) {
+      return validationResult;
+    }
+
+    currentScene = structuredClone(sceneChange.scene);
+
+    return {
+      ok: true,
+      value: structuredClone(sceneChange),
+    };
+  }
+  function updateStaticBodyProperties(
+    bodyId: string,
+    properties: RampPlacementProperties,
+  ): EngineResult<SceneDraftChange> {
+    const selectedBody = currentScene.bodies.find((body) => body.id === bodyId);
+
+    if (selectedBody === undefined) {
+      return {
+        ok: false,
+        diagnostics: [
+          {
+            code: "UNKNOWN_ENTITY_ID",
+            path: "bodyId",
+            message: `Body "${bodyId}" does not exist.`,
+            entityId: bodyId,
+          },
+        ],
+      };
+    }
+
+    if (selectedBody.kind !== "static") {
+      return {
+        ok: false,
+        diagnostics: [
+          {
+            code: "INVALID_BODY_KIND",
+            path: "bodyId",
+            message: "Only a static body can use these properties.",
+            entityId: bodyId,
+          },
+        ],
+      };
+    }
+
+    const sceneChange = updateStaticBodyInScene(
+      currentScene,
+      bodyId,
+      properties,
+    );
+
+    const validationResult = validateScene(sceneChange.scene);
+
+    if (!validationResult.ok) {
+      return validationResult;
+    }
+
+    currentScene = structuredClone(sceneChange.scene);
+
+    return {
+      ok: true,
+      value: structuredClone(sceneChange),
+    };
+  }
+  function updateTargetProperties(
+    targetId: string,
+    properties: TargetPlacementProperties,
+  ): EngineResult<SceneDraftChange> {
+    const selectedTarget = currentScene.triggers.find(
+      (trigger) => trigger.id === targetId,
+    );
+
+    if (selectedTarget === undefined) {
+      return {
+        ok: false,
+        diagnostics: [
+          {
+            code: "UNKNOWN_ENTITY_ID",
+            path: "targetId",
+            message: `Target "${targetId}" does not exist.`,
+            entityId: targetId,
+          },
+        ],
+      };
+    }
+
+    const sceneChange = updateTargetInScene(currentScene, targetId, properties);
+
+    const validationResult = validateScene(sceneChange.scene);
+
+    if (!validationResult.ok) {
+      return validationResult;
+    }
+
+    currentScene = structuredClone(sceneChange.scene);
+
+    return {
+      ok: true,
+      value: structuredClone(sceneChange),
+    };
+  }
+  function moveEntityWhilePaused(
+    entityId: string,
+    positionMeters: Vector2,
+  ): EngineResult<SceneDraftChange> {
+    const entityExists =
+      currentScene.bodies.some((body) => body.id === entityId) ||
+      currentScene.triggers.some((trigger) => trigger.id === entityId);
+
+    if (!entityExists) {
+      return {
+        ok: false,
+        diagnostics: [
+          {
+            code: "UNKNOWN_ENTITY_ID",
+            path: "entityId",
+            message: `Entity "${entityId}" does not exist.`,
+            entityId,
+          },
+        ],
+      };
+    }
+
+    const sceneChange = moveEntityInScene(
+      currentScene,
+      entityId,
+      positionMeters,
+    );
+
+    const validationResult = validateScene(sceneChange.scene);
+
+    if (!validationResult.ok) {
+      return validationResult;
+    }
+
+    currentScene = structuredClone(sceneChange.scene);
+
+    return {
+      ok: true,
+      value: structuredClone(sceneChange),
+    };
+  }
+  function deleteEntity(entityId: string): EngineResult<SceneDraftChange> {
+    const entityExists =
+      currentScene.bodies.some((body) => body.id === entityId) ||
+      currentScene.triggers.some((trigger) => trigger.id === entityId);
+
+    if (!entityExists) {
+      return {
+        ok: false,
+        diagnostics: [
+          {
+            code: "UNKNOWN_ENTITY_ID",
+            path: "entityId",
+            message: `Entity "${entityId}" does not exist.`,
+            entityId,
+          },
+        ],
+      };
+    }
+
+    const sceneChange = deleteEntityFromScene(currentScene, entityId);
+    const validationResult = validateScene(sceneChange.scene);
+
+    if (!validationResult.ok) {
+      return validationResult;
+    }
+
+    currentScene = structuredClone(sceneChange.scene);
+
+    return {
+      ok: true,
+      value: structuredClone(sceneChange),
+    };
+  }
   return {
     ok: true,
     value: {
@@ -97,7 +484,17 @@ export function createLabController(
       stepOnce,
       copySnapshot: () => engine.copySnapshot(),
       reset,
-      dispose
-    }
+      dispose,
+      copyScene: () => structuredClone(currentScene),
+      placeRamp,
+      placeProjectile,
+      placePlatform,
+      placeTarget,
+      updateProjectileProperties,
+      updateStaticBodyProperties,
+      updateTargetProperties,
+      moveEntityWhilePaused,
+      deleteEntity,
+    },
   };
 }

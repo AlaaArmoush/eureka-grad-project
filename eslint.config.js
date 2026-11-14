@@ -11,6 +11,9 @@ import tseslint from "typescript-eslint";
 
 export default defineConfig(
   globalIgnores([
+    // Skip local metadata directories before ESLint tries to read them.
+    ".aws/",
+    ".codex/",
     "**/coverage/**",
     "**/dist/**",
     "**/node_modules/**",
