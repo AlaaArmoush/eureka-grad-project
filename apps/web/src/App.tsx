@@ -14,6 +14,8 @@ import {
   StepForward,
   RotateCcw,
   PanelLeft,
+  Expand,
+  Shrink,
 } from "lucide-react";
 import { useStore } from "zustand";
 import { labStore } from "./lab/store";
@@ -44,13 +46,42 @@ export function App() {
     structuredClone(PROJECTILE_LAB_MOCK.scene),
   );
   const [labVisible, setLabVisible] = useState(true);
-  const [sceneOutlineOpen, setSceneOutlineOpen] = useState(() => window.matchMedia("(min-width: 1251px)").matches);
+  const [sceneOutlineOpen, setSceneOutlineOpen] = useState(false);
   const outlineToggleRef = useRef<HTMLButtonElement>(null);
+  const viewportRef = useRef<HTMLElement>(null);
+  const [viewportExpanded, setViewportExpanded] = useState(false);
+  const [viewportError, setViewportError] = useState<string | null>(null);
 
   function closeSceneOutline(): void {
     setSceneOutlineOpen(false);
     outlineToggleRef.current?.focus();
   }
+
+  // Let the browser expand the existing viewport without replacing its mounted canvas.
+  async function toggleViewportSize(): Promise<void> {
+    const viewport = viewportRef.current;
+    if (viewport === null) {
+      return;
+    }
+    try {
+      if (document.fullscreenElement === viewport) {
+        await document.exitFullscreen();
+      } else {
+        await viewport.requestFullscreen();
+      }
+    } catch {
+      setViewportError("The viewport could not expand. You can still zoom and pan normally.");
+    }
+  }
+
+  useEffect(() => {
+    function handleFullscreenChange(): void {
+      setViewportExpanded(viewportRef.current !== null && document.fullscreenElement === viewportRef.current);
+      setViewportError(null);
+    }
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
   const selectedEntityId = useStore(
     labStore,
     (state) => state.selectedEntityId,
@@ -252,7 +283,7 @@ export function App() {
                 </p>
                 <p>Tick: {displayedSnapshot.tick}</p>
               </div>
-              <section className="canvas" aria-label="Scene viewport">
+              <section ref={viewportRef} className="canvas" aria-label="Scene viewport">
                 <header className="panel-heading">
                   <h2><Atom size={15} />Scene viewport</h2>
                   <div className="viewport-actions">
@@ -265,6 +296,16 @@ export function App() {
                       onClick={() => setSceneOutlineOpen((open) => !open)}
                     >
                       <PanelLeft size={14} />Scene
+                    </button>
+                    <button
+                      className="tool-btn"
+                      type="button"
+                      aria-label={viewportExpanded ? "Exit expanded viewport" : "Expand viewport"}
+                      title={viewportExpanded ? "Exit expanded viewport" : "Expand viewport"}
+                      disabled={!document.fullscreenEnabled}
+                      onClick={() => { void toggleViewportSize(); }}
+                    >
+                      {viewportExpanded ? <Shrink size={14} /> : <Expand size={14} />}
                     </button>
                   </div>
                 </header>
@@ -282,6 +323,7 @@ export function App() {
                   </div>
                 </div>
                 <div className="viewport-status"><span><span className="status-dot" />{activeSampleSnapshots === undefined ? "Authored initial state" : "Handwritten sample"}</span><span>{activeTool.kind === "place" ? "Click the page to place your object" : activeTool.kind === "move" ? "Drag an object to move it" : activeTool.kind === "delete" ? "Click an object to delete it" : activeTool.kind === "pan" ? "Drag the page to pan" : "Select an object to inspect · Escape to deselect"}</span><code>t {displayedSnapshot.simulationTimeSeconds.toFixed(2)} s / tick {displayedSnapshot.tick}</code></div>
+                {viewportError !== null && <p className="viewport-error" role="alert">{viewportError}</p>}
               </section>
               <section className="display-panel" aria-label="Display options">
                 <h2><Eye size={15} />Show in viewport</h2>

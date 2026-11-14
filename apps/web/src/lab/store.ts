@@ -11,6 +11,14 @@ import type {
   TargetPlacementProperties,
 } from "./authoring.js";
 
+// Share the camera scale between wheel input, zoom controls and initial editor state.
+export const CAMERA_ZOOM = {
+  basePixelsPerMeter: 48,
+  minimumPercent: 5,
+  maximumPercent: 3200,
+  stops: [5, 10, 15, 25, 50, 75, 100, 150, 200, 300, 400, 600, 800, 1200, 1600, 2400, 3200],
+} as const;
+
 export interface OverlayVisibility {
   readonly trail: boolean;
   readonly velocity: boolean;
@@ -59,7 +67,7 @@ export const labStore = createStore<LabEditorState>()((set) => ({
     y: 0,
   },
   // Startup framing may reduce this scale; later resizing preserves zoom.
-  pixelsPerMeter: 48,
+  pixelsPerMeter: CAMERA_ZOOM.basePixelsPerMeter,
   cameraInitialized: false,
   cameraFitRequest: 0,
   fitCamera: () => set((state) => ({ cameraFitRequest: state.cameraFitRequest + 1 })),

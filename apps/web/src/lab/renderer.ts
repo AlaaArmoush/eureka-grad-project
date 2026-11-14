@@ -15,7 +15,7 @@ import {
   type ViewportTransform,
 } from "./coordinates.js";
 
-import { labStore } from "./store.js";
+import { CAMERA_ZOOM, labStore } from "./store.js";
 import type { MoveEntityRequest, PlacementRequest } from "./authoring.js";
 import { createPaperTexture } from "./materials.js";
 import { createNotebookGrid } from "./sketchbook.js";
@@ -678,6 +678,7 @@ export function mountLabRenderer(
 
   function fitScene(): void {
     const bounds = new Bounds();
+    const editorState = labStore.getState();
     const include = (x: number, y: number, halfWidth = 0, halfHeight = 0) => {
       bounds.addFrame(x - halfWidth, y - halfHeight, x + halfWidth, y + halfHeight);
     };
@@ -696,7 +697,9 @@ export function mountLabRenderer(
         // The long default ground establishes height without shrinking the experiment.
         include(pose.positionMeters.x, pose.positionMeters.y, entity.id === "default-ground" ? 0 : halfWidth, halfHeight);
       }
-      if (entity.kind === "dynamic") include(entity.pose.positionMeters.x, entity.pose.positionMeters.y);
+      if (entity.kind === "dynamic") {
+        include(entity.pose.positionMeters.x, entity.pose.positionMeters.y);
+      }
     }
     for (const snapshot of trailSnapshots) {
       for (const body of snapshot.bodies) {
@@ -705,23 +708,15 @@ export function mountLabRenderer(
         }
       }
     }
-    // Include the already-drawn reference, using the same prediction as the viewport.
-    if (predictionGraphic.visible && getSelectedProjectile(labStore.getState().selectedEntityId) !== undefined) {
-      const reference = predictionGraphic.getBounds();
-      const viewport = getViewport();
-      const first = screenToWorld({ x: reference.x, y: reference.y }, viewport);
-      const last = screenToWorld({ x: reference.x + reference.width, y: reference.y + reference.height }, viewport);
-      include(first.x, first.y);
-      include(last.x, last.y);
-    }
+    // The ideal path may extend beyond the experiment; it must not shrink the authored objects.
     if (currentScene.bodies.length + currentScene.triggers.length === 0) {
-      labStore.getState().setCamera({ x: 0, y: 0 }, 48);
+      editorState.setCamera({ x: 0, y: 0 }, CAMERA_ZOOM.basePixelsPerMeter);
       return;
     }
     const scale = Math.max(.01, Math.min(
-      96,
-      Math.max(1, application.screen.width - 100) / Math.max(1, bounds.width),
-      Math.max(1, application.screen.height - 180) / Math.max(1, bounds.height),
+      CAMERA_ZOOM.basePixelsPerMeter * 2,
+      Math.max(1, application.screen.width - 80) / Math.max(1, bounds.width),
+      Math.max(1, application.screen.height - 128) / Math.max(1, bounds.height),
     ));
     labStore.getState().setCamera({
       x: bounds.x + bounds.width / 2,
@@ -739,7 +734,9 @@ export function mountLabRenderer(
     const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
     const world = screenToWorld(pointer, viewport);
     const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.heightPixels : 1);
-    const scale = Math.max(12, Math.min(192, viewport.pixelsPerMeter * Math.exp(-delta * .001)));
+    const minimumScale = CAMERA_ZOOM.minimumPercent / 100 * CAMERA_ZOOM.basePixelsPerMeter;
+    const maximumScale = CAMERA_ZOOM.maximumPercent / 100 * CAMERA_ZOOM.basePixelsPerMeter;
+    const scale = Math.max(minimumScale, Math.min(maximumScale, viewport.pixelsPerMeter * Math.exp(-delta * .001)));
     labStore.getState().setCamera({
       x: world.x - (pointer.x - viewport.widthPixels / 2) / scale,
       y: world.y + (pointer.y - viewport.heightPixels / 2) / scale,

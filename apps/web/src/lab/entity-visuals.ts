@@ -59,7 +59,7 @@ export function createEntityVisual(entity: Body | TargetTrigger) {
     caption.style.fontSize = compact ? 15 : 17;
     caption.visible = labels && (!compact || selected || entity.kind === "target");
     let x = entity.kind === "target" ? 22 : -48;
-    let y = entity.kind === "target" ? -62 : -38;
+    let y = shape.kind === "circle" ? -shape.radiusMeters * scale - 30 : -38;
     if (shape.kind === "box") {
       const halfHeight = scale * (Math.abs(Math.sin(angle)) * shape.widthMeters + Math.abs(Math.cos(angle)) * shape.heightMeters) / 2;
       x = -Math.min(shape.widthMeters * scale / 2, 55);

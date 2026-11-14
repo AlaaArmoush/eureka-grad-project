@@ -26,6 +26,7 @@
   --font-sans: Inter, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
   --shadow-sm: 0 2px 8px #202e3610;
+  --canvas-height: clamp(520px, 68dvh, 960px);
   font-family: var(--font-sans);
   color: var(--text);
   background: var(--bg-1);
@@ -102,7 +103,7 @@ svg { flex-shrink: 0; stroke-width: 1.4; }
   align-content: start;
   flex: 1;
   min-height: 0;
-  max-height: calc(clamp(440px, 53vh, 620px) - 120px);
+  max-height: calc(var(--canvas-height) - 120px);
   padding: 10px 7px;
   gap: 4px;
   overflow-y: auto;
@@ -131,13 +132,13 @@ svg { flex-shrink: 0; stroke-width: 1.4; }
 .canvas-toolbar { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 2px; padding: 4px; max-width: 320px; border: 1px solid var(--line); border-radius: 6px; background: #f3f4f1f5; }
 .toolbar-divider { height: 16px; margin: 0 3px; border-left: 1px solid var(--line); }
 .zoom-form { display: flex; align-items: center; color: var(--text-2); font: 10px var(--font-mono); }
-.zoom-form input { width: 35px; min-width: 0; padding: 5px 2px; border: 0; background: transparent; color: inherit; font: inherit; text-align: right; }
+.zoom-form input { width: 45px; min-width: 0; padding: 5px 2px; border: 0; background: transparent; color: inherit; font: inherit; text-align: right; }
 .zoom-error { max-width: 240px; margin: 4px 0 0; padding: 6px; background: var(--bg-2); color: var(--red); border-radius: 4px; font-size: 11px; }
 .tool-btn { display: inline-flex; justify-content: center; align-items: center; gap: 6px; min-width: 29px; min-height: 29px; padding: 5px 7px; border: 1px solid transparent; border-radius: 4px; background: transparent; color: var(--text-3); font-size: 11px; }
 .tool-btn:hover { background: var(--bg-3); }
 .tool-btn[aria-pressed="true"], .tool-btn.active { background: #dce5e8; border-color: var(--line); color: var(--accent); }
 .zoom-readout { display: flex; align-items: center; padding: 0 7px; font: 10px var(--font-mono); color: var(--text-2); }
-[data-pixi-host], .closed-lab { width: 100%; height: clamp(440px, 53vh, 620px); min-height: 440px; overflow: hidden; }
+[data-pixi-host], .closed-lab { width: 100%; height: var(--canvas-height); overflow: hidden; }
 [data-pixi-host] canvas { display: block; touch-action: none; }
 [data-pixi-host].is-panning canvas { cursor: grabbing !important; }
 .closed-lab { display: flex; flex-direction: column; align-items: center; justify-content: center; color: #6c6b5c; font: 18px Kalam, cursive; }
@@ -149,6 +150,22 @@ svg { flex-shrink: 0; stroke-width: 1.4; }
 .target-swatch { width: 7px; height: 7px; border: 1px solid #3b8066; border-radius: 50%; }
 .viewport-status { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 40px; padding: 10px 15px; border-top: 1px solid var(--line); color: var(--text-3); font-size: 10px; }
 .viewport-status code { font: 10px var(--font-mono); }
+.viewport-error { margin: 0; padding: 10px 15px; color: var(--red); font-size: 11px; }
+.canvas:fullscreen {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg-2);
+}
+.canvas:fullscreen .panel-heading { border-radius: 0; }
+.canvas:fullscreen .canvas-workbench { flex: 1; min-height: 0; }
+.canvas:fullscreen .canvas-page { display: flex; flex-direction: column; min-height: 0; }
+.canvas:fullscreen [data-pixi-host], .canvas:fullscreen .closed-lab { flex: 1; height: auto; min-height: 0; }
+.canvas:fullscreen .scene-outline .bodies { max-height: none; }
+.canvas:fullscreen .panel-heading, .canvas:fullscreen .canvas-legend, .canvas:fullscreen .viewport-status { flex-shrink: 0; }
 .display-panel { padding: 15px 16px; }
 .display-panel h2 { margin-bottom: 12px; font-size: 11px; }
 .display-options { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -381,7 +398,7 @@ svg { flex-shrink: 0; stroke-width: 1.4; }
   .canvas-heading { top: 12px; left: 12px; right: 12px; }
   .canvas-heading > span { font-size: 16px; max-width: 110px; }
   .canvas-toolbar { max-width: 155px; }
-  [data-pixi-host], .closed-lab { height: 440px; }
+  .canvas { --canvas-height: max(460px, 65dvh); }
   .canvas-legend { padding: 9px 12px; gap: 6px 14px; font-size: 12px; }
   .viewport-status { font-size: 9px; }
   .viewport-status > span:nth-child(2) { order: 3; width: 100%; }
