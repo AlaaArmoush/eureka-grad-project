@@ -167,8 +167,8 @@ export function LabCanvas(props: {
     <>
       {/* Keep this host dedicated to Pixi. */}
       <div
-        aria-label="Physics canvas. Enter places an object, Delete removes selection, arrow keys pan."
-        aria-keyshortcuts="Enter Delete Backspace ArrowLeft ArrowRight ArrowUp ArrowDown"
+        aria-label="Physics canvas. Enter places an object, Escape exits placement to Move, Delete removes selection, arrow keys pan."
+        aria-keyshortcuts="Enter Escape Delete Backspace ArrowLeft ArrowRight ArrowUp ArrowDown"
         tabIndex={0}
         data-pixi-host
         ref={hostRef}
