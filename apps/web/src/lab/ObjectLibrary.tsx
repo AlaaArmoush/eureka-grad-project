@@ -204,6 +204,8 @@ export function ObjectLibrary() {
             }
             onClick={() => {
               setProjectileMenuOpen(false);
+              setRampMenuOpen(false);
+              setTargetMenuOpen(false);
               setPlatformMenuOpen((open) => !open);
             }}
           >
@@ -329,6 +331,7 @@ export function ObjectLibrary() {
             onClick={() => {
               setProjectileMenuOpen(false);
               setPlatformMenuOpen(false);
+              setTargetMenuOpen(false);
               setRampMenuOpen((open) => !open);
             }}
           >
