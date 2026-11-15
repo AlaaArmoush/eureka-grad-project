@@ -294,6 +294,11 @@ export function mountLabRenderer(
     const trailPoints: Vector2[] = [];
 
     for (const trailSnapshot of trailSnapshots) {
+      // A recorded trail ends at the current tick, even when future sample frames are prepared.
+      if (trailSnapshot.tick > currentSnapshot.tick) {
+        continue;
+      }
+
       const snapshotBody = trailSnapshot.bodies.find(
         (body) => body.id === selectedProjectile.id,
       );

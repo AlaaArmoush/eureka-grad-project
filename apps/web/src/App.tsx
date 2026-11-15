@@ -1,6 +1,7 @@
 import { useCallback, useEffect } from "react";
 import { useRef, useState } from "react";
-import { PROJECTILE_LAB_MOCK } from "./lab/mocks";
+// Supply the reviewed static observation and its consecutive playback frames.
+import { PROJECTILE_LAB_MOCK, PROJECTILE_PLAYBACK_SNAPSHOTS } from "./lab/mocks.js";
 import type { MoveEntityRequest, PlacementRequest } from "./lab/authoring";
 import { ObjectLibrary } from "./lab/ObjectLibrary";
 import {
@@ -19,7 +20,9 @@ import {
 } from "lucide-react";
 import { useStore } from "zustand";
 import { labStore } from "./lab/store";
-import type { LabController } from "./lab/controller";
+import { PLAYBACK_SPEEDS, type LabController, type PlaybackState } from "./lab/controller.js";
+// Describe operation results displayed by the playback controls.
+import type { EngineStatus } from "@eureka/engine";
 import { LabCanvas } from "./lab/LabCanvas";
 import type { Snapshot, SceneDefinition } from "@eureka/contracts";
 import "./App.css";
@@ -94,18 +97,63 @@ export function App() {
     editableScene.id === PROJECTILE_LAB_MOCK.scene.id &&
     editableScene.revision === PROJECTILE_LAB_MOCK.scene.revision
   ) {
-    activeSampleSnapshots = PROJECTILE_LAB_MOCK.trailSnapshots;
+    // Enable motion only for the scene covered by these reviewed frames.
+    activeSampleSnapshots = PROJECTILE_PLAYBACK_SNAPSHOTS;
   } else {
     activeSampleSnapshots = undefined;
   }
 
+  // Hold the last reported playback metadata for HTML rendering.
+  const [playbackState, setPlaybackState] = useState<PlaybackState | null>(null);
+  // Keep playback failures separate from viewport/fullscreen errors.
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+
+  const sampleEndTick = activeSampleSnapshots?.at(-1)?.tick;
+  const playbackReady = playbackState !== null && sampleEndTick !== undefined;
+  const sampleFinished = sampleEndTick !== undefined && displayedSnapshot.tick >= sampleEndTick;
   const controllerRef = useRef<LabController | null>(null);
-  const setActiveController = useCallback(
-    (controller: LabController | null) => {
-      controllerRef.current = controller;
-    },
-    [],
-  );
+
+  // Keep the imperative handle and clear toolbar availability when it is released.
+  const setActiveController = useCallback((controller: LabController | null) => {
+    controllerRef.current = controller;
+
+    if (controller === null) {
+      setPlaybackState(null);
+      setPlaybackError(null);
+    }
+  }, []);
+
+  // Show a rejected operation or clear the previous playback error after success.
+  function reportPlaybackResult(result: EngineStatus | void): void {
+    setPlaybackError(
+      result !== undefined && !result.ok
+        ? result.diagnostics.map((diagnostic) => diagnostic.message).join(" ")
+        : null,
+    );
+  }
+
+  // Route a toolbar action through the current controller without changing editor state.
+  function handlePlaybackAction(action: "play" | "pause" | "stepOnce" | "reset"): void {
+    const controller = controllerRef.current;
+
+    if (controller === null) {
+      return;
+    }
+
+    reportPlaybackResult(controller[action]());
+  }
+
+  // Convert the HTML speed into an approved value and show the controller's result.
+  function handleSpeedChange(value: string): void {
+    const controller = controllerRef.current;
+    const selectedSpeed = PLAYBACK_SPEEDS.find((candidate) => String(candidate) === value);
+
+    if (controller === null || selectedSpeed === undefined) {
+      return;
+    }
+
+    reportPlaybackResult(controller.setSpeed(selectedSpeed));
+  }
 
   useEffect(() => {
     if (!labVisible) {
@@ -249,40 +297,86 @@ export function App() {
           <div className="lab-layout">
             <div className="workbench-column">
               <div className="playback-bar">
+                {/* Continue the reviewed sample from its current tick. */}
                 <span className="playback-action" title="Play">
-                  <button aria-label="Play" disabled type="button">
+                  <button
+                    aria-label="Play" type="button"
+                    disabled={!playbackReady || playbackState?.playing === true || sampleFinished}
+                    onClick={() => handlePlaybackAction("play")}
+                  >
                     <Play size={14} />
                   </button>
                 </span>
+
+                {/* Pause without changing the accepted physical state. */}
                 <span className="playback-action" title="Pause">
-                  <button aria-label="Pause" disabled type="button">
+                  <button
+                    aria-label="Pause" type="button"
+                    disabled={playbackState?.playing !== true}
+                    onClick={() => handlePlaybackAction("pause")}
+                  >
                     <Pause size={14} />
                   </button>
                 </span>
+
+                {/* Request one outer tick while remaining paused. */}
                 <span className="playback-action" title="Step">
-                  <button aria-label="Step" disabled type="button">
+                  <button
+                    aria-label="Step" type="button"
+                    disabled={!playbackReady || playbackState?.playing === true || sampleFinished}
+                    onClick={() => handlePlaybackAction("stepOnce")}
+                  >
                     <StepForward size={14} />
                   </button>
                 </span>
+
+                {/* Restore the starting state while preserving the mounted view and selection. */}
                 <span className="playback-action" title="Reset">
-                  <button aria-label="Reset" disabled type="button">
+                  <button
+                    aria-label="Reset" type="button"
+                    disabled={playbackState === null}
+                    onClick={() => handlePlaybackAction("reset")}
+                  >
                     <RotateCcw size={14} />
                   </button>
                 </span>
                 <label htmlFor="simulation-speed">Speed </label>
-                <select name="Speed:" id="simulation-speed" defaultValue="1" disabled>
-                  <option value="0.25">0.25x</option>
-                  <option value="0.5">0.5x </option>
-                  <option value="1">1x</option>
-                  <option value="2">2x</option>
-                  <option value="4">4x</option>
+                <select
+                  id="simulation-speed" name="speed"
+                  value={playbackState?.speed ?? 1}
+                  disabled={playbackState === null}
+                  onChange={(event) => handleSpeedChange(event.currentTarget.value)}
+                >
+                  {PLAYBACK_SPEEDS.map((speed) => (
+                    <option key={speed} value={speed}>{speed}×</option>
+                  ))}
                 </select>
+                {/* Explain the finite sample's normal stopping point. */}
+                <span role="status">
+                  {playbackState === null
+                    ? "Unavailable"
+                    : playbackState.playing
+                      ? "Playing"
+                      : playbackReady && sampleFinished
+                        ? "Sample finished · Reset to replay"
+                        : "Paused"}
+                </span>
+                {playbackState !== null && !playbackReady && (
+                  <span>This edited scene has no playback sample.</span>
+                )}
+                {playbackState?.unableToMaintainRealTimeSpeed && (
+                  <span role="status">Unable to maintain real-time speed.</span>
+                )}
                 <p>
                   Time:
                   {displayedSnapshot.simulationTimeSeconds.toFixed(3)} s
                 </p>
                 <p>Tick: {displayedSnapshot.tick}</p>
               </div>
+              {/* Keep rejected playback operations visible beside their controls. */}
+              {playbackError !== null && (
+                <p className="viewport-error" role="alert">{playbackError}</p>
+              )}
               <section ref={viewportRef} className="canvas" aria-label="Scene viewport">
                 <header className="panel-heading">
                   <h2><Atom size={15} />Scene viewport</h2>
@@ -317,7 +411,13 @@ export function App() {
                       <CanvasTools />
                     </div>
                     {labVisible ? (
-                      <LabCanvas scene={editableScene} sampleSnapshots={activeSampleSnapshots} setDisplayedSnapshot={setDisplayedSnapshot} setActiveController={setActiveController} onPlacementRequested={handlePlacementRequested} onMoveRequested={handleMoveRequested} onDeleteRequested={handleDeleteRequested} />
+                      <LabCanvas
+                        scene={editableScene} sampleSnapshots={activeSampleSnapshots}
+                        setDisplayedSnapshot={setDisplayedSnapshot} setActiveController={setActiveController}
+                        onPlaybackChange={setPlaybackState}
+                        onPlacementRequested={handlePlacementRequested}
+                        onMoveRequested={handleMoveRequested} onDeleteRequested={handleDeleteRequested}
+                      />
                     ) : <div className="closed-lab"><Atom size={32} /><p>Your laboratory is closed.</p><button type="button" className="tool-btn" onClick={() => setLabVisible(true)}>Enter lab</button></div>}
                     <div className="canvas-legend" aria-label="Path legend"><span><i className="path-swatch trail" />Recorded trail</span><span><i className="path-swatch prediction" />Ideal prediction</span><span><i className="velocity-swatch" />Velocity</span><span><i className="target-swatch" />Target sensor</span></div>
                   </div>

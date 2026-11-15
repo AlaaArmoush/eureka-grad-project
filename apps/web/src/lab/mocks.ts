@@ -3,6 +3,8 @@
 // how they appear on screen without running the physics engine.
 
 import type { Diagnostic, SceneDefinition, Snapshot } from "@eureka/contracts";
+// Describe the public operations implemented by the fixture playback adapter.
+import type { Engine, EngineResult, EngineStatus } from "@eureka/engine";
 
 export interface LabMock {
   readonly scene: SceneDefinition;
@@ -207,6 +209,11 @@ function createFlightSnapshot(tick: number): Snapshot {
     diagnostics: [],
   };
 }
+// Supply every whole tick for the reviewed one-second playback sample.
+export const PROJECTILE_PLAYBACK_SNAPSHOTS: readonly Snapshot[] = Array.from(
+  { length: OBSERVATION_TICK + 1 },
+  (_, tick) => createFlightSnapshot(tick),
+);
 // time from 0 - 0.1 - 0.2 ---> 1
 const projectileTrailSnapshots = [0, 6, 12, 18, 24, 30, 36, 42, 48, 54, 60].map(
   createFlightSnapshot,
@@ -408,3 +415,134 @@ export const TARGET_PASS_THROUGH_MOCKS = {
     invalidInputDiagnostic,
   },
 } as const satisfies Record<"before" | "entered" | "after", LabMock>;
+
+// Present consecutive reviewed snapshots through the controller's existing engine boundary.
+export function createSnapshotPlaybackEngine(snapshots: readonly Snapshot[]): EngineResult<Engine> {
+  const frames = structuredClone([...snapshots]);
+  const candidate = frames[0];
+
+  if (candidate === undefined || frames.some((frame, index) => frame.tick !== index)) {
+    return {
+      ok: false,
+      diagnostics: [{
+        code: "OUT_OF_RANGE",
+        path: "snapshots",
+        message: "Playback frames must begin at tick zero and contain every whole tick.",
+      }],
+    };
+  }
+
+  const initialFrame: Snapshot = candidate;
+  let currentFrame: Snapshot = initialFrame;
+  let disposed = false;
+
+  // Reject operations after this source releases its prepared frames.
+  function activeStatus(): EngineStatus {
+    return disposed
+      ? {
+          ok: false,
+          diagnostics: [{
+            code: "DISPOSED_ENGINE",
+            path: "playback",
+            message: "This snapshot playback source has been disposed.",
+          }],
+        }
+      : { ok: true };
+  }
+
+  // Return the current borrowed frame without changing the playback cursor.
+  function getSnapshot(): EngineResult<Snapshot> {
+    const status = activeStatus();
+
+    if (!status.ok) {
+      return status;
+    }
+
+    return { ok: true, value: currentFrame };
+  }
+
+  const engine: Engine = {
+    // Prepared frames cannot execute physical commands.
+    enqueue() {
+      const status = activeStatus();
+
+      if (!status.ok) {
+        return status;
+      }
+
+      return {
+        ok: false,
+        diagnostics: [{
+          code: "UNSUPPORTED_COMMAND",
+          path: "command",
+          message: "Reviewed snapshot playback does not execute physical commands.",
+        }],
+      };
+    },
+
+    // Move only by a nonnegative integer number of prepared ticks.
+    advance(tickCount) {
+      const status = activeStatus();
+
+      if (!status.ok) {
+        return status;
+      }
+
+      if (!Number.isSafeInteger(tickCount) || tickCount < 0) {
+        return {
+          ok: false,
+          diagnostics: [{
+            code: "INVALID_ADVANCE_COUNT",
+            path: "tickCount",
+            message: "Playback requires a nonnegative whole-tick count.",
+          }],
+        };
+      }
+
+      const nextFrame = frames[currentFrame.tick + tickCount];
+
+      if (nextFrame === undefined) {
+        return {
+          ok: false,
+          diagnostics: [{
+            code: "OUT_OF_RANGE",
+            path: "tickCount",
+            message: "The requested tick is outside this reviewed sample.",
+          }],
+        };
+      }
+
+      currentFrame = nextFrame;
+      return { ok: true, value: { lastValidTick: currentFrame.tick } };
+    },
+
+    getSnapshot,
+
+    // Give retained consumers a copy independent of the borrowed frame.
+    copySnapshot() {
+      const result = getSnapshot();
+      return result.ok ? { ok: true, value: structuredClone(result.value) } : result;
+    },
+
+    // Restore the sample's original frame without replacing its controller or view.
+    reset() {
+      const status = activeStatus();
+
+      if (!status.ok) {
+        return status;
+      }
+
+      currentFrame = initialFrame;
+      return { ok: true };
+    },
+
+    // Release the frame list and allow repeated cleanup.
+    dispose() {
+      disposed = true;
+      frames.length = 0;
+      return { ok: true };
+    },
+  };
+
+  return { ok: true, value: engine };
+}

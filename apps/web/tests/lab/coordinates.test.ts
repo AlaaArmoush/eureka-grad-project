@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   screenToWorld,
   worldToScreen
-} from "./coordinates.js";
+} from "../../src/lab/coordinates.js";
 
 const VIEWPORT = {
   widthPixels: 800,
