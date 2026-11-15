@@ -235,6 +235,12 @@ export function mountLabRenderer(
 
     const state = labStore.getState();
 
+    if (event.key === "Escape" && state.activeTool.kind === "place") {
+      event.preventDefault();
+      state.setActiveTool({ kind: "move" });
+      return;
+    }
+
     if (event.key === "Enter" && state.activeTool.kind === "place") {
       event.preventDefault();
 

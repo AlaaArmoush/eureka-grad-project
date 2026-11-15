@@ -245,7 +245,6 @@ export function App() {
     reportLabResult("Command rejected — placement", placementResult);
     setEditableScene(placementResult.value.scene);
     labStore.getState().selectEntity(placementResult.value.entityId);
-    labStore.getState().setActiveTool({ kind: "move" });
   }, [reportLabResult]);
   const handleMoveRequested = useCallback(
     (request: MoveEntityRequest): boolean => {
