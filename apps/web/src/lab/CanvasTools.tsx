@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Hand, Maximize2, Minus, MousePointer2, Move, Plus, Trash2 } from "lucide-react";
+import { Hand, Minus, MousePointer2, Move, Plus, Scan, Trash2 } from "lucide-react";
 import { useStore } from "zustand";
 import { CAMERA_ZOOM, labStore } from "./store.js";
 
@@ -39,22 +39,22 @@ export function CanvasTools() {
           const value = Number(text);
           if (text === "" || !Number.isFinite(value) || value < CAMERA_ZOOM.minimumPercent || value > CAMERA_ZOOM.maximumPercent) {
             setZoomError(`Enter a zoom from ${CAMERA_ZOOM.minimumPercent}% to ${CAMERA_ZOOM.maximumPercent}%.`);
+            setZoomDraft(null);
+            event.currentTarget.querySelector<HTMLInputElement>("input")?.focus();
             return;
           }
           zoomTo(value);
-          event.currentTarget.querySelector("input")?.blur();
         }}>
           <input aria-label="Zoom percentage" aria-invalid={zoomError !== null} aria-describedby={zoomError === null ? undefined : "zoom-error"} inputMode="decimal" value={zoomDraft ?? String(Math.round(percent))} onChange={(event) => setZoomDraft(event.currentTarget.value)} onBlur={() => { setZoomDraft(null); setZoomError(null); }} onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.stopPropagation();
               setZoomDraft(null);
               setZoomError(null);
-              event.currentTarget.blur();
             }
           }} /><span>%</span>
         </form>
         <button type="button" className="tool-btn" aria-label="Zoom in" title="Zoom in" disabled={percent >= CAMERA_ZOOM.maximumPercent} onClick={() => zoomTo(largerZoom)}><Plus size={14} /></button>
-        <button type="button" className="tool-btn" aria-label="Fit scene" title="Fit scene" onClick={() => { labStore.getState().fitCamera(); setZoomDraft(null); setZoomError(null); }}><Maximize2 size={14} /></button>
+        <button type="button" className="tool-btn" aria-label="Fit scene" title="Fit scene" onClick={() => { labStore.getState().fitCamera(); setZoomDraft(null); setZoomError(null); }}><Scan size={14} /></button>
       </div>
       {zoomError !== null && <p id="zoom-error" role="alert" className="zoom-error">{zoomError}</p>}
     </div>

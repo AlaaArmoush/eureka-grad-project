@@ -666,3 +666,73 @@ it.each([
   expect(h.controller.copyScene()).toEqual(startingScene);
   expect(h.engine.advance).not.toHaveBeenCalled();
 });
+
+// Zero coordinates are valid when the proposed object does not penetrate a static surface.
+it.each([
+  { entityId: "projectile", position: { x: 0, y: 1 } },
+  { entityId: "projectile", position: { x: 25, y: 0 } },
+  { entityId: "ramp", position: { x: 0, y: 0 } },
+  { entityId: "target", position: { x: 0, y: 0 } },
+])("accepts paused coordinate editing for $entityId at $position without replacing its identity or other properties", ({ entityId, position }) => {
+  const h = createPlaybackHarness();
+  const before = h.controller.copyScene();
+  const original = [...before.bodies, ...before.triggers].find((entity) => entity.id === entityId);
+
+  if (original === undefined) {
+    throw new Error(`The reviewed authoring scene must contain ${entityId}.`);
+  }
+
+  const result = h.controller.moveEntityWhilePaused(entityId, position);
+  expect(result.ok).toBe(true);
+
+  if (!result.ok) {
+    throw new Error("Valid paused coordinates should be accepted.");
+  }
+
+  const after = h.controller.copyScene();
+  const moved = [...after.bodies, ...after.triggers].find((entity) => entity.id === entityId);
+  expect(moved).toEqual({ ...original, pose: { ...original.pose, positionMeters: position } });
+  expect([...after.bodies, ...after.triggers].filter((entity) => entity.id !== entityId)).toEqual(
+    [...before.bodies, ...before.triggers].filter((entity) => entity.id !== entityId),
+  );
+  expect(result.value.scene).toEqual(after);
+  expect(h.controller.getPlaybackState().playing).toBe(false);
+});
+
+// Ground occupies x=[-10,20], y=[-0.5,0]; a radius-0.1 ball centred at the origin penetrates it.
+it("rejects a coordinate edit that embeds the projectile in the ground and preserves the accepted scene", () => {
+  const h = createPlaybackHarness();
+  const accepted = h.controller.copyScene();
+
+  expect(h.controller.moveEntityWhilePaused("projectile", { x: 0, y: 0 })).toMatchObject({
+    ok: false,
+    diagnostics: [{ code: "INVALID_INITIAL_OVERLAP", entityId: "projectile" }],
+  });
+  expect(h.controller.copyScene()).toEqual(accepted);
+});
+
+// Each invalid input is checked against the last accepted edit, not just the initial fixture.
+it.each([
+  { name: "NaN horizontal position", position: { x: Number.NaN, y: 4 } },
+  { name: "infinite vertical position", position: { x: 3, y: Number.POSITIVE_INFINITY } },
+  { name: "negative infinite horizontal position", position: { x: Number.NEGATIVE_INFINITY, y: 4 } },
+])("preserves the last accepted scene after $name", ({ position }) => {
+  const h = createPlaybackHarness();
+  expect(h.controller.moveEntityWhilePaused("projectile", { x: 2, y: 3 }).ok).toBe(true);
+  const accepted = h.controller.copyScene();
+
+  expect(h.controller.moveEntityWhilePaused("projectile", position).ok).toBe(false);
+  expect(h.controller.copyScene()).toEqual(accepted);
+});
+
+// A stale selection cannot create an object or alter an accepted scene through coordinate editing.
+it("rejects coordinate editing for an object that no longer exists", () => {
+  const h = createPlaybackHarness();
+  const accepted = h.controller.copyScene();
+
+  expect(h.controller.moveEntityWhilePaused("removed-projectile", { x: 2, y: 3 })).toMatchObject({
+    ok: false,
+    diagnostics: [{ code: "UNKNOWN_ENTITY_ID", entityId: "removed-projectile" }],
+  });
+  expect(h.controller.copyScene()).toEqual(accepted);
+});

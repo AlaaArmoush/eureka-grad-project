@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react";
 // Supplies the portable scene and snapshot records.
 import type { SceneDefinition, Snapshot } from "@eureka/contracts";
 // Creates the headless physical-state owner for this mounted lab.
-import { createEngine } from "@eureka/engine";
+import { createEngine, type EngineStatus } from "@eureka/engine";
 // Adapt reviewed frame sequences without running the numerical solver.
 import { createSnapshotPlaybackEngine } from "./mocks.js";
 // Supplies typed placement and movement requests from Pixi to React.
@@ -13,23 +13,25 @@ import { createLabController, type LabController, type PlaybackBrowser, type Pla
 // Owns the mounted renderer.
 import { mountLabRenderer, type LabRenderer } from "./renderer.js";
 
-// Supply browser facilities while leaving callback and listener lifetime with the controller.
-function createPlaybackBrowser(): PlaybackBrowser {
+// Supply browser facilities and forward failures from scheduled playback.
+function createPlaybackBrowser(
+  onOperationResult: (context: string, result: EngineStatus) => void,
+): PlaybackBrowser {
   return {
     requestFrame: (callback) => window.requestAnimationFrame(callback),
     cancelFrame: (handle) => window.cancelAnimationFrame(handle),
     isHidden: () => document.hidden,
 
-    // Return the matching listener cleanup for controller disposal.
+    // The controller removes this listener when its lifetime ends.
     subscribeVisibilityChange: (listener) => {
       document.addEventListener("visibilitychange", listener);
       return () => document.removeEventListener("visibilitychange", listener);
     },
 
-    // Preserve asynchronous failure information until the visible error UI is wired.
+    // The controller has already paused before reporting a failed tick.
     onFrameResult: (result) => {
       if (!result.ok) {
-        console.error("Playback frame failed", result.diagnostics);
+        onOperationResult("Physics failed to complete a tick", result);
       }
     },
   };
@@ -41,6 +43,7 @@ export function LabCanvas(props: {
   setDisplayedSnapshot(snapshot: Snapshot): void;
   setActiveController(controller: LabController | null): void;
   onPlaybackChange(state: PlaybackState): void;
+  onOperationResult(context: string, result: EngineStatus): void;
   onPlacementRequested(request: PlacementRequest): void;
   onMoveRequested(request: MoveEntityRequest): boolean;
   onDeleteRequested(entityId: string): boolean;
@@ -49,6 +52,7 @@ export function LabCanvas(props: {
   const toSetDisplayedSnapshot = props.setDisplayedSnapshot;
   const setActiveController = props.setActiveController;
   const onPlaybackChange = props.onPlaybackChange;
+  const onOperationResult = props.onOperationResult;
   const onPlacementRequested = props.onPlacementRequested;
   const onMoveRequested = props.onMoveRequested;
   const onDeleteRequested = props.onDeleteRequested;
@@ -66,6 +70,11 @@ export function LabCanvas(props: {
     }
 
     setActiveController(null);
+    function failSetup(result: EngineStatus): void {
+      onOperationResult("Laboratory unavailable", result);
+      rendererRef.current?.dispose();
+      rendererRef.current = null;
+    }
 
     // Use prepared frames for reviewed samples and the existing initial-state source for authoring.
     const engineResult = sampleSnapshots === undefined
@@ -73,7 +82,7 @@ export function LabCanvas(props: {
       : createSnapshotPlaybackEngine(sampleSnapshots);
 
     if (!engineResult.ok) {
-      console.error("Engine creation failed", engineResult.diagnostics);
+      failSetup(engineResult);
       return;
     }
 
@@ -81,11 +90,8 @@ export function LabCanvas(props: {
     const initialSnapshotResult = engine.getSnapshot();
 
     if (!initialSnapshotResult.ok) {
-      console.error(
-        "Initial snapshot failed",
-        initialSnapshotResult.diagnostics,
-      );
       engine.dispose();
+      failSetup(initialSnapshotResult);
       return;
     }
 
@@ -117,17 +123,14 @@ export function LabCanvas(props: {
       consumeSnapshot: renderer.updateSnapshot,
       consumeReadout: toSetDisplayedSnapshot,
       releaseView: renderer.dispose,
-      playbackBrowser: createPlaybackBrowser(),
+      playbackBrowser: createPlaybackBrowser(onOperationResult),
       onPlaybackChange,
       stopAtTick: sampleSnapshots?.at(-1)?.tick,
     });
 
     if (!controllerResult.ok) {
-      console.error("Controller creation failed", controllerResult.diagnostics);
-      renderer.dispose();
-      // Clear the retained handle after failed controller construction.
-      rendererRef.current = null;
       engine.dispose();
+      failSetup(controllerResult);
       return;
     }
 
@@ -145,6 +148,7 @@ export function LabCanvas(props: {
     toSetDisplayedSnapshot,
     setActiveController,
     onPlaybackChange,
+    onOperationResult,
     onPlacementRequested,
     onMoveRequested,
     onDeleteRequested,
@@ -163,10 +167,12 @@ export function LabCanvas(props: {
     <>
       {/* Keep this host dedicated to Pixi. */}
       <div
-        aria-label="Eureka physics canvas"
+        aria-label="Physics canvas. Enter places an object, Delete removes selection, arrow keys pan."
+        aria-keyshortcuts="Enter Delete Backspace ArrowLeft ArrowRight ArrowUp ArrowDown"
+        tabIndex={0}
         data-pixi-host
         ref={hostRef}
-        role="img"
+        role="group"
         style={{
           overflow: "hidden",
           width: "100%",

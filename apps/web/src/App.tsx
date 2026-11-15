@@ -89,7 +89,7 @@ export function App() {
     labStore,
     (state) => state.selectedEntityId,
   );
-  const activeTool = useStore(labStore, (state) => state.activeTool);
+  const selectionNotice = useStore(labStore, (state) => state.selectionNotice);
   const overlayVisibility = useStore(labStore, (state) => state.overlayVisibility);
   let activeSampleSnapshots;
 
@@ -105,8 +105,7 @@ export function App() {
 
   // Hold the last reported playback metadata for HTML rendering.
   const [playbackState, setPlaybackState] = useState<PlaybackState | null>(null);
-  // Keep playback failures separate from viewport/fullscreen errors.
-  const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [labError, setLabError] = useState<string | null>(null);
 
   const sampleEndTick = activeSampleSnapshots?.at(-1)?.tick;
   const playbackReady = playbackState !== null && sampleEndTick !== undefined;
@@ -119,40 +118,51 @@ export function App() {
 
     if (controller === null) {
       setPlaybackState(null);
-      setPlaybackError(null);
+      setLabError(null);
     }
   }, []);
 
-  // Show a rejected operation or clear the previous playback error after success.
-  function reportPlaybackResult(result: EngineStatus | void): void {
-    setPlaybackError(
-      result !== undefined && !result.ok
-        ? result.diagnostics.map((diagnostic) => diagnostic.message).join(" ")
-        : null,
-    );
-  }
+  // Display typed failures with enough context to distinguish their source.
+  const reportLabResult = useCallback((context: string, result: EngineStatus | void): void => {
+    if (result === undefined || result.ok) {
+      setLabError(null);
+      return;
+    }
 
-  // Route a toolbar action through the current controller without changing editor state.
+    const details = result.diagnostics
+      .map((diagnostic) => diagnostic.message || `${diagnostic.code} (${diagnostic.path})`)
+      .join(" ");
+
+    setLabError(`${context}: ${details || "No diagnostic details were supplied."}`);
+  }, []);
+
+  // Run the requested operation through the mounted controller.
   function handlePlaybackAction(action: "play" | "pause" | "stepOnce" | "reset"): void {
     const controller = controllerRef.current;
 
     if (controller === null) {
+      setLabError("Command rejected: the laboratory is not available.");
       return;
     }
 
-    reportPlaybackResult(controller[action]());
+    const context = action === "stepOnce"
+      ? "Physics failed to complete a tick"
+      : "Command rejected";
+
+    reportLabResult(context, controller[action]());
   }
 
-  // Convert the HTML speed into an approved value and show the controller's result.
+  // Accept only a speed listed by the existing controller boundary.
   function handleSpeedChange(value: string): void {
     const controller = controllerRef.current;
     const selectedSpeed = PLAYBACK_SPEEDS.find((candidate) => String(candidate) === value);
 
     if (controller === null || selectedSpeed === undefined) {
+      setLabError("Command rejected: the laboratory or requested speed is unavailable.");
       return;
     }
 
-    reportPlaybackResult(controller.setSpeed(selectedSpeed));
+    reportLabResult("Command rejected", controller.setSpeed(selectedSpeed));
   }
 
   useEffect(() => {
@@ -190,13 +200,17 @@ export function App() {
       editableScene.triggers.some((trigger) => trigger.id === selectedEntityId);
 
     if (!selectedEntityStillExists) {
-      labStore.getState().selectEntity(null);
+      labStore.getState().selectEntity(
+        null,
+        `Object no longer exists: ${selectedEntityId}. Select another object.`,
+      );
     }
   }, [editableScene, selectedEntityId]);
   const handlePlacementRequested = useCallback((request: PlacementRequest) => {
     const controller = controllerRef.current;
 
     if (controller === null) {
+      setLabError("Command rejected: the laboratory is not available.");
       return;
     }
 
@@ -224,18 +238,21 @@ export function App() {
       );
     }
     if (!placementResult.ok) {
-      console.error("Object placement rejected", placementResult.diagnostics);
+      reportLabResult("Command rejected — placement", placementResult);
       return;
     }
 
+    reportLabResult("Command rejected — placement", placementResult);
     setEditableScene(placementResult.value.scene);
     labStore.getState().selectEntity(placementResult.value.entityId);
-  }, []);
+    labStore.getState().setActiveTool({ kind: "move" });
+  }, [reportLabResult]);
   const handleMoveRequested = useCallback(
     (request: MoveEntityRequest): boolean => {
       const controller = controllerRef.current;
 
       if (controller === null) {
+        setLabError("Command rejected: the laboratory is not available.");
         return false;
       }
 
@@ -245,34 +262,37 @@ export function App() {
       );
 
       if (!moveResult.ok) {
-        console.error("Object movement rejected", moveResult.diagnostics);
+        reportLabResult("Command rejected — movement", moveResult);
         return false;
       }
 
+      reportLabResult("Command rejected — movement", moveResult);
       setEditableScene(moveResult.value.scene);
       labStore.getState().selectEntity(moveResult.value.entityId);
       return true;
     },
-    [],
+    [reportLabResult],
   );
   const handleDeleteRequested = useCallback((entityId: string): boolean => {
     const controller = controllerRef.current;
 
     if (controller === null) {
+      setLabError("Command rejected: the laboratory is not available.");
       return false;
     }
 
     const deleteResult = controller.deleteEntity(entityId);
 
     if (!deleteResult.ok) {
-      console.error("Object deletion rejected", deleteResult.diagnostics);
+      reportLabResult("Command rejected — deletion", deleteResult);
       return false;
     }
 
+    reportLabResult("Command rejected — deletion", deleteResult);
     setEditableScene(deleteResult.value.scene);
     labStore.getState().selectEntity(null);
     return true;
-  }, []);
+  }, [reportLabResult]);
   return (
     <div className="eureka-app">
       <aside className="site-rail" aria-label="Eureka">
@@ -373,10 +393,6 @@ export function App() {
                 </p>
                 <p>Tick: {displayedSnapshot.tick}</p>
               </div>
-              {/* Keep rejected playback operations visible beside their controls. */}
-              {playbackError !== null && (
-                <p className="viewport-error" role="alert">{playbackError}</p>
-              )}
               <section ref={viewportRef} className="canvas" aria-label="Scene viewport">
                 <header className="panel-heading">
                   <h2><Atom size={15} />Scene viewport</h2>
@@ -415,6 +431,7 @@ export function App() {
                         scene={editableScene} sampleSnapshots={activeSampleSnapshots}
                         setDisplayedSnapshot={setDisplayedSnapshot} setActiveController={setActiveController}
                         onPlaybackChange={setPlaybackState}
+                        onOperationResult={reportLabResult}
                         onPlacementRequested={handlePlacementRequested}
                         onMoveRequested={handleMoveRequested} onDeleteRequested={handleDeleteRequested}
                       />
@@ -422,7 +439,13 @@ export function App() {
                     <div className="canvas-legend" aria-label="Path legend"><span><i className="path-swatch trail" />Recorded trail</span><span><i className="path-swatch prediction" />Ideal prediction</span><span><i className="velocity-swatch" />Velocity</span><span><i className="target-swatch" />Target sensor</span></div>
                   </div>
                 </div>
-                <div className="viewport-status"><span><span className="status-dot" />{activeSampleSnapshots === undefined ? "Authored initial state" : "Handwritten sample"}</span><span>{activeTool.kind === "place" ? "Click the page to place your object" : activeTool.kind === "move" ? "Drag an object to move it" : activeTool.kind === "delete" ? "Click an object to delete it" : activeTool.kind === "pan" ? "Drag the page to pan" : "Select an object to inspect · Escape to deselect"}</span><code>t {displayedSnapshot.simulationTimeSeconds.toFixed(2)} s / tick {displayedSnapshot.tick}</code></div>
+                <div className="viewport-status"><span><span className="status-dot" />{activeSampleSnapshots === undefined ? "Authored initial state" : "Handwritten sample"}</span></div>
+                {selectionNotice !== null && (
+                  <p className="viewport-error" role="status">{selectionNotice}</p>
+                )}
+                {labError !== null && (
+                  <p className="viewport-error" role="alert">{labError}</p>
+                )}
                 {viewportError !== null && <p className="viewport-error" role="alert">{viewportError}</p>}
               </section>
               <section className="display-panel" aria-label="Display options">
@@ -439,7 +462,7 @@ export function App() {
               </section>
               <ObservationNotebook snapshot={displayedSnapshot} selectedEntityId={selectedEntityId} />
             </div>
-            <SceneInspector controllerRef={controllerRef} displayedSnapshot={displayedSnapshot} editableScene={editableScene} selectedEntityId={selectedEntityId} setEditableScene={setEditableScene} />
+            <SceneInspector controllerRef={controllerRef} displayedSnapshot={displayedSnapshot} editableScene={editableScene} selectedEntityId={selectedEntityId} setEditableScene={setEditableScene} playing={playbackState?.playing ?? false} />
           </div>
           <footer className="workspace-footer"><span>Eureka <i>/</i> A place to make physics visible.</span><span>{activeSampleSnapshots === undefined ? "Scene authoring" : "Sample observation"} · SI units</span></footer>
         </main>

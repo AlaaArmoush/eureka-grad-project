@@ -36,12 +36,13 @@ export interface LabEditorState {
   readonly cameraFitRequest: number;
   fitCamera(): void;
   readonly selectedEntityId: string | null;
+  readonly selectionNotice: string | null;
+  selectEntity(entityId: string | null, notice?: string): void;
   readonly overlayVisibility: OverlayVisibility;
 
   setCamera(centerWorldMeters: Vector2, pixelsPerMeter: number): void;
   setOverlayVisible(overlay: keyof OverlayVisibility, visible: boolean): void;
 
-  selectEntity(entityId: string | null): void;
   readonly activeTool: LabTool;
   setActiveTool(tool: LabTool): void;
 }
@@ -52,13 +53,13 @@ export type LabTool =
   | { readonly kind: "pan" }
   | { readonly kind: "delete" }
   | {
-      readonly kind: "place";
-      readonly entityKind: PlaceableEntityKind;
-      readonly projectileProperties?: ProjectilePlacementProperties;
-      readonly platformProperties?: PlatformPlacementProperties;
-      readonly rampProperties?: RampPlacementProperties;
-      readonly targetProperties?: TargetPlacementProperties;
-    };
+    readonly kind: "place";
+    readonly entityKind: PlaceableEntityKind;
+    readonly projectileProperties?: ProjectilePlacementProperties;
+    readonly platformProperties?: PlatformPlacementProperties;
+    readonly rampProperties?: RampPlacementProperties;
+    readonly targetProperties?: TargetPlacementProperties;
+  };
 
 // Share editor state outside React; keep it across canvas remounts.
 export const labStore = createStore<LabEditorState>()((set) => ({
@@ -72,6 +73,7 @@ export const labStore = createStore<LabEditorState>()((set) => ({
   cameraFitRequest: 0,
   fitCamera: () => set((state) => ({ cameraFitRequest: state.cameraFitRequest + 1 })),
   selectedEntityId: "projectile",
+  selectionNotice: null,
   overlayVisibility: {
     trail: true,
     velocity: true,
@@ -111,8 +113,11 @@ export const labStore = createStore<LabEditorState>()((set) => ({
     });
   },
 
-  selectEntity: (selectedEntityId) => {
-    set({ selectedEntityId });
+  selectEntity: (selectedEntityId, notice) => {
+    set({
+      selectedEntityId,
+      selectionNotice: notice ?? null,
+    });
   },
 
   activeTool: { kind: "select" },

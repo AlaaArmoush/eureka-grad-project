@@ -21,6 +21,11 @@ import { createPaperTexture } from "./materials.js";
 import { createNotebookGrid } from "./sketchbook.js";
 import { createEntityVisual } from "./entity-visuals.js";
 
+const DELETE_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke="#303b42" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M3 2v16l4-4 3 7 3-1-3-7h7Z" fill="#fff"/><circle cx="18" cy="17" r="5" fill="#fff"/><path d="M15 17h6" fill="none" stroke-width="2"/></svg>',
+)}") 3 2, pointer`;
+
 // Keep velocity arrows readable without changing physical values.
 export const VELOCITY_ARROW_SCALE = {
   pixelsPerMeterPerSecond: 6,
@@ -187,7 +192,10 @@ export function mountLabRenderer(
   function stopPan(): void {
     panState = null;
     host.classList.remove("is-panning");
-    background.cursor = labStore.getState().activeTool.kind === "pan" ? "grab" : "default";
+
+    if (initialized && !disposed) {
+      resizeAndRender();
+    }
   }
 
   function finishPan(event: FederatedPointerEvent): void {
@@ -207,6 +215,58 @@ export function mountLabRenderer(
   function preventMiddleMouseDefault(event: MouseEvent): void {
     if (event.button === 1) {
       event.preventDefault();
+    }
+  }
+
+  function placeObjectAt(positionMeters: Vector2): void {
+    const tool = labStore.getState().activeTool;
+
+    if (tool.kind !== "place") {
+      return;
+    }
+
+    onPlacementRequested({ ...tool, positionMeters: { ...positionMeters } });
+  }
+
+  function handleCanvasKey(event: KeyboardEvent): void {
+    if (event.altKey || event.ctrlKey || event.metaKey || disposed) {
+      return;
+    }
+
+    const state = labStore.getState();
+
+    if (event.key === "Enter" && state.activeTool.kind === "place") {
+      event.preventDefault();
+
+      if (!event.repeat) {
+        placeObjectAt(state.cameraCenterWorldMeters);
+      }
+
+      return;
+    }
+
+    if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+
+      if (!event.repeat && state.selectedEntityId !== null && onDeleteRequested(state.selectedEntityId)) {
+        labStore.getState().setActiveTool({ kind: "select" });
+      }
+
+      return;
+    }
+
+    const x = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+    const y = event.key === "ArrowUp" ? 1 : event.key === "ArrowDown" ? -1 : 0;
+
+    if (x !== 0 || y !== 0) {
+      event.preventDefault();
+      stopPan();
+      cancelActiveDrag();
+      const distanceMeters = 120 / state.pixelsPerMeter;
+      state.setCamera({
+        x: state.cameraCenterWorldMeters.x + x * distanceMeters,
+        y: state.cameraCenterWorldMeters.y + y * distanceMeters,
+      }, state.pixelsPerMeter);
     }
   }
 
@@ -423,8 +483,12 @@ export function mountLabRenderer(
     const editorState = labStore.getState();
 
     // Apply editor choices without changing the physical snapshot.
-    background.cursor = editorState.activeTool.kind === "pan" ? "grab" :
-      editorState.activeTool.kind === "place" || editorState.activeTool.kind === "delete" ? "crosshair" : "default";
+    const toolCursor = panState !== null || dragState !== null ? "grabbing" :
+      editorState.activeTool.kind === "pan" ? "grab" :
+        editorState.activeTool.kind === "move" ? "move" :
+          editorState.activeTool.kind === "place" ? "copy" :
+            editorState.activeTool.kind === "delete" ? DELETE_CURSOR : "default";
+    background.cursor = toolCursor;
     trailGraphic.visible = editorState.overlayVisibility.trail;
     predictionGraphic.visible = editorState.overlayVisibility.prediction;
     velocityGraphic.visible = editorState.overlayVisibility.velocity;
@@ -443,9 +507,7 @@ export function mountLabRenderer(
     redrawSelectedPrediction(viewport, selectedProjectile);
 
     for (const item of renderItems.values()) {
-      item.graphic.cursor = dragState?.entityId === item.entityId ? "grabbing" :
-        editorState.activeTool.kind === "move" ? "move" : editorState.activeTool.kind === "pan" ? "grab" :
-          editorState.activeTool.kind === "delete" || editorState.activeTool.kind === "place" ? "crosshair" : "pointer";
+      item.graphic.cursor = editorState.activeTool.kind === "select" && panState === null ? "pointer" : toolCursor;
       const entered = editorState.overlayVisibility.events && currentSnapshot.events.some(
         (event) => event.kind === "targetEntered" && event.targetId === item.entityId && event.tick === currentSnapshot.tick,
       );
@@ -486,7 +548,6 @@ export function mountLabRenderer(
       return;
     }
 
-    background.cursor = labStore.getState().activeTool.kind === "pan" ? "grab" : "default";
     rebuildRenderItems();
     resizeAndRender();
   }
@@ -802,6 +863,7 @@ export function mountLabRenderer(
       if (!event.isPrimary) {
         return;
       }
+      host.focus({ preventScroll: true });
       if (panState !== null) {
         event.stopImmediatePropagation();
         return;
@@ -828,42 +890,7 @@ export function mountLabRenderer(
         return;
       }
 
-      const positionMeters = screenToWorld(event.global, getViewport());
-
-      let placementRequest: PlacementRequest = {
-        entityKind: activeTool.entityKind,
-        positionMeters,
-      };
-
-      if (activeTool.projectileProperties !== undefined) {
-        placementRequest = {
-          ...placementRequest,
-          projectileProperties: activeTool.projectileProperties,
-        };
-      }
-
-      if (activeTool.platformProperties !== undefined) {
-        placementRequest = {
-          ...placementRequest,
-          platformProperties: activeTool.platformProperties,
-        };
-      }
-      if (activeTool.rampProperties !== undefined) {
-        placementRequest = {
-          ...placementRequest,
-          rampProperties: activeTool.rampProperties,
-        };
-      }
-      if (activeTool.targetProperties !== undefined) {
-        placementRequest = {
-          ...placementRequest,
-          targetProperties: activeTool.targetProperties,
-        };
-      }
-
-      onPlacementRequested(placementRequest);
-
-      labStore.getState().setActiveTool({ kind: "select" });
+      placeObjectAt(screenToWorld(event.global, getViewport()));
 
       // Prevent the object underneath from being selected instead.
       event.stopImmediatePropagation();
@@ -896,6 +923,7 @@ export function mountLabRenderer(
     host.addEventListener("wheel", handleWheel, { passive: false });
     host.addEventListener("mousedown", preventMiddleMouseDefault);
     host.addEventListener("auxclick", preventMiddleMouseDefault);
+    host.addEventListener("keydown", handleCanvasKey);
     window.addEventListener("blur", cancelInteractions);
     unsubscribeFromStore = labStore.subscribe((state, previousState) => {
       if (state.cameraFitRequest !== previousState.cameraFitRequest) {
@@ -921,6 +949,10 @@ export function mountLabRenderer(
         state.overlayVisibility !== previousState.overlayVisibility
       ) {
         resizeAndRender();
+
+        if (state.activeTool !== previousState.activeTool) {
+          application.renderer.events.setCursor(background.cursor ?? "default");
+        }
       }
     });
     updateSnapshot(currentSnapshot);
@@ -945,6 +977,7 @@ export function mountLabRenderer(
     host.removeEventListener("wheel", handleWheel);
     host.removeEventListener("mousedown", preventMiddleMouseDefault);
     host.removeEventListener("auxclick", preventMiddleMouseDefault);
+    host.removeEventListener("keydown", handleCanvasKey);
     window.removeEventListener("blur", cancelInteractions);
     stopPan();
     dragState = null;

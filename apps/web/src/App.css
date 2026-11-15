@@ -156,7 +156,6 @@ svg { flex-shrink: 0; stroke-width: 1.4; }
 .velocity-swatch { width: 17px; border-top: 2px solid #357ea0; transform: rotate(-5deg); }
 .target-swatch { width: 7px; height: 7px; border: 1px solid #3b8066; border-radius: 50%; }
 .viewport-status { display: flex; justify-content: space-between; flex-wrap: wrap; align-items: center; gap: 8px 16px; min-height: 40px; padding: 10px 15px; border-top: 1px solid var(--line); color: var(--text-3); font-size: 10px; }
-.viewport-status code { font: 10px var(--font-mono); }
 .viewport-error { margin: 0; padding: 10px 15px; color: var(--red); font-size: 11px; }
 .canvas:fullscreen {
   display: flex;
@@ -184,13 +183,14 @@ svg { flex-shrink: 0; stroke-width: 1.4; }
 .playback-bar button, .playback-bar select { display: inline-flex; align-items: center; min-height: 28px; padding: 5px 7px; background: var(--bg-2); color: var(--text-2); border: 1px solid var(--line); border-radius: 4px; }
 .playback-bar p { margin: 0 0 0 auto; font: 10px var(--font-mono); }
 .notebook-values { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px 0; margin: 0; padding: 20px 0; }
+.notebook-values.is-time-only { grid-template-columns: 1fr; }
+.notebook-values.is-time-only > div { border: 0; }
 .notebook-values > div { padding: 0 18px; border-right: 1px solid var(--line); min-width: 0; }
 .notebook-values > div:nth-child(3n) { border: 0; }
 .notebook-values dt { margin-bottom: 13px; color: var(--text-3); font-size: 11px; }
 .notebook-values dd { margin: 0 0 7px; font: 500 clamp(17px, 1.55vw, 25px)/1.2 var(--font-mono); overflow-wrap: anywhere; }
 .notebook-values small { margin-left: 5px; font-size: 10px; color: var(--text-3); }
 .notebook-values div > span { font: 11px var(--font-mono); color: var(--text-3); }
-.panel-footnote { margin: 0; padding: 12px 16px; border-top: 1px solid var(--line); border-radius: 0 0 10px 10px; background: var(--bg-0); color: var(--text-3); font-size: 10px; line-height: 1.6; }
 .event-notebook summary { padding: 16px; cursor: pointer; color: var(--text-2); font-size: 12px; }
 .event-notebook .count-badge { margin-left: 6px; }
 .panel-empty { padding: 0 16px 12px; color: var(--text-3); font-size: 12px; }
@@ -209,6 +209,13 @@ svg { flex-shrink: 0; stroke-width: 1.4; }
 .property-position { display: grid; grid-template-columns: 1fr auto; gap: 10px; margin: 18px 0; font-size: 11px; }
 .property-position dt { color: var(--text-3); }
 .property-position dd { margin: 0; font-family: var(--font-mono); text-align: right; overflow-wrap: anywhere; }
+.coordinate-editor { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 4px; margin: 0; }
+.number-field-inline { display: block; min-width: 0; }
+.number-field-inline input { box-sizing: border-box; width: 100%; max-width: 12ch; padding: 1px 3px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: inherit; font: inherit; text-align: right; }
+.number-field-inline input:hover { border-color: var(--line-2); }
+.number-field-inline [role="alert"], .coordinate-error { display: block; margin: 4px 0; color: var(--red); font: 11px/1.4 var(--font-sans); text-align: left; }
+.coordinate-unit { color: var(--text-3); }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .inspector-footer { display: flex; gap: 12px; border-top: 1px solid var(--line); padding: 14px 17px; color: var(--text-3); font-size: 10px; overflow-wrap: anywhere; }
 .inspector-footer code { font: 10px var(--font-mono); min-width: 0; }
 .bodies { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
@@ -241,8 +248,10 @@ svg { flex-shrink: 0; stroke-width: 1.4; }
 }
 
 .placement-submenu input:focus-visible,
-.property-editor-inline input:focus-visible {
-  outline: none;
+.property-editor-inline input:focus-visible,
+.coordinate-editor input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
   border-color: var(--accent-2);
   box-shadow: 0 0 0 3px rgba(127, 156, 141, 0.08);
 }

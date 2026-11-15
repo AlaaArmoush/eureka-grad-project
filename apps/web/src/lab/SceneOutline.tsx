@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { SceneDefinition } from "@eureka/contracts";
 import { Circle, Layers, Target, X } from "lucide-react";
 import { labStore } from "./store.js";
@@ -9,9 +10,19 @@ export function SceneOutline(props: {
   onClose(): void;
 }) {
   const entities = [...props.scene.bodies, ...props.scene.triggers];
+  const outlineRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    const outline = outlineRef.current;
+    const selectedButton = outline?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]');
+    const firstButton = outline?.querySelector<HTMLButtonElement>("button");
+
+    (selectedButton ?? firstButton)?.focus();
+  }, []);
 
   return (
     <aside
+      ref={outlineRef}
       id="scene-outline"
       className="scene-outline"
       aria-labelledby="scene-outline-title"
