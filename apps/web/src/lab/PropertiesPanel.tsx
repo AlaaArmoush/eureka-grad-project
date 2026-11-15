@@ -1,9 +1,10 @@
 // Owns property-form errors and types the existing controller reference.
-import { useState, type RefObject } from "react";
+import { Fragment, useRef, useState, type RefObject } from "react";
 // Supplies the scene and displayed snapshot records.
 import type { SceneDefinition, Snapshot } from "@eureka/contracts";
 // Supplies the accepted property-edit operations.
 import type { LabController } from "./controller.js";
+import { NumberField } from "./NumberField.js";
 
 // Remember launch text alongside the physical values accepted for this projectile.
 interface AcceptedLaunchInput {
@@ -12,6 +13,15 @@ interface AcceptedLaunchInput {
   readonly velocityY: number;
   readonly speedText: string;
   readonly angleText: string;
+}
+
+function usePropertyError(scope: string): readonly [string | null, (message: string | null) => void] {
+  const [entry, setEntry] = useState<{ scope: string; message: string } | null>(null);
+
+  return [
+    entry?.scope === scope ? entry.message : null,
+    (message) => setEntry(message === null ? null : { scope, message }),
+  ];
 }
 
 // Hide conversion noise when reconstructing an input from physical values.
@@ -25,6 +35,7 @@ export function PropertiesPanel(props: {
   editableScene: SceneDefinition;
   selectedEntityId: string | null;
   setEditableScene(scene: SceneDefinition): void;
+  playing?: boolean;
 }) {
   const {
     controllerRef,
@@ -43,7 +54,9 @@ export function PropertiesPanel(props: {
   const selectedDefinition =
     editableScene.bodies.find((body) => body.id === selectedEntityId) ??
     selectedTrigger;
-  const selectedPose = selectedBody?.pose ?? selectedTrigger?.pose;
+  const selectedPose = selectedDefinition === undefined
+    ? undefined
+    : selectedBody?.pose ?? selectedTrigger?.pose;
 
   const selectedProjectile =
     selectedDefinition?.kind === "dynamic" ? selectedDefinition : undefined;
@@ -77,13 +90,12 @@ export function PropertiesPanel(props: {
   const selectedTarget =
     selectedDefinition?.kind === "target" ? selectedDefinition : undefined;
 
-  const [projectileEditError, setProjectileEditError] = useState<string | null>(
-    null,
-  );
-  const [staticBodyEditError, setStaticBodyEditError] = useState<string | null>(
-    null,
-  );
-  const [targetEditError, setTargetEditError] = useState<string | null>(null);
+  const errorScope = JSON.stringify([editableScene.id, editableScene.revision, selectedEntityId]);
+  const [projectileEditError, setProjectileEditError] = usePropertyError(errorScope);
+  const [staticBodyEditError, setStaticBodyEditError] = usePropertyError(errorScope);
+  const [targetEditError, setTargetEditError] = usePropertyError(errorScope);
+  const [positionEditError, setPositionEditError] = usePropertyError(errorScope);
+  const panelRef = useRef<HTMLElement>(null);
 
   // Keep accepted launch text across renders and selection changes.
   const [acceptedLaunchInputs, setAcceptedLaunchInputs] = useState<
@@ -109,40 +121,125 @@ export function PropertiesPanel(props: {
     }
   }
 
+  function commitPosition(axis: "x" | "y", form: HTMLFormElement): void {
+    const input = form.elements.namedItem(`edit-position-${axis}`);
+
+    if (!(input instanceof HTMLInputElement) || selectedDefinition === undefined || selectedPose === undefined) {
+      return;
+    }
+
+    if (input.value === input.defaultValue) {
+      return;
+    }
+
+    const value = Number(input.value);
+    const controller = controllerRef.current;
+
+    if (input.value.trim() === "" || !Number.isFinite(value)) {
+      form.reset();
+      setPositionEditError(`${axis.toUpperCase()} must be a finite number.`);
+      return;
+    }
+
+    if (controller === null) {
+      form.reset();
+      setPositionEditError("Command rejected: the laboratory is not available.");
+      return;
+    }
+
+    const result = controller.moveEntityWhilePaused(selectedDefinition.id, {
+      ...selectedPose.positionMeters,
+      [axis]: value,
+    });
+
+    if (!result.ok) {
+      form.reset();
+      const details = result.diagnostics.map((diagnostic) => diagnostic.message || diagnostic.code).join(" ");
+      setPositionEditError(`Command rejected: ${details || "The position could not be changed."}`);
+      return;
+    }
+
+    setPositionEditError(null);
+    setEditableScene(result.value.scene);
+  }
+
   return (
-    <section className="properties">
-      <h2>Properties</h2>
-      <p>
-        <strong> Selected Object: </strong>
-        {selectedEntityId ?? "None"}
-      </p>
-      <p>
-        <strong>Type: </strong>
-        {selectedDefinition?.kind ?? "None"}
-      </p>
-      <p>
-        <strong>Shape: </strong>
-        {selectedDefinition?.shape.kind ?? "None"}
-      </p>
-      {selectedDefinition === undefined && (
-        <p className="dimension-readout">
-          <strong>Dimensions:</strong>
-          No object selected
+    <section
+      ref={panelRef}
+      className="properties"
+      onSubmit={(event) => {
+        const form = event.target;
+
+        if (!(form instanceof HTMLFormElement) || form.classList.contains("coordinate-editor")) {
+          return;
+        }
+
+        const active = document.activeElement;
+        const name = active instanceof HTMLInputElement && form.contains(active)
+          ? active.name
+          : form.querySelector<HTMLInputElement>("input[name]")?.name;
+
+        if (name === undefined || name === "") {
+          return;
+        }
+
+        // Accepted edits replace the form with the next scene revision.
+        queueMicrotask(() => {
+          panelRef.current?.querySelector<HTMLInputElement>(`input[name="${CSS.escape(name)}"]`)?.focus();
+        });
+      }}
+    >
+      <header className="property-identity">
+        <h2>
+          {selectedDefinition === undefined
+            ? selectedEntityId === null ? "No object selected" : "Object no longer exists"
+            : selectedDefinition.kind === "dynamic" ? "Projectile"
+              : selectedDefinition.kind === "target" ? "Target zone"
+                : selectedDefinition.id.toLowerCase().includes("ground") ? "Ground"
+                  : selectedDefinition.id.toLowerCase().includes("ramp") ? "Inclined plane"
+                    : "Platform"}
+        </h2>
+        <p>
+          {selectedDefinition === undefined
+            ? selectedEntityId === null
+              ? "Select an object on the page or open the scene outline."
+              : "This object is absent from the scene. Select another object."
+            : `${selectedDefinition.kind === "dynamic" ? "Dynamic body" : selectedDefinition.kind === "target" ? "Pass-through sensor" : "Fixed surface"} · ${selectedDefinition.shape.kind}`}
         </p>
+      </header>
+      {selectedPose !== undefined && selectedDefinition !== undefined && (
+        <dl className="property-position">
+          {(["x", "y"] as const).map((axis) => (
+            <Fragment key={`${selectedDefinition.id}-${axis}`}>
+              <dt>{axis.toUpperCase()}</dt>
+              <dd>
+                {props.playing ? `${selectedPose.positionMeters[axis].toFixed(3)} m` : (
+                  <form
+                    className="coordinate-editor"
+                    aria-label={`Edit ${axis.toUpperCase()} position`}
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      commitPosition(axis, event.currentTarget);
+                    }}
+                    onBlur={(event) => {
+                      const input = event.target;
+
+                      if (input instanceof HTMLInputElement && input.value !== input.defaultValue) {
+                        event.currentTarget.requestSubmit();
+                      }
+                    }}
+                  >
+                    <NumberField label={`${axis.toUpperCase()} position (m)`} name={`edit-position-${axis}`} defaultValue={selectedPose.positionMeters[axis].toFixed(3)} compact />
+                    <span className="coordinate-unit">m</span>
+                  </form>
+                )}
+              </dd>
+            </Fragment>
+          ))}
+          <dt>Rotation</dt><dd>{(selectedPose.angleRadians * 180 / Math.PI).toFixed(2)}°</dd>
+        </dl>
       )}
-      <p>
-        <strong>Selected Object position:</strong>
-      </p>
-      <ul>
-        <li>
-          <strong>x(m):</strong>
-          {selectedPose?.positionMeters.x ?? "Please select an Object"}
-        </li>
-        <li>
-          <strong>y(m):</strong>
-          {selectedPose?.positionMeters.y ?? "Please select an Object"}
-        </li>
-      </ul>
+      {positionEditError !== null && <p className="coordinate-error" role="alert">{positionEditError}</p>}
       {selectedProjectile !== undefined && (
         <form
           className="property-editor-inline"
@@ -156,7 +253,7 @@ export function PropertiesPanel(props: {
             const read = (name: string) => String(form.get(name) ?? "").trim();
 
             const rejectEdit = (message: string) => {
-              setProjectileEditError(message);
+              setProjectileEditError(`Command rejected: ${message}`);
 
               formElement.reset();
             };
@@ -260,44 +357,11 @@ export function PropertiesPanel(props: {
             setProjectileEditError(null);
           }}
         >
-          <label>
-            Mass (kg)
-            <input
-              name="edit-mass"
-              defaultValue={selectedProjectile.massKilograms}
-            />
-          </label>
-
-          <label>
-            Radius (m)
-            <input
-              name="edit-radius"
-              defaultValue={selectedProjectile.shape.radiusMeters}
-            />
-          </label>
-
-          <label>
-            Launch speed (m/s)
-            {/* Preserve accepted speed text instead of exposing conversion noise. */}
-            <input name="edit-speed" defaultValue={launchSpeedInput} />
-          </label>
-
-          <label>
-            Launch angle (°)
-            {/* Preserve accepted degrees while physical data remains in radians. */}
-            <input
-              name="edit-angle"
-              defaultValue={launchAngleInput}
-            />
-          </label>
-
-          <label>
-            Restitution (0–1)
-            <input
-              name="edit-restitution"
-              defaultValue={selectedProjectile.material.restitution}
-            />
-          </label>
+          <NumberField label="Mass (kg)" name="edit-mass" defaultValue={selectedProjectile.massKilograms} rule="positive" />
+          <NumberField label="Radius (m)" name="edit-radius" defaultValue={selectedProjectile.shape.radiusMeters} rule="positive" />
+          <NumberField label="Launch speed (m/s)" name="edit-speed" defaultValue={launchSpeedInput} rule="nonnegative" />
+          <NumberField label="Launch angle (°)" name="edit-angle" defaultValue={launchAngleInput} />
+          <NumberField label="Restitution (0–1)" name="edit-restitution" defaultValue={selectedProjectile.material.restitution} rule="unitInterval" />
 
           {projectileEditError !== null && (
             <p role="alert">{projectileEditError}</p>
@@ -331,7 +395,7 @@ export function PropertiesPanel(props: {
             const read = (name: string) => String(form.get(name) ?? "").trim();
 
             const rejectEdit = (message: string) => {
-              setStaticBodyEditError(message);
+              setStaticBodyEditError(`Command rejected: ${message}`);
               formElement.reset();
             };
 
@@ -404,38 +468,10 @@ export function PropertiesPanel(props: {
             setStaticBodyEditError(null);
           }}
         >
-          <label>
-            Width (m)
-            <input
-              name="edit-static-width"
-              defaultValue={selectedStaticBody.shape.widthMeters}
-            />
-          </label>
-
-          <label>
-            Height (m)
-            <input
-              name="edit-static-height"
-              defaultValue={selectedStaticBody.shape.heightMeters}
-            />
-          </label>
-
-          <label>
-            Surface angle (°)
-            {/* Format degrees reconstructed from the static body's radians. */}
-            <input
-              name="edit-static-angle"
-              defaultValue={formatDerivedInput(selectedStaticAngleDegrees)}
-            />
-          </label>
-
-          <label>
-            Restitution (0–1)
-            <input
-              name="edit-static-restitution"
-              defaultValue={selectedStaticBody.material.restitution}
-            />
-          </label>
+          <NumberField label="Width (m)" name="edit-static-width" defaultValue={selectedStaticBody.shape.widthMeters} rule="positive" />
+          <NumberField label="Height (m)" name="edit-static-height" defaultValue={selectedStaticBody.shape.heightMeters} rule="positive" />
+          <NumberField label="Surface angle (°)" name="edit-static-angle" defaultValue={formatDerivedInput(selectedStaticAngleDegrees)} />
+          <NumberField label="Restitution (0–1)" name="edit-static-restitution" defaultValue={selectedStaticBody.material.restitution} rule="unitInterval" />
 
           {staticBodyEditError !== null && (
             <p role="alert">{staticBodyEditError}</p>
@@ -471,9 +507,8 @@ export function PropertiesPanel(props: {
             ).trim();
 
             const rejectEdit = (message: string) => {
-              setTargetEditError(message);
+              setTargetEditError(`Command rejected: ${message}`);
 
-              // Restore the last accepted radius.
               formElement.reset();
             };
 
@@ -520,13 +555,7 @@ export function PropertiesPanel(props: {
             setTargetEditError(null);
           }}
         >
-          <label>
-            Radius (m)
-            <input
-              name="edit-target-radius"
-              defaultValue={selectedTarget.shape.radiusMeters}
-            />
-          </label>
+          <NumberField label="Radius (m)" name="edit-target-radius" defaultValue={selectedTarget.shape.radiusMeters} rule="positive" />
 
           {targetEditError !== null && <p role="alert">{targetEditError}</p>}
 

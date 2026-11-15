@@ -11,25 +11,38 @@ import type {
   TargetPlacementProperties,
 } from "./authoring.js";
 
+// Share the camera scale between wheel input, zoom controls and initial editor state.
+export const CAMERA_ZOOM = {
+  basePixelsPerMeter: 48,
+  minimumPercent: 5,
+  maximumPercent: 3200,
+  stops: [5, 10, 15, 25, 50, 75, 100, 150, 200, 300, 400, 600, 800, 1200, 1600, 2400, 3200],
+} as const;
+
 export interface OverlayVisibility {
   readonly trail: boolean;
   readonly velocity: boolean;
   readonly components: boolean;
   readonly prediction: boolean;
   readonly events: boolean;
+  readonly grid: boolean;
+  readonly labels: boolean;
 }
 
 export interface LabEditorState {
   readonly cameraCenterWorldMeters: Vector2;
   readonly pixelsPerMeter: number;
   readonly cameraInitialized: boolean;
+  readonly cameraFitRequest: number;
+  fitCamera(): void;
   readonly selectedEntityId: string | null;
+  readonly selectionNotice: string | null;
+  selectEntity(entityId: string | null, notice?: string): void;
   readonly overlayVisibility: OverlayVisibility;
 
   setCamera(centerWorldMeters: Vector2, pixelsPerMeter: number): void;
   setOverlayVisible(overlay: keyof OverlayVisibility, visible: boolean): void;
 
-  selectEntity(entityId: string | null): void;
   readonly activeTool: LabTool;
   setActiveTool(tool: LabTool): void;
 }
@@ -40,13 +53,13 @@ export type LabTool =
   | { readonly kind: "pan" }
   | { readonly kind: "delete" }
   | {
-      readonly kind: "place";
-      readonly entityKind: PlaceableEntityKind;
-      readonly projectileProperties?: ProjectilePlacementProperties;
-      readonly platformProperties?: PlatformPlacementProperties;
-      readonly rampProperties?: RampPlacementProperties;
-      readonly targetProperties?: TargetPlacementProperties;
-    };
+    readonly kind: "place";
+    readonly entityKind: PlaceableEntityKind;
+    readonly projectileProperties?: ProjectilePlacementProperties;
+    readonly platformProperties?: PlatformPlacementProperties;
+    readonly rampProperties?: RampPlacementProperties;
+    readonly targetProperties?: TargetPlacementProperties;
+  };
 
 // Share editor state outside React; keep it across canvas remounts.
 export const labStore = createStore<LabEditorState>()((set) => ({
@@ -55,15 +68,20 @@ export const labStore = createStore<LabEditorState>()((set) => ({
     y: 0,
   },
   // Startup framing may reduce this scale; later resizing preserves zoom.
-  pixelsPerMeter: 48,
+  pixelsPerMeter: CAMERA_ZOOM.basePixelsPerMeter,
   cameraInitialized: false,
-  selectedEntityId: null,
+  cameraFitRequest: 0,
+  fitCamera: () => set((state) => ({ cameraFitRequest: state.cameraFitRequest + 1 })),
+  selectedEntityId: "projectile",
+  selectionNotice: null,
   overlayVisibility: {
     trail: true,
     velocity: true,
     components: true,
     prediction: true,
     events: true,
+    grid: true,
+    labels: true,
   },
 
   // Keep display choices across authored edits and canvas remounts.
@@ -95,8 +113,11 @@ export const labStore = createStore<LabEditorState>()((set) => ({
     });
   },
 
-  selectEntity: (selectedEntityId) => {
-    set({ selectedEntityId });
+  selectEntity: (selectedEntityId, notice) => {
+    set({
+      selectedEntityId,
+      selectionNotice: notice ?? null,
+    });
   },
 
   activeTool: { kind: "select" },

@@ -5,7 +5,8 @@ import {
   Bounds,
   Container,
   Graphics,
-  Text,
+  TilingSprite,
+  type Texture,
   type FederatedPointerEvent,
 } from "pixi.js";
 import {
@@ -14,9 +15,16 @@ import {
   type ViewportTransform,
 } from "./coordinates.js";
 
-import { labStore } from "./store.js";
+import { CAMERA_ZOOM, labStore } from "./store.js";
 import type { MoveEntityRequest, PlacementRequest } from "./authoring.js";
-import { OutlineFilter } from "pixi-filters";
+import { createPaperTexture } from "./materials.js";
+import { createNotebookGrid } from "./sketchbook.js";
+import { createEntityVisual } from "./entity-visuals.js";
+
+const DELETE_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" stroke="#303b42" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">' +
+  '<path d="M3 2v16l4-4 3 7 3-1-3-7h7Z" fill="#fff"/><circle cx="18" cy="17" r="5" fill="#fff"/><path d="M15 17h6" fill="none" stroke-width="2"/></svg>',
+)}") 3 2, pointer`;
 
 // Keep velocity arrows readable without changing physical values.
 export const VELOCITY_ARROW_SCALE = {
@@ -32,16 +40,22 @@ interface RenderItem {
   readonly graphic: Container;
   positionMeters: Vector2;
   angleRadians: number;
-  readonly sourcePixelsPerMeter: number;
   readonly entityId: string;
-  readonly updateFeedback?: (snapshot: Snapshot) => void;
-  readonly selectionGraphic: Container;
+  readonly updateAppearance: ReturnType<typeof createEntityVisual>["update"];
 }
 interface DragState {
   readonly entityId: string;
   readonly pointerId: number; //prevent another pointer from finishing the drag
   readonly acceptedPositionMeters: Vector2; //restores the object after cancellation
   readonly pointerOffsetMeters: Vector2; // Preserves the exact point where the object was grabbed.
+}
+
+interface PanState {
+  readonly pointerId: number;
+  readonly buttonMask: number;
+  readonly startPixels: Vector2;
+  readonly cameraCenterWorldMeters: Vector2;
+  readonly pixelsPerMeter: number;
 }
 export interface LabRenderer {
   updateSnapshot(snapshot: Snapshot): void;
@@ -52,110 +66,24 @@ export interface LabRenderer {
 function createRenderItems(
   scene: SceneDefinition,
   snapshot: Snapshot,
-  pixelsPerMeter: number,
 ): readonly RenderItem[] {
-  const items: RenderItem[] = [];
-
-  for (const trigger of scene.triggers) {
-    const radiusPixels = trigger.shape.radiusMeters * pixelsPerMeter;
-
-    const graphic = new Container();
-    const ring = new Graphics();
-    const centreMarker = new Graphics();
-
-    const label = new Text({
-      text: "Target",
-      style: {
-        fontFamily: "Inter, system-ui, sans-serif",
-        fontSize: 12,
-        fontWeight: "500",
-        fill: 0x3b8066,
-      },
-    });
-    function updateFeedback(nextSnapshot: Snapshot): void {
-      const hasEntered = labStore.getState().overlayVisibility.events && nextSnapshot.events.some(
-        (event) =>
-          event.kind === "targetEntered" &&
-          event.targetId === trigger.id &&
-          event.tick === nextSnapshot.tick,
-      );
-
-      const color = hasEntered ? 0x16776e : 0x3b8066;
-      ring
-        .clear()
-        .circle(0, 0, radiusPixels)
-        .fill({
-          color,
-          alpha: hasEntered ? 0.16 : 0.08,
-        })
-        .stroke({ color, width: 2 });
-
-      centreMarker.clear().circle(0, 0, 2).fill({ color });
-
-      label.text = hasEntered ? "Target Entered" : "Target";
-      label.style.fill = color;
+  return [...scene.triggers, ...scene.bodies].map((entity) => {
+    const pose = entity.kind === "target"
+      ? entity.pose
+      : snapshot.bodies.find((body) => body.id === entity.id)?.pose;
+    if (pose === undefined) {
+      throw new Error(`Snapshot omitted scene body "${entity.id}".`);
     }
-
-    updateFeedback(snapshot);
-    label.anchor.set(0.5, 1);
-    label.position.set(0, -radiusPixels - 8);
-
-    graphic.addChild(ring, centreMarker, label);
-    graphic.eventMode = "static";
-    graphic.cursor = "pointer";
-
-    items.push({
-      graphic,
-      positionMeters: trigger.pose.positionMeters,
-      angleRadians: trigger.pose.angleRadians,
-      sourcePixelsPerMeter: pixelsPerMeter,
-      entityId: trigger.id,
-      selectionGraphic: ring,
-      kind: "target",
-      updateFeedback,
-    });
-  }
-
-  for (const body of scene.bodies) {
-    const snapshotBody = snapshot.bodies.find(
-      (candidate) => candidate.id === body.id,
-    );
-
-    if (snapshotBody === undefined) {
-      throw new Error(`Snapshot omitted scene body "${body.id}".`);
-    }
-
-    const isGround = body.id.toLowerCase().includes("ground");
-
-    const graphic =
-      body.kind === "dynamic"
-        ? new Graphics()
-          .circle(0, 0, body.shape.radiusMeters * pixelsPerMeter)
-          .fill({ color: 0xdd875d })
-          .stroke({ color: 0x9b553b, width: 1.5 })
-        : new Graphics()
-          .rect(
-            (-body.shape.widthMeters * pixelsPerMeter) / 2,
-            (-body.shape.heightMeters * pixelsPerMeter) / 2,
-            body.shape.widthMeters * pixelsPerMeter,
-            body.shape.heightMeters * pixelsPerMeter,
-          )
-          .fill({ color: isGround ? 0xb8c28c : 0xe0b455 })
-          .stroke({ color: isGround ? 0x6f6c51 : 0x9b713b, width: 1.5 });
-    graphic.eventMode = "static";
-
-    items.push({
-      graphic,
-      positionMeters: snapshotBody.pose.positionMeters,
-      angleRadians: snapshotBody.pose.angleRadians,
-      sourcePixelsPerMeter: pixelsPerMeter,
-      entityId: snapshotBody.id,
-      selectionGraphic: graphic,
-      kind: "body",
-    });
-  }
-
-  return items;
+    const visual = createEntityVisual(entity);
+    return {
+      kind: entity.kind === "target" ? "target" : "body",
+      graphic: visual.graphic,
+      positionMeters: pose.positionMeters,
+      angleRadians: pose.angleRadians,
+      entityId: entity.id,
+      updateAppearance: visual.update,
+    };
+  });
 }
 
 // Draw an open-headed arrow between two screen positions.
@@ -234,8 +162,7 @@ export function mountLabRenderer(
   horizontalVelocityGraphic.eventMode = "none";
 
   trailGraphic.eventMode = "none";
-  let panStart: Vector2 | null = null; // null when user not panning
-  let panCameraStart: Vector2 | null = null; //camera position at the start of pan
+  let panState: PanState | null = null;
   let dragState: DragState | null = null;
   const background = new Graphics();
   background.eventMode = "static";
@@ -243,11 +170,11 @@ export function mountLabRenderer(
   let backgroundHeight = 0;
   background.cursor =
     labStore.getState().activeTool.kind === "pan" ? "grab" : "default";
-  const selectedFilter = new OutlineFilter({
-    color: 0xd87149,
-    thickness: 2,
-    alpha: 1,
-    quality: 0.8,
+  const notebook = createNotebookGrid();
+  let paperTexture: Texture | undefined;
+  let paper: TilingSprite | undefined;
+  const resizeObserver = new ResizeObserver(() => {
+    if (initialized && !disposed) resizeAndRender();
   });
 
   function getViewport(): ViewportTransform {
@@ -259,6 +186,88 @@ export function mountLabRenderer(
       pixelsPerMeter: editorState.pixelsPerMeter,
       centerWorldMeters: editorState.cameraCenterWorldMeters,
     };
+  }
+
+  // Both pan gestures share one camera origin and leave the selected tool unchanged.
+  function stopPan(): void {
+    panState = null;
+    host.classList.remove("is-panning");
+
+    if (initialized && !disposed) {
+      resizeAndRender();
+    }
+  }
+
+  function finishPan(event: FederatedPointerEvent): void {
+    if (panState?.pointerId === event.pointerId &&
+      (event.type === "pointercancel" || (event.buttons & panState.buttonMask) === 0)) {
+      stopPan();
+    }
+  }
+
+  // Cancel temporary pointer work when the browser loses focus.
+  function cancelInteractions(): void {
+    stopPan();
+    cancelActiveDrag();
+  }
+
+  // Reserve middle-click on this canvas for panning rather than browser autoscroll or paste.
+  function preventMiddleMouseDefault(event: MouseEvent): void {
+    if (event.button === 1) {
+      event.preventDefault();
+    }
+  }
+
+  function placeObjectAt(positionMeters: Vector2): void {
+    const tool = labStore.getState().activeTool;
+
+    if (tool.kind !== "place") {
+      return;
+    }
+
+    onPlacementRequested({ ...tool, positionMeters: { ...positionMeters } });
+  }
+
+  function handleCanvasKey(event: KeyboardEvent): void {
+    if (event.altKey || event.ctrlKey || event.metaKey || disposed) {
+      return;
+    }
+
+    const state = labStore.getState();
+
+    if (event.key === "Enter" && state.activeTool.kind === "place") {
+      event.preventDefault();
+
+      if (!event.repeat) {
+        placeObjectAt(state.cameraCenterWorldMeters);
+      }
+
+      return;
+    }
+
+    if (event.key === "Delete" || event.key === "Backspace") {
+      event.preventDefault();
+
+      if (!event.repeat && state.selectedEntityId !== null && onDeleteRequested(state.selectedEntityId)) {
+        labStore.getState().setActiveTool({ kind: "select" });
+      }
+
+      return;
+    }
+
+    const x = event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+    const y = event.key === "ArrowUp" ? 1 : event.key === "ArrowDown" ? -1 : 0;
+
+    if (x !== 0 || y !== 0) {
+      event.preventDefault();
+      stopPan();
+      cancelActiveDrag();
+      const distanceMeters = 120 / state.pixelsPerMeter;
+      state.setCamera({
+        x: state.cameraCenterWorldMeters.x + x * distanceMeters,
+        y: state.cameraCenterWorldMeters.y + y * distanceMeters,
+      }, state.pixelsPerMeter);
+    }
   }
 
   // Use the same selected dynamic body for every projectile-only overlay.
@@ -345,6 +354,11 @@ export function mountLabRenderer(
     const trailPoints: Vector2[] = [];
 
     for (const trailSnapshot of trailSnapshots) {
+      // A recorded trail ends at the current tick, even when future sample frames are prepared.
+      if (trailSnapshot.tick > currentSnapshot.tick) {
+        continue;
+      }
+
       const snapshotBody = trailSnapshot.bodies.find(
         (body) => body.id === selectedProjectile.id,
       );
@@ -469,6 +483,12 @@ export function mountLabRenderer(
     const editorState = labStore.getState();
 
     // Apply editor choices without changing the physical snapshot.
+    const toolCursor = panState !== null || dragState !== null ? "grabbing" :
+      editorState.activeTool.kind === "pan" ? "grab" :
+        editorState.activeTool.kind === "move" ? "move" :
+          editorState.activeTool.kind === "place" ? "copy" :
+            editorState.activeTool.kind === "delete" ? DELETE_CURSOR : "default";
+    background.cursor = toolCursor;
     trailGraphic.visible = editorState.overlayVisibility.trail;
     predictionGraphic.visible = editorState.overlayVisibility.prediction;
     velocityGraphic.visible = editorState.overlayVisibility.velocity;
@@ -476,26 +496,31 @@ export function mountLabRenderer(
     verticalVelocityGraphic.visible = editorState.overlayVisibility.components;
 
     const viewport = getViewport();
+    if (paper !== undefined) {
+      paper.width = width;
+      paper.height = height;
+    }
+    notebook.update(viewport, editorState.overlayVisibility.grid);
     const selectedProjectile = getSelectedProjectile(editorState.selectedEntityId);
     redrawSelectedTrail(viewport, selectedProjectile);
     redrawSelectedVelocity(viewport, selectedProjectile);
     redrawSelectedPrediction(viewport, selectedProjectile);
 
     for (const item of renderItems.values()) {
-      item.updateFeedback?.(currentSnapshot);
-      const screenPosition = worldToScreen(item.positionMeters, viewport);
-
-      item.graphic.position.set(screenPosition.x, screenPosition.y);
-      item.graphic.scale.set(
-        editorState.pixelsPerMeter / item.sourcePixelsPerMeter,
+      item.graphic.cursor = editorState.activeTool.kind === "select" && panState === null ? "pointer" : toolCursor;
+      const entered = editorState.overlayVisibility.events && currentSnapshot.events.some(
+        (event) => event.kind === "targetEntered" && event.targetId === item.entityId && event.tick === currentSnapshot.tick,
       );
-      item.graphic.rotation = -item.angleRadians;
-
-      if (editorState.selectedEntityId === item.entityId) {
-        item.selectionGraphic.filters = selectedFilter;
-      } else {
-        item.selectionGraphic.filters = [];
-      }
+      item.updateAppearance(
+        editorState.pixelsPerMeter,
+        item.angleRadians,
+        editorState.selectedEntityId === item.entityId,
+        entered,
+        editorState.overlayVisibility.labels,
+        worldToScreen(item.positionMeters, viewport),
+        width,
+        editorState.activeTool.kind === "move",
+      );
     }
 
     application.render();
@@ -517,14 +542,12 @@ export function mountLabRenderer(
 
     // Discard pointer previews belonging to the previous revision.
     dragState = null;
-    panStart = null;
-    panCameraStart = null;
+    stopPan();
 
     if (!initialized) {
       return;
     }
 
-    background.cursor = labStore.getState().activeTool.kind === "pan" ? "grab" : "default";
     rebuildRenderItems();
     resizeAndRender();
   }
@@ -589,6 +612,7 @@ export function mountLabRenderer(
     };
 
     item.graphic.cursor = "grabbing";
+    resizeAndRender();
     event.stopPropagation();
   }
 
@@ -596,6 +620,9 @@ export function mountLabRenderer(
     item: RenderItem,
     event: FederatedPointerEvent,
   ): void {
+    if (event.button !== 0 || !event.isPrimary || panState !== null) {
+      return;
+    }
     const activeTool = labStore.getState().activeTool;
 
     if (activeTool.kind === "delete") {
@@ -612,6 +639,10 @@ export function mountLabRenderer(
 
   function previewDrag(event: FederatedPointerEvent): void {
     if (dragState === null || dragState.pointerId !== event.pointerId) {
+      return;
+    }
+    if (labStore.getState().activeTool.kind !== "move" || (event.buttons & 1) === 0) {
+      cancelActiveDrag();
       return;
     }
 
@@ -696,7 +727,6 @@ export function mountLabRenderer(
     const nextItems = createRenderItems(
       currentScene,
       currentSnapshot,
-      labStore.getState().pixelsPerMeter,
     );
 
     for (const item of renderItems.values()) {
@@ -723,7 +753,81 @@ export function mountLabRenderer(
     }
   }
 
+  function fitScene(): void {
+    const bounds = new Bounds();
+    const editorState = labStore.getState();
+    const include = (x: number, y: number, halfWidth = 0, halfHeight = 0) => {
+      bounds.addFrame(x - halfWidth, y - halfHeight, x + halfWidth, y + halfHeight);
+    };
+    // Frame physical geometry, never text bounds or decorative selection strokes.
+    for (const entity of [...currentScene.bodies, ...currentScene.triggers]) {
+      const pose = entity.kind === "target" ? entity.pose : currentSnapshot.bodies.find((body) => body.id === entity.id)?.pose;
+      if (pose === undefined) continue;
+      if (entity.shape.kind === "circle") {
+        include(pose.positionMeters.x, pose.positionMeters.y, entity.shape.radiusMeters, entity.shape.radiusMeters);
+      } else {
+        const shape = entity.shape;
+        const cosine = Math.abs(Math.cos(pose.angleRadians));
+        const sine = Math.abs(Math.sin(pose.angleRadians));
+        const halfWidth = (shape.widthMeters * cosine + shape.heightMeters * sine) / 2;
+        const halfHeight = (shape.widthMeters * sine + shape.heightMeters * cosine) / 2;
+        // The long default ground establishes height without shrinking the experiment.
+        include(pose.positionMeters.x, pose.positionMeters.y, entity.id === "default-ground" ? 0 : halfWidth, halfHeight);
+      }
+      if (entity.kind === "dynamic") {
+        include(entity.pose.positionMeters.x, entity.pose.positionMeters.y);
+      }
+    }
+    for (const snapshot of trailSnapshots) {
+      for (const body of snapshot.bodies) {
+        if (currentScene.bodies.some((entity) => entity.id === body.id && entity.kind === "dynamic")) {
+          include(body.pose.positionMeters.x, body.pose.positionMeters.y);
+        }
+      }
+    }
+    // The ideal path may extend beyond the experiment; it must not shrink the authored objects.
+    if (currentScene.bodies.length + currentScene.triggers.length === 0) {
+      editorState.setCamera({ x: 0, y: 0 }, CAMERA_ZOOM.basePixelsPerMeter);
+      return;
+    }
+    const scale = Math.max(.01, Math.min(
+      CAMERA_ZOOM.basePixelsPerMeter * 2,
+      Math.max(1, application.screen.width - 80) / Math.max(1, bounds.width),
+      Math.max(1, application.screen.height - 128) / Math.max(1, bounds.height),
+    ));
+    labStore.getState().setCamera({
+      x: bounds.x + bounds.width / 2,
+      // Reserve more room for the title/tools above the diagram.
+      y: bounds.y + bounds.height / 2 + 25 / scale,
+    }, scale);
+  }
+
+  function handleWheel(event: WheelEvent): void {
+    event.preventDefault();
+    stopPan();
+    cancelActiveDrag();
+    const viewport = getViewport();
+    const rect = application.canvas.getBoundingClientRect();
+    const pointer = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+    const world = screenToWorld(pointer, viewport);
+    const delta = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? viewport.heightPixels : 1);
+    const minimumScale = CAMERA_ZOOM.minimumPercent / 100 * CAMERA_ZOOM.basePixelsPerMeter;
+    const maximumScale = CAMERA_ZOOM.maximumPercent / 100 * CAMERA_ZOOM.basePixelsPerMeter;
+    const scale = Math.max(minimumScale, Math.min(maximumScale, viewport.pixelsPerMeter * Math.exp(-delta * .001)));
+    labStore.getState().setCamera({
+      x: world.x - (pointer.x - viewport.widthPixels / 2) / scale,
+      y: world.y + (pointer.y - viewport.heightPixels / 2) / scale,
+    }, scale);
+  }
+
   const initialize = async (): Promise<void> => {
+    // The local handwriting font must be ready before Pixi measures captions.
+    try {
+      await document.fonts.load('17px "Kalam"');
+    } catch {
+      // Retain a usable canvas if the local font fails to load.
+    }
+    if (disposed) return;
     await application.init({
       antialias: true,
       autoDensity: true,
@@ -741,6 +845,9 @@ export function mountLabRenderer(
       return;
     }
 
+    paperTexture = createPaperTexture();
+    paper = new TilingSprite({ texture: paperTexture, width: host.clientWidth, height: host.clientHeight, eventMode: "none" });
+    application.stage.addChild(paper, notebook.root);
     // Keep paths behind bodies and velocity arrows.
     application.stage.addChild(
       trailGraphic, predictionGraphic,
@@ -753,94 +860,83 @@ export function mountLabRenderer(
     application.stage.on("pointerdowncapture", (event) => {
       const activeTool = labStore.getState().activeTool;
 
-      if (activeTool.kind !== "place") {
+      if (!event.isPrimary) {
+        return;
+      }
+      host.focus({ preventScroll: true });
+      if (panState !== null) {
+        event.stopImmediatePropagation();
+        return;
+      }
+      if (event.button === 1 || (event.button === 0 && activeTool.kind === "pan")) {
+        cancelActiveDrag();
+        const editorState = labStore.getState();
+        panState = {
+          pointerId: event.pointerId,
+          // Held-button flags use 4 for middle and 1 for left.
+          buttonMask: event.button === 1 ? 4 : 1,
+          startPixels: { x: event.global.x, y: event.global.y },
+          cameraCenterWorldMeters: { ...editorState.cameraCenterWorldMeters },
+          pixelsPerMeter: editorState.pixelsPerMeter,
+        };
+        host.classList.add("is-panning");
+        background.cursor = "grabbing";
+        event.preventDefault();
+        event.stopImmediatePropagation();
         return;
       }
 
-      const positionMeters = screenToWorld(event.global, getViewport());
-
-      let placementRequest: PlacementRequest = {
-        entityKind: activeTool.entityKind,
-        positionMeters,
-      };
-
-      if (activeTool.projectileProperties !== undefined) {
-        placementRequest = {
-          ...placementRequest,
-          projectileProperties: activeTool.projectileProperties,
-        };
+      if (event.button !== 0 || activeTool.kind !== "place") {
+        return;
       }
 
-      if (activeTool.platformProperties !== undefined) {
-        placementRequest = {
-          ...placementRequest,
-          platformProperties: activeTool.platformProperties,
-        };
-      }
-      if (activeTool.rampProperties !== undefined) {
-        placementRequest = {
-          ...placementRequest,
-          rampProperties: activeTool.rampProperties,
-        };
-      }
-      if (activeTool.targetProperties !== undefined) {
-        placementRequest = {
-          ...placementRequest,
-          targetProperties: activeTool.targetProperties,
-        };
-      }
-
-      onPlacementRequested(placementRequest);
-
-      labStore.getState().setActiveTool({ kind: "select" });
+      placeObjectAt(screenToWorld(event.global, getViewport()));
 
       // Prevent the object underneath from being selected instead.
       event.stopImmediatePropagation();
     });
-    background.on("pointerdown", (event) => {
-      if (labStore.getState().activeTool.kind !== "pan") {
+    application.stage.on("globalpointermove", (event) => {
+      if (panState === null || panState.pointerId !== event.pointerId) {
         return;
       }
-      panStart = { x: event.global.x, y: event.global.y };
-      panCameraStart = { ...labStore.getState().cameraCenterWorldMeters };
-      background.cursor = "grabbing";
-    });
-
-    background.on("pointermove", (event) => {
-      if (panStart === null || panCameraStart === null) {
+      if ((event.buttons & panState.buttonMask) === 0) {
+        stopPan();
         return;
       }
 
-      const p = labStore.getState().pixelsPerMeter;
-      const dx = event.global.x - panStart.x;
-      const dy = event.global.y - panStart.y;
-
-      labStore
-        .getState()
-        .setCamera(
-          { x: panCameraStart.x - dx / p, y: panCameraStart.y + dy / p },
-          p,
-        );
+      const { startPixels, cameraCenterWorldMeters, pixelsPerMeter } = panState;
+      const dx = event.global.x - startPixels.x;
+      const dy = event.global.y - startPixels.y;
+      labStore.getState().setCamera({
+        x: cameraCenterWorldMeters.x - dx / pixelsPerMeter,
+        y: cameraCenterWorldMeters.y + dy / pixelsPerMeter,
+      }, pixelsPerMeter);
     });
 
-    const stopPan = (): void => {
-      panStart = null;
-      panCameraStart = null;
-      background.cursor =
-        labStore.getState().activeTool.kind === "pan" ? "grab" : "default";
-    };
-
-    background.on("pointerup", stopPan);
-    background.on("pointerupoutside", stopPan);
+    application.stage.on("pointerup", finishPan);
+    application.stage.on("pointerupoutside", finishPan);
+    application.stage.on("pointercancel", finishPan);
     // This host is dedicated to Pixi, so replacing its children enforces
     // one-canvas ownership even across development remounts.
     host.replaceChildren(application.canvas);
-    window.addEventListener("resize", resizeAndRender);
-    window.addEventListener("blur", cancelActiveDrag);
+    resizeObserver.observe(host);
+    host.addEventListener("wheel", handleWheel, { passive: false });
+    host.addEventListener("mousedown", preventMiddleMouseDefault);
+    host.addEventListener("auxclick", preventMiddleMouseDefault);
+    host.addEventListener("keydown", handleCanvasKey);
+    window.addEventListener("blur", cancelInteractions);
     unsubscribeFromStore = labStore.subscribe((state, previousState) => {
+      if (state.cameraFitRequest !== previousState.cameraFitRequest) {
+        stopPan();
+        cancelActiveDrag();
+        fitScene();
+        return;
+      }
       if (state.activeTool !== previousState.activeTool) {
-        background.cursor =
-          state.activeTool.kind === "pan" ? "grab" : "default";
+        stopPan();
+        cancelActiveDrag();
+      }
+      if (dragState !== null && state.selectedEntityId !== dragState.entityId) {
         cancelActiveDrag();
       }
 
@@ -849,49 +945,25 @@ export function mountLabRenderer(
         previousState.cameraCenterWorldMeters ||
         state.pixelsPerMeter !== previousState.pixelsPerMeter ||
         state.selectedEntityId !== previousState.selectedEntityId ||
+        state.activeTool !== previousState.activeTool ||
         state.overlayVisibility !== previousState.overlayVisibility
       ) {
         resizeAndRender();
+
+        if (state.activeTool !== previousState.activeTool) {
+          application.renderer.events.setCursor(background.cursor ?? "default");
+        }
       }
     });
     updateSnapshot(currentSnapshot);
 
-    // Frame startup content once, then preserve the user's camera.
-    const editorState = labStore.getState();
-
-    if (!editorState.cameraInitialized && renderItems.size > 0) {
-      const viewport = getViewport();
-      const bounds = new Bounds();
-
-      for (const item of renderItems.values()) {
-        bounds.addBounds(item.graphic.getBounds());
-      }
-
-      // Include history even when its projectile is not selected.
-      for (const trailSnapshot of trailSnapshots) {
-        for (const body of trailSnapshot.bodies) {
-          const point = worldToScreen(body.pose.positionMeters, viewport);
-          bounds.addFrame(point.x, point.y, point.x, point.y);
-        }
-      }
-
-      const centerWorldMeters = screenToWorld({
-        x: bounds.x + bounds.width / 2,
-        y: bounds.y + bounds.height / 2,
-      }, viewport);
-      const fitRatio = Math.min(
-        1,
-        viewport.widthPixels * 0.9 / bounds.width,
-        viewport.heightPixels * 0.9 / bounds.height,
-      );
-
-      editorState.setCamera(centerWorldMeters, editorState.pixelsPerMeter * fitRatio);
-    }
+    if (!labStore.getState().cameraInitialized) fitScene();
   };
 
   void initialize().catch((error: unknown) => {
     if (!disposed) {
       console.error("Failed to initialize the Pixi canvas.", error);
+      dispose();
     }
   });
 
@@ -901,8 +973,13 @@ export function mountLabRenderer(
     }
 
     disposed = true;
-    window.removeEventListener("resize", resizeAndRender);
-    window.removeEventListener("blur", cancelActiveDrag);
+    resizeObserver.disconnect();
+    host.removeEventListener("wheel", handleWheel);
+    host.removeEventListener("mousedown", preventMiddleMouseDefault);
+    host.removeEventListener("auxclick", preventMiddleMouseDefault);
+    host.removeEventListener("keydown", handleCanvasKey);
+    window.removeEventListener("blur", cancelInteractions);
+    stopPan();
     dragState = null;
     unsubscribeFromStore?.();
     if (initialized) {
@@ -915,9 +992,10 @@ export function mountLabRenderer(
       horizontalVelocityGraphic.destroy();
       verticalVelocityGraphic.destroy();
       predictionGraphic.destroy();
+      notebook.root.destroy({ children: true });
     }
 
-    selectedFilter.destroy();
+    paperTexture?.destroy(true);
   }
 
   return {

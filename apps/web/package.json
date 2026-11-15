@@ -10,7 +10,7 @@
     "pretest": "npm run build:dependencies",
     "build": "tsc -b && vite build",
     "dev": "vite",
-    "test": "vitest run src/lab/coordinates.test.ts",
+    "test": "vitest run tests",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

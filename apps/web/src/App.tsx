@@ -1,49 +1,45 @@
 import { useCallback, useEffect } from "react";
 import { useRef, useState } from "react";
-import { PROJECTILE_LAB_MOCK } from "./lab/mocks";
+// Supply the reviewed static observation and its consecutive playback frames.
+import { PROJECTILE_LAB_MOCK, PROJECTILE_PLAYBACK_SNAPSHOTS } from "./lab/mocks.js";
 import type { MoveEntityRequest, PlacementRequest } from "./lab/authoring";
 import { ObjectLibrary } from "./lab/ObjectLibrary";
 import {
-  Hand,
-  ZoomIn,
-  ZoomOut,
+  Atom,
+  BookOpen,
+  Folder,
+  Users,
+  Eye,
   Play,
   Pause,
   StepForward,
   RotateCcw,
-  Move,
-  Trash2,
+  PanelLeft,
+  Expand,
+  Shrink,
 } from "lucide-react";
 import { useStore } from "zustand";
 import { labStore } from "./lab/store";
-import type { LabController } from "./lab/controller";
+import { PLAYBACK_SPEEDS, type LabController, type PlaybackState } from "./lab/controller.js";
+// Describe operation results displayed by the playback controls.
+import type { EngineStatus } from "@eureka/engine";
 import { LabCanvas } from "./lab/LabCanvas";
 import type { Snapshot, SceneDefinition } from "@eureka/contracts";
 import "./App.css";
-import { PropertiesPanel } from "./lab/PropertiesPanel";
+import { CanvasTools } from "./lab/CanvasTools.js";
+import { SceneInspector } from "./lab/SceneInspector.js";
+import { SceneOutline } from "./lab/SceneOutline.js";
+import { ObservationNotebook } from "./lab/ObservationNotebook.js";
 
 const OVERLAY_OPTIONS = [
   { key: "trail", label: "Trail" },
   { key: "velocity", label: "Velocity" },
   { key: "components", label: "Components" },
-  { key: "prediction", label: "Ideal prediction (ignores obstacles)" },
+  { key: "prediction", label: "Ideal prediction" },
   { key: "events", label: "Target entry" },
+  { key: "grid", label: "Grid" },
+  { key: "labels", label: "Labels" },
 ] as const;
-
-// Round displayed measurements while preserving the snapshot.
-function formatMeasurement(value: number | undefined): string {
-  if (value === undefined) {
-    return "—";
-  }
-
-  const text = value.toFixed(4);
-
-  if (text === "-0.0000") {
-    return "0.0000";
-  }
-
-  return text;
-}
 
 export function App() {
   const [displayedSnapshot, setDisplayedSnapshot] = useState<Snapshot>(
@@ -53,56 +49,121 @@ export function App() {
     structuredClone(PROJECTILE_LAB_MOCK.scene),
   );
   const [labVisible, setLabVisible] = useState(true);
+  const [sceneOutlineOpen, setSceneOutlineOpen] = useState(false);
+  const outlineToggleRef = useRef<HTMLButtonElement>(null);
+  const viewportRef = useRef<HTMLElement>(null);
+  const [viewportExpanded, setViewportExpanded] = useState(false);
+  const [viewportError, setViewportError] = useState<string | null>(null);
+
+  function closeSceneOutline(): void {
+    setSceneOutlineOpen(false);
+    outlineToggleRef.current?.focus();
+  }
+
+  // Let the browser expand the existing viewport without replacing its mounted canvas.
+  async function toggleViewportSize(): Promise<void> {
+    const viewport = viewportRef.current;
+    if (viewport === null) {
+      return;
+    }
+    try {
+      if (document.fullscreenElement === viewport) {
+        await document.exitFullscreen();
+      } else {
+        await viewport.requestFullscreen();
+      }
+    } catch {
+      setViewportError("The viewport could not expand. You can still zoom and pan normally.");
+    }
+  }
+
+  useEffect(() => {
+    function handleFullscreenChange(): void {
+      setViewportExpanded(viewportRef.current !== null && document.fullscreenElement === viewportRef.current);
+      setViewportError(null);
+    }
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
   const selectedEntityId = useStore(
     labStore,
     (state) => state.selectedEntityId,
   );
-  const activeTool = useStore(labStore, (state) => state.activeTool);
+  const selectionNotice = useStore(labStore, (state) => state.selectionNotice);
   const overlayVisibility = useStore(labStore, (state) => state.overlayVisibility);
-  const selectedBody = displayedSnapshot.bodies.find(
-    (body) => body.id === selectedEntityId,
-  );
-
-  // Calculate speed without changing the snapshot.
-  let selectedSpeedMetersPerSecond: number | undefined = undefined;
-
-  if (selectedBody !== undefined) {
-    const velocity = selectedBody.velocity.linearMetersPerSecond;
-    selectedSpeedMetersPerSecond = Math.hypot(velocity.x, velocity.y);
-  }
   let activeSampleSnapshots;
 
   if (
     editableScene.id === PROJECTILE_LAB_MOCK.scene.id &&
     editableScene.revision === PROJECTILE_LAB_MOCK.scene.revision
   ) {
-    activeSampleSnapshots = PROJECTILE_LAB_MOCK.trailSnapshots;
+    // Enable motion only for the scene covered by these reviewed frames.
+    activeSampleSnapshots = PROJECTILE_PLAYBACK_SNAPSHOTS;
   } else {
     activeSampleSnapshots = undefined;
   }
 
-  const visibleEvents = displayedSnapshot.events.filter((event) => {
-    if (selectedEntityId === null) {
-      return true;
-    }
+  // Hold the last reported playback metadata for HTML rendering.
+  const [playbackState, setPlaybackState] = useState<PlaybackState | null>(null);
+  const [labError, setLabError] = useState<string | null>(null);
 
-    if (event.bodyId === selectedEntityId) {
-      return true;
-    }
-
-    if (event.kind === "targetEntered") {
-      return event.targetId === selectedEntityId;
-    }
-
-    return event.surfaceBodyId === selectedEntityId;
-  });
+  const sampleEndTick = activeSampleSnapshots?.at(-1)?.tick;
+  const playbackReady = playbackState !== null && sampleEndTick !== undefined;
+  const sampleFinished = sampleEndTick !== undefined && displayedSnapshot.tick >= sampleEndTick;
   const controllerRef = useRef<LabController | null>(null);
-  const setActiveController = useCallback(
-    (controller: LabController | null) => {
-      controllerRef.current = controller;
-    },
-    [],
-  );
+
+  // Keep the imperative handle and clear toolbar availability when it is released.
+  const setActiveController = useCallback((controller: LabController | null) => {
+    controllerRef.current = controller;
+
+    if (controller === null) {
+      setPlaybackState(null);
+      setLabError(null);
+    }
+  }, []);
+
+  // Display typed failures with enough context to distinguish their source.
+  const reportLabResult = useCallback((context: string, result: EngineStatus | void): void => {
+    if (result === undefined || result.ok) {
+      setLabError(null);
+      return;
+    }
+
+    const details = result.diagnostics
+      .map((diagnostic) => diagnostic.message || `${diagnostic.code} (${diagnostic.path})`)
+      .join(" ");
+
+    setLabError(`${context}: ${details || "No diagnostic details were supplied."}`);
+  }, []);
+
+  // Run the requested operation through the mounted controller.
+  function handlePlaybackAction(action: "play" | "pause" | "stepOnce" | "reset"): void {
+    const controller = controllerRef.current;
+
+    if (controller === null) {
+      setLabError("Command rejected: the laboratory is not available.");
+      return;
+    }
+
+    const context = action === "stepOnce"
+      ? "Physics failed to complete a tick"
+      : "Command rejected";
+
+    reportLabResult(context, controller[action]());
+  }
+
+  // Accept only a speed listed by the existing controller boundary.
+  function handleSpeedChange(value: string): void {
+    const controller = controllerRef.current;
+    const selectedSpeed = PLAYBACK_SPEEDS.find((candidate) => String(candidate) === value);
+
+    if (controller === null || selectedSpeed === undefined) {
+      setLabError("Command rejected: the laboratory or requested speed is unavailable.");
+      return;
+    }
+
+    reportLabResult("Command rejected", controller.setSpeed(selectedSpeed));
+  }
 
   useEffect(() => {
     if (!labVisible) {
@@ -139,13 +200,17 @@ export function App() {
       editableScene.triggers.some((trigger) => trigger.id === selectedEntityId);
 
     if (!selectedEntityStillExists) {
-      labStore.getState().selectEntity(null);
+      labStore.getState().selectEntity(
+        null,
+        `Object no longer exists: ${selectedEntityId}. Select another object.`,
+      );
     }
   }, [editableScene, selectedEntityId]);
   const handlePlacementRequested = useCallback((request: PlacementRequest) => {
     const controller = controllerRef.current;
 
     if (controller === null) {
+      setLabError("Command rejected: the laboratory is not available.");
       return;
     }
 
@@ -173,18 +238,21 @@ export function App() {
       );
     }
     if (!placementResult.ok) {
-      console.error("Object placement rejected", placementResult.diagnostics);
+      reportLabResult("Command rejected — placement", placementResult);
       return;
     }
 
+    reportLabResult("Command rejected — placement", placementResult);
     setEditableScene(placementResult.value.scene);
     labStore.getState().selectEntity(placementResult.value.entityId);
-  }, []);
+    labStore.getState().setActiveTool({ kind: "move" });
+  }, [reportLabResult]);
   const handleMoveRequested = useCallback(
     (request: MoveEntityRequest): boolean => {
       const controller = controllerRef.current;
 
       if (controller === null) {
+        setLabError("Command rejected: the laboratory is not available.");
         return false;
       }
 
@@ -194,311 +262,211 @@ export function App() {
       );
 
       if (!moveResult.ok) {
-        console.error("Object movement rejected", moveResult.diagnostics);
+        reportLabResult("Command rejected — movement", moveResult);
         return false;
       }
 
+      reportLabResult("Command rejected — movement", moveResult);
       setEditableScene(moveResult.value.scene);
       labStore.getState().selectEntity(moveResult.value.entityId);
       return true;
     },
-    [],
+    [reportLabResult],
   );
   const handleDeleteRequested = useCallback((entityId: string): boolean => {
     const controller = controllerRef.current;
 
     if (controller === null) {
+      setLabError("Command rejected: the laboratory is not available.");
       return false;
     }
 
     const deleteResult = controller.deleteEntity(entityId);
 
     if (!deleteResult.ok) {
-      console.error("Object deletion rejected", deleteResult.diagnostics);
+      reportLabResult("Command rejected — deletion", deleteResult);
       return false;
     }
 
+    reportLabResult("Command rejected — deletion", deleteResult);
     setEditableScene(deleteResult.value.scene);
     labStore.getState().selectEntity(null);
     return true;
-  }, []);
+  }, [reportLabResult]);
   return (
-    <main className="lab-shell">
-      <header className="lab-header">
-        <h1>Eureka</h1>
-        <button
-          onClick={() => {
-            setLabVisible((visible) => !visible);
-          }}
-          type="button"
-        >
-          {labVisible ? "Leave lab" : "Enter lab"}
-        </button>
-        <section>
-          <h2> Sample Scene</h2>
-          <p>scene Id: {editableScene.id}</p>
-          <p>Body Count: {editableScene.bodies.length}</p>
-        </section>
-        <div className="playback-bar">
-          <span className="playback-action" title="Play">
-            <button aria-label="Play" disabled type="button">
-              <Play size={14} />
-            </button>
-          </span>
-          <span className="playback-action" title="Pause">
-            <button aria-label="Pause" disabled type="button">
-              <Pause size={14} />
-            </button>
-          </span>
-          <span className="playback-action" title="Step">
-            <button aria-label="Step" disabled type="button">
-              <StepForward size={14} />
-            </button>
-          </span>
-          <span className="playback-action" title="Reset">
-            <button aria-label="Reset" disabled type="button">
-              <RotateCcw size={14} />
-            </button>
-          </span>
-          <label htmlFor="simulation-speed">Speed </label>
-          <select name="Speed:" id="simulation-speed" defaultValue="1" disabled>
-            <option value="0.25">0.25x</option>
-            <option value="0.5">0.5x </option>
-            <option value="1">1x</option>
-            <option value="2">2x</option>
-            <option value="4">4x</option>
-          </select>
-          <p>
-            Time:
-            {displayedSnapshot.simulationTimeSeconds.toFixed(3)} s
-          </p>
-          <p>Tick: {displayedSnapshot.tick}</p>
-        </div>
-      </header>
+    <div className="eureka-app">
+      <aside className="site-rail" aria-label="Eureka">
+        <a className="brand" href="#laboratory"><Atom size={24} /><span>Eureka<small>computational physics studio</small></span></a>
+        <nav aria-label="Workspace">
+          <span className="rail-label">Explore</span>
+          <a className="rail-link is-current" href="#laboratory" aria-current="page"><Atom size={17} />Physics laboratory</a>
+          <button className="rail-link" type="button" disabled><BookOpen size={17} />Learning library</button>
+          <span className="rail-label">Your work</span>
+          <button className="rail-link" type="button" disabled><Folder size={17} />My experiments</button>
+          <button className="rail-link" type="button" disabled><Users size={17} />Classes</button>
+        </nav>
+        <div className="rail-footer"><span className="status-dot" />Local laboratory<small>Explore · observe · understand</small></div>
+      </aside>
+      <div className="workspace">
+        <div className="workspace-topbar"><span>Workspace <i>/</i> Mechanics <i>/</i> <strong>Projectiles</strong></span><span className="scene-badge">{activeSampleSnapshots === undefined ? "Authored scene" : "Sample scene"}</span></div>
+        <main id="laboratory" className="lab-shell">
+          <header className="lab-header">
+            <div><p className="eyebrow"><span>01</span>Mechanics laboratory</p><h1>A question of trajectory.</h1><p className="lab-subtitle">Explore the relationship between motion, gravity and geometry.</p></div>
+            <button onClick={() => setLabVisible((visible) => !visible)} type="button">{labVisible ? "Leave lab" : "Enter lab"}</button>
+          </header>
+          <div className="lab-layout">
+            <div className="workbench-column">
+              <div className="playback-bar">
+                {/* Continue the reviewed sample from its current tick. */}
+                <span className="playback-action" title="Play">
+                  <button
+                    aria-label="Play" type="button"
+                    disabled={!playbackReady || playbackState?.playing === true || sampleFinished}
+                    onClick={() => handlePlaybackAction("play")}
+                  >
+                    <Play size={14} />
+                  </button>
+                </span>
 
-      <div className="lab-layout">
-        <section className="object-library">
-          <ObjectLibrary />
-          <h2>Scene Objects</h2>
-          <ul className="bodies">
-            {editableScene.bodies.map((singleBody) => (
-              <li key={singleBody.id}>
-                <button
-                  type="button"
-                  aria-pressed={selectedEntityId === singleBody.id}
-                  onClick={() => {
-                    labStore.getState().selectEntity(singleBody.id);
-                  }}
+                {/* Pause without changing the accepted physical state. */}
+                <span className="playback-action" title="Pause">
+                  <button
+                    aria-label="Pause" type="button"
+                    disabled={playbackState?.playing !== true}
+                    onClick={() => handlePlaybackAction("pause")}
+                  >
+                    <Pause size={14} />
+                  </button>
+                </span>
+
+                {/* Request one outer tick while remaining paused. */}
+                <span className="playback-action" title="Step">
+                  <button
+                    aria-label="Step" type="button"
+                    disabled={!playbackReady || playbackState?.playing === true || sampleFinished}
+                    onClick={() => handlePlaybackAction("stepOnce")}
+                  >
+                    <StepForward size={14} />
+                  </button>
+                </span>
+
+                {/* Restore the starting state while preserving the mounted view and selection. */}
+                <span className="playback-action" title="Reset">
+                  <button
+                    aria-label="Reset" type="button"
+                    disabled={playbackState === null}
+                    onClick={() => handlePlaybackAction("reset")}
+                  >
+                    <RotateCcw size={14} />
+                  </button>
+                </span>
+                <label htmlFor="simulation-speed">Speed </label>
+                <select
+                  id="simulation-speed" name="speed"
+                  value={playbackState?.speed ?? 1}
+                  disabled={playbackState === null}
+                  onChange={(event) => handleSpeedChange(event.currentTarget.value)}
                 >
-                  {singleBody.id}: {singleBody.kind}
-                </button>
-              </li>
-            ))}
-            {editableScene.triggers.map((target) => (
-              <li key={target.id}>
-                <button
-                  type="button"
-                  aria-pressed={selectedEntityId === target.id}
-                  onClick={() => {
-                    labStore.getState().selectEntity(target.id);
-                  }}
-                >
-                  {target.id}: {target.kind}
-                </button>
-              </li>
-            ))}
-          </ul>
-        </section>
-        <section className="canvas">
-          <h2>Canvas</h2>
-
-          <div className="canvas-toolbar">
-            <button
-              aria-label="Delete objects"
-              aria-pressed={activeTool.kind === "delete"}
-              className={`tool-btn ${activeTool.kind === "delete" ? "active" : ""}`}
-              title="Delete objects"
-              type="button"
-              onClick={() => {
-                labStore
-                  .getState()
-                  .setActiveTool(
-                    activeTool.kind === "delete"
-                      ? { kind: "select" }
-                      : { kind: "delete" },
-                  );
-              }}
-            >
-              <Trash2 size={14} />
-            </button>
-            <button
-              aria-label="Move objects"
-              aria-pressed={activeTool.kind === "move"}
-              className={`tool-btn ${activeTool.kind === "move" ? "active" : ""}`}
-              title="Move objects"
-              type="button"
-              onClick={() => {
-                labStore
-                  .getState()
-                  .setActiveTool(
-                    activeTool.kind === "move"
-                      ? { kind: "select" }
-                      : { kind: "move" },
-                  );
-              }}
-            >
-              <Move size={14} />
-            </button>
-            <button
-              type="button"
-              className={`tool-btn ${activeTool.kind === "pan" ? "active" : ""}`}
-              aria-pressed={activeTool.kind === "pan"}
-              onClick={() => {
-                labStore
-                  .getState()
-                  .setActiveTool(
-                    activeTool.kind === "pan"
-                      ? { kind: "select" }
-                      : { kind: "pan" },
-                  );
-              }}
-            >
-              <Hand size={14} />
-            </button>
-
-            <button
-              type="button"
-              className="tool-btn"
-              onClick={() => {
-                const state = labStore.getState();
-                state.setCamera(
-                  state.cameraCenterWorldMeters,
-                  state.pixelsPerMeter + 12,
-                );
-              }}
-            >
-              <ZoomIn size={14} />
-            </button>
-
-            <button
-              type="button"
-              className="tool-btn"
-              onClick={() => {
-                const state = labStore.getState();
-                const nextScale = state.pixelsPerMeter - 12;
-
-                if (nextScale >= 12) {
-                  state.setCamera(state.cameraCenterWorldMeters, nextScale);
-                }
-              }}
-            >
-              <ZoomOut size={14} />
-            </button>
-          </div>
-
-          <section
-            aria-label="Physics laboratory"
-            style={{ marginTop: "16px" }}
-          >
-            {labVisible ? (
-              <LabCanvas
-                scene={editableScene}
-                sampleSnapshots={activeSampleSnapshots}
-                setDisplayedSnapshot={setDisplayedSnapshot}
-                setActiveController={setActiveController}
-                onPlacementRequested={handlePlacementRequested}
-                onMoveRequested={handleMoveRequested}
-                onDeleteRequested={handleDeleteRequested}
-              />
-            ) : (
-              <p>The lab is closed.</p>
-            )}
-          </section>
-          <section className="measurements">
-            <h2>Measurements and display</h2>
-
-            <h3>Current measurements</h3>
-            <p>
-              Snapshot tick {displayedSnapshot.tick} · Values rounded to four decimal places.
-            </p>
-
-            {selectedBody === undefined && (
-              <p>Select a projectile or solid body to see its values.</p>
-            )}
-
-            <dl className="measurement-values">
-              <dt>x (m)</dt>
-              <dd>{formatMeasurement(selectedBody?.pose.positionMeters.x)}</dd>
-
-              <dt>y (m)</dt>
-              <dd>{formatMeasurement(selectedBody?.pose.positionMeters.y)}</dd>
-
-              <dt>vx (m/s)</dt>
-              <dd>{formatMeasurement(selectedBody?.velocity.linearMetersPerSecond.x)}</dd>
-
-              <dt>vy (m/s)</dt>
-              <dd>{formatMeasurement(selectedBody?.velocity.linearMetersPerSecond.y)}</dd>
-
-              <dt>Speed |v| (m/s)</dt>
-              <dd>{formatMeasurement(selectedSpeedMetersPerSecond)}</dd>
-
-              <dt>t (s)</dt>
-              <dd>{formatMeasurement(displayedSnapshot.simulationTimeSeconds)}</dd>
-            </dl>
-
-            <h3>Recent events</h3>
-            {visibleEvents.length === 0 ? (
-              <p>No events reported for this selection.</p>
-            ) : (
-              <ul>
-                {visibleEvents.map((event) => (
-                  <li key={event.id}>
-                    {event.kind} — {event.bodyId} at
-                    {event.timeSeconds.toFixed(3)} s
-                  </li>
-                ))}
-              </ul>
-            )}
-
-            <h3>Errors</h3>
-            {displayedSnapshot.diagnostics.length === 0 ? (
-              <p>No errors reported.</p>
-            ) : (
-              <ul>
-                {displayedSnapshot.diagnostics.map((diagnostic, index) => (
-                  <li key={index}>{diagnostic.message}</li>
-                ))}
-              </ul>
-            )}
-
-            <h3>Display options</h3>
-            <div className="display-options">
-              {OVERLAY_OPTIONS.map((option) => (
-                <label key={option.key}>
-                  <input
-                    type="checkbox"
-                    checked={overlayVisibility[option.key]}
-                    onChange={(event) => {
-                      labStore.getState().setOverlayVisible(option.key, event.currentTarget.checked);
-                    }}
-                  />
-                  {(option.key === "trail" || option.key === "prediction") && (
-                    <span aria-hidden="true" className={`path-swatch ${option.key}`} />
-                  )}
-                  {option.label}
-                </label>
-              ))}
+                  {PLAYBACK_SPEEDS.map((speed) => (
+                    <option key={speed} value={speed}>{speed}×</option>
+                  ))}
+                </select>
+                {/* Explain the finite sample's normal stopping point. */}
+                <span role="status">
+                  {playbackState === null
+                    ? "Unavailable"
+                    : playbackState.playing
+                      ? "Playing"
+                      : playbackReady && sampleFinished
+                        ? "Sample finished · Reset to replay"
+                        : "Paused"}
+                </span>
+                {playbackState !== null && !playbackReady && (
+                  <span>This edited scene has no playback sample.</span>
+                )}
+                {playbackState?.unableToMaintainRealTimeSpeed && (
+                  <span role="status">Unable to maintain real-time speed.</span>
+                )}
+                <p>
+                  Time:
+                  {displayedSnapshot.simulationTimeSeconds.toFixed(3)} s
+                </p>
+                <p>Tick: {displayedSnapshot.tick}</p>
+              </div>
+              <section ref={viewportRef} className="canvas" aria-label="Scene viewport">
+                <header className="panel-heading">
+                  <h2><Atom size={15} />Scene viewport</h2>
+                  <div className="viewport-actions">
+                    <button
+                      ref={outlineToggleRef}
+                      className="tool-btn"
+                      type="button"
+                      aria-expanded={sceneOutlineOpen}
+                      aria-controls="scene-outline"
+                      onClick={() => setSceneOutlineOpen((open) => !open)}
+                    >
+                      <PanelLeft size={14} />Scene
+                    </button>
+                    <button
+                      className="tool-btn"
+                      type="button"
+                      aria-label={viewportExpanded ? "Exit expanded viewport" : "Expand viewport"}
+                      title={viewportExpanded ? "Exit expanded viewport" : "Expand viewport"}
+                      disabled={!document.fullscreenEnabled}
+                      onClick={() => { void toggleViewportSize(); }}
+                    >
+                      {viewportExpanded ? <Shrink size={14} /> : <Expand size={14} />}
+                    </button>
+                  </div>
+                </header>
+                <div className={`canvas-workbench${sceneOutlineOpen ? " outline-open" : ""}`}>
+                  <aside className="object-library" aria-label="Add objects"><ObjectLibrary /></aside>
+                  {sceneOutlineOpen && <SceneOutline scene={editableScene} selectedEntityId={selectedEntityId} onClose={closeSceneOutline} />}
+                  <div className="canvas-page">
+                    <div className="canvas-heading"><span>— Motion study</span>
+                      <CanvasTools />
+                    </div>
+                    {labVisible ? (
+                      <LabCanvas
+                        scene={editableScene} sampleSnapshots={activeSampleSnapshots}
+                        setDisplayedSnapshot={setDisplayedSnapshot} setActiveController={setActiveController}
+                        onPlaybackChange={setPlaybackState}
+                        onOperationResult={reportLabResult}
+                        onPlacementRequested={handlePlacementRequested}
+                        onMoveRequested={handleMoveRequested} onDeleteRequested={handleDeleteRequested}
+                      />
+                    ) : <div className="closed-lab"><Atom size={32} /><p>Your laboratory is closed.</p><button type="button" className="tool-btn" onClick={() => setLabVisible(true)}>Enter lab</button></div>}
+                    <div className="canvas-legend" aria-label="Path legend"><span><i className="path-swatch trail" />Recorded trail</span><span><i className="path-swatch prediction" />Ideal prediction</span><span><i className="velocity-swatch" />Velocity</span><span><i className="target-swatch" />Target sensor</span></div>
+                  </div>
+                </div>
+                <div className="viewport-status"><span><span className="status-dot" />{activeSampleSnapshots === undefined ? "Authored initial state" : "Handwritten sample"}</span></div>
+                {selectionNotice !== null && (
+                  <p className="viewport-error" role="status">{selectionNotice}</p>
+                )}
+                {labError !== null && (
+                  <p className="viewport-error" role="alert">{labError}</p>
+                )}
+                {viewportError !== null && <p className="viewport-error" role="alert">{viewportError}</p>}
+              </section>
+              <section className="display-panel" aria-label="Display options">
+                <h2><Eye size={15} />Show in viewport</h2>
+                <div className="display-options">
+                  {OVERLAY_OPTIONS.map((option) => (
+                    <label key={option.key}>
+                      <input type="checkbox" checked={overlayVisibility[option.key]} onChange={(event) => labStore.getState().setOverlayVisible(option.key, event.currentTarget.checked)} />
+                      {(option.key === "trail" || option.key === "prediction") && <span aria-hidden="true" className={`path-swatch ${option.key}`} />}
+                      {option.label}
+                    </label>
+                  ))}
+                </div>
+              </section>
+              <ObservationNotebook snapshot={displayedSnapshot} selectedEntityId={selectedEntityId} />
             </div>
-          </section>
-        </section>
-        <PropertiesPanel
-          controllerRef={controllerRef}
-          displayedSnapshot={displayedSnapshot}
-          editableScene={editableScene}
-          selectedEntityId={selectedEntityId}
-          setEditableScene={setEditableScene}
-        />
+            <SceneInspector controllerRef={controllerRef} displayedSnapshot={displayedSnapshot} editableScene={editableScene} selectedEntityId={selectedEntityId} setEditableScene={setEditableScene} playing={playbackState?.playing ?? false} />
+          </div>
+          <footer className="workspace-footer"><span>Eureka <i>/</i> A place to make physics visible.</span><span>{activeSampleSnapshots === undefined ? "Scene authoring" : "Sample observation"} · SI units</span></footer>
+        </main>
       </div>
-    </main>
+    </div>
   );
 }

@@ -13,6 +13,7 @@ import {
   DEFAULT_TARGET_PROPERTIES,
 } from "./authoring.js";
 import { labStore } from "./store.js";
+import { NumberField } from "./NumberField.js";
 
 export function ObjectLibrary() {
   const activeTool = useStore(labStore, (state) => state.activeTool);
@@ -30,11 +31,49 @@ export function ObjectLibrary() {
   const [targetMenuOpen, setTargetMenuOpen] = useState(false);
   const [targetFormError, setTargetFormError] = useState<string | null>(null);
 
+  function restoreLibraryFocus(form: HTMLFormElement | null): void {
+    if (form === null) {
+      return;
+    }
+
+    const button = form.closest("li")?.querySelector<HTMLButtonElement>(".object-tool-button");
+
+    queueMicrotask(() => {
+      if (!form.isConnected && button?.isConnected) {
+        button.focus();
+      }
+    });
+  }
+
   return (
     <>
-      <h2>Objects Library</h2>
-      <h3>Tools</h3>
-      <ul className="tools">
+      <h2>Objects</h2>
+      <ul
+        className="tools"
+        onClick={(event) => {
+          if (event.target instanceof Element) {
+            restoreLibraryFocus(event.target.closest("form"));
+          }
+        }}
+        onSubmit={(event) => {
+          if (event.target instanceof HTMLFormElement) {
+            restoreLibraryFocus(event.target);
+          }
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape" || !(event.target instanceof Element)) {
+            return;
+          }
+
+          const form = event.target.closest("form");
+
+          if (form !== null) {
+            event.preventDefault();
+            event.stopPropagation();
+            form.querySelector<HTMLButtonElement>('button[type="button"]')?.click();
+          }
+        }}
+      >
         <li>
           <button
             className="object-tool-button"
@@ -130,49 +169,11 @@ export function ObjectLibrary() {
                 setProjectileMenuOpen(false);
               }}
             >
-              <label>
-                Mass (kg)
-                <input
-                  name="mass"
-                  defaultValue={DEFAULT_PROJECTILE_PROPERTIES.massKilograms}
-                />
-              </label>
-
-              <label>
-                Radius (m)
-                <input
-                  name="radius"
-                  defaultValue={DEFAULT_PROJECTILE_PROPERTIES.radiusMeters}
-                />
-              </label>
-
-              <label>
-                Launch speed (m/s)
-                <input
-                  name="speed"
-                  defaultValue={
-                    DEFAULT_PROJECTILE_PROPERTIES.launchSpeedMetersPerSecond
-                  }
-                />
-              </label>
-
-              <label>
-                Launch angle (°)
-                <input
-                  name="angle"
-                  defaultValue={
-                    DEFAULT_PROJECTILE_PROPERTIES.launchAngleDegrees
-                  }
-                />
-              </label>
-
-              <label>
-                Restitution (0–1)
-                <input
-                  name="restitution"
-                  defaultValue={DEFAULT_PROJECTILE_PROPERTIES.restitution}
-                />
-              </label>
+              <NumberField label="Mass (kg)" name="mass" defaultValue={DEFAULT_PROJECTILE_PROPERTIES.massKilograms} rule="positive" autoFocus />
+              <NumberField label="Radius (m)" name="radius" defaultValue={DEFAULT_PROJECTILE_PROPERTIES.radiusMeters} rule="positive" />
+              <NumberField label="Launch speed (m/s)" name="speed" defaultValue={DEFAULT_PROJECTILE_PROPERTIES.launchSpeedMetersPerSecond} rule="nonnegative" />
+              <NumberField label="Launch angle (°)" name="angle" defaultValue={DEFAULT_PROJECTILE_PROPERTIES.launchAngleDegrees} />
+              <NumberField label="Restitution (0–1)" name="restitution" defaultValue={DEFAULT_PROJECTILE_PROPERTIES.restitution} rule="unitInterval" />
 
               {projectileFormError !== null && (
                 <p role="alert">{projectileFormError}</p>
@@ -205,6 +206,8 @@ export function ObjectLibrary() {
             }
             onClick={() => {
               setProjectileMenuOpen(false);
+              setRampMenuOpen(false);
+              setTargetMenuOpen(false);
               setPlatformMenuOpen((open) => !open);
             }}
           >
@@ -275,29 +278,9 @@ export function ObjectLibrary() {
                 setPlatformMenuOpen(false);
               }}
             >
-              <label>
-                Width (m)
-                <input
-                  name="width"
-                  defaultValue={DEFAULT_PLATFORM_PROPERTIES.widthMeters}
-                />
-              </label>
-
-              <label>
-                Height (m)
-                <input
-                  name="height"
-                  defaultValue={DEFAULT_PLATFORM_PROPERTIES.heightMeters}
-                />
-              </label>
-
-              <label>
-                Restitution (0–1)
-                <input
-                  name="restitution"
-                  defaultValue={DEFAULT_PLATFORM_PROPERTIES.restitution}
-                />
-              </label>
+              <NumberField label="Width (m)" name="width" defaultValue={DEFAULT_PLATFORM_PROPERTIES.widthMeters} rule="positive" autoFocus />
+              <NumberField label="Height (m)" name="height" defaultValue={DEFAULT_PLATFORM_PROPERTIES.heightMeters} rule="positive" />
+              <NumberField label="Restitution (0–1)" name="restitution" defaultValue={DEFAULT_PLATFORM_PROPERTIES.restitution} rule="unitInterval" />
 
               {platformFormError !== null && (
                 <p role="alert">{platformFormError}</p>
@@ -330,6 +313,7 @@ export function ObjectLibrary() {
             onClick={() => {
               setProjectileMenuOpen(false);
               setPlatformMenuOpen(false);
+              setTargetMenuOpen(false);
               setRampMenuOpen((open) => !open);
             }}
           >
@@ -405,37 +389,10 @@ export function ObjectLibrary() {
                 setRampMenuOpen(false);
               }}
             >
-              <label>
-                Width (m)
-                <input
-                  name="width"
-                  defaultValue={DEFAULT_RAMP_PROPERTIES.widthMeters}
-                />
-              </label>
-
-              <label>
-                Height (m)
-                <input
-                  name="height"
-                  defaultValue={DEFAULT_RAMP_PROPERTIES.heightMeters}
-                />
-              </label>
-
-              <label>
-                Surface angle (°)
-                <input
-                  name="angle"
-                  defaultValue={DEFAULT_RAMP_PROPERTIES.angleDegrees}
-                />
-              </label>
-
-              <label>
-                Restitution (0–1)
-                <input
-                  name="restitution"
-                  defaultValue={DEFAULT_RAMP_PROPERTIES.restitution}
-                />
-              </label>
+              <NumberField label="Width (m)" name="width" defaultValue={DEFAULT_RAMP_PROPERTIES.widthMeters} rule="positive" autoFocus />
+              <NumberField label="Height (m)" name="height" defaultValue={DEFAULT_RAMP_PROPERTIES.heightMeters} rule="positive" />
+              <NumberField label="Surface angle (°)" name="angle" defaultValue={DEFAULT_RAMP_PROPERTIES.angleDegrees} />
+              <NumberField label="Restitution (0–1)" name="restitution" defaultValue={DEFAULT_RAMP_PROPERTIES.restitution} rule="unitInterval" />
 
               {rampFormError !== null && <p role="alert">{rampFormError}</p>}
 
@@ -514,13 +471,7 @@ export function ObjectLibrary() {
                 setTargetMenuOpen(false);
               }}
             >
-              <label>
-                Radius (m)
-                <input
-                  name="radius"
-                  defaultValue={DEFAULT_TARGET_PROPERTIES.radiusMeters}
-                />
-              </label>
+              <NumberField label="Radius (m)" name="radius" defaultValue={DEFAULT_TARGET_PROPERTIES.radiusMeters} rule="positive" autoFocus />
 
               {targetFormError !== null && (
                 <p role="alert">{targetFormError}</p>
