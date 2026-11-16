@@ -1,6 +1,6 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { SceneDefinition } from "@eureka/contracts";
-import { Circle, Layers, Target, X } from "lucide-react";
+import { Circle, Layers, Search, Target } from "lucide-react";
 import { labStore } from "./store.js";
 
 // List the current scene independently of the property form and canvas lifetime.
@@ -10,12 +10,18 @@ export function SceneOutline(props: {
   onClose(): void;
 }) {
   const entities = [...props.scene.bodies, ...props.scene.triggers];
+  const [search, setSearch] = useState("");
+  const visibleEntities = entities.filter((entity) => entity.id.replaceAll("-", " ").toLowerCase().includes(search.trim().toLowerCase()));
   const outlineRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
+    // Opening from the Scene button moves focus; the initial desktop layout does not.
+    if (document.activeElement?.getAttribute("aria-controls") !== "editor-panels") {
+      return;
+    }
     const outline = outlineRef.current;
     const selectedButton = outline?.querySelector<HTMLButtonElement>('button[aria-pressed="true"]');
-    const firstButton = outline?.querySelector<HTMLButtonElement>("button");
+    const firstButton = outline?.querySelector<HTMLButtonElement>(".bodies button");
 
     (selectedButton ?? firstButton)?.focus();
   }, []);
@@ -34,13 +40,12 @@ export function SceneOutline(props: {
       }}
     >
       <header className="outline-heading">
-        <h3 id="scene-outline-title">Scene <span className="count-badge">{entities.length}</span></h3>
-        <button className="tool-btn" type="button" aria-label="Close scene outline" title="Close scene outline" onClick={props.onClose}>
-          <X size={14} />
-        </button>
+        <h3 id="scene-outline-title"><Layers size={14} />Scene objects <span className="count-badge">{entities.length}</span></h3>
       </header>
+      <label className="scene-search"><Search size={13} /><span className="visually-hidden">Filter scene objects</span><input type="search" placeholder="Find an object…" value={search} onChange={(event) => setSearch(event.currentTarget.value)} /></label>
+      <p className="scene-root"><span className="status-dot" />Experiment<span>2D</span></p>
       <ul className="bodies" aria-label="Scene objects">
-        {entities.map((entity) => {
+        {visibleEntities.map((entity) => {
           const name = entity.id.replaceAll("-", " ");
           return (
             <li key={entity.id}>
@@ -50,7 +55,7 @@ export function SceneOutline(props: {
                 aria-pressed={entity.id === props.selectedEntityId}
                 onClick={() => {
                   labStore.getState().selectEntity(entity.id);
-                  if (window.matchMedia("(max-width: 1250px)").matches) {
+                  if (window.matchMedia("(max-width: 1100px)").matches) {
                     props.onClose();
                   }
                 }}
@@ -61,8 +66,9 @@ export function SceneOutline(props: {
             </li>
           );
         })}
+        {entities.length > 0 && visibleEntities.length === 0 && <li className="outline-empty" role="status">No matching objects.</li>}
       </ul>
-      <p className="outline-hint">{entities.length === 0 ? "Add an object to begin your experiment." : "Select an object to inspect its properties."}</p>
+      {entities.length === 0 && <p className="outline-hint">Add an object to begin your experiment.</p>}
     </aside>
   );
 }

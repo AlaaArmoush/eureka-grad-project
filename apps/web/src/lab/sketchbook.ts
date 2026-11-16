@@ -72,11 +72,11 @@ export function createNotebookGrid() {
         const x = worldToScreen({ x: value, y: 0 }, viewport).x;
         const major = index % 2 === 0;
         if (major) {
-          pencilLine(lines, x, 0, x, height, 0x81988f, .85, .6);
+          pencilLine(lines, x, 0, x, height, sceneColors.grid, .85, .38);
         } else {
-          line(x, 0, x, height, 0x91a19a, .55, .32);
+          line(x, 0, x, height, sceneColors.fineGrid, .55, .2);
         }
-        if (major && x > 24 && x < width - 72) {
+        if (major && x > 24 && x < width - 92) {
           label(format(value), x + 4, xAxisVisible ? origin.y - 23 : height - 54);
           if (xAxisVisible) line(x, origin.y - 3, x, origin.y + 3, sceneColors.ink);
         }
@@ -86,9 +86,9 @@ export function createNotebookGrid() {
         const y = worldToScreen({ x: 0, y: value }, viewport).y;
         const major = index % 2 === 0;
         if (major) {
-          pencilLine(lines, 0, y, width, y, 0x81988f, .85, .6);
+          pencilLine(lines, 0, y, width, y, sceneColors.grid, .85, .38);
         } else {
-          line(0, y, width, y, 0x91a19a, .55, .32);
+          line(0, y, width, y, sceneColors.fineGrid, .55, .2);
         }
         if (major && index !== 0 && y > 100 && y < height - 70) {
           label(format(value), yAxisVisible ? origin.x - 29 : 10, y - 9);
@@ -96,17 +96,17 @@ export function createNotebookGrid() {
         }
       }
       if (origin.y >= 0 && origin.y <= height) {
-        pencilLine(lines, 0, origin.y, width, origin.y, 0x8d7044, 1.8, .95);
-        line(width - 24, origin.y - 4, width - 16, origin.y, 0x8d7044);
-        line(width - 24, origin.y + 4, width - 16, origin.y, 0x8d7044);
+        pencilLine(lines, 0, origin.y, width, origin.y, sceneColors.axisX, 1.4, .9);
+        line(width - 24, origin.y - 4, width - 16, origin.y, sceneColors.axisX);
+        line(width - 24, origin.y + 4, width - 16, origin.y, sceneColors.axisX);
       }
       if (origin.x >= 0 && origin.x <= width) {
-        pencilLine(lines, origin.x, 0, origin.x, height, 0x527b73, 1.6, .95);
-        line(origin.x - 4, 88, origin.x, 80, 0x527b73);
-        line(origin.x + 4, 88, origin.x, 80, 0x527b73);
+        pencilLine(lines, origin.x, 0, origin.x, height, sceneColors.axisY, 1.4, .9);
+        line(origin.x - 4, 88, origin.x, 80, sceneColors.axisY);
+        line(origin.x + 4, 88, origin.x, 80, sceneColors.axisY);
       }
-      label("x (m)", width - 58, xAxisVisible ? origin.y - 25 : height - 54, 0x8d7044, 15);
-      label("y (m)", yAxisVisible ? origin.x + 9 : 10, 76, 0x527b73, 15);
+      label("x (m)", width - 58, xAxisVisible ? origin.y - 25 : height - 54, sceneColors.axisX, 15);
+      label("y (m)", yAxisVisible ? origin.x + 9 : 10, 76, sceneColors.axisY, 15);
     }
     const rulerLength = step * scale;
     const rulerX = width - rulerLength - 24;

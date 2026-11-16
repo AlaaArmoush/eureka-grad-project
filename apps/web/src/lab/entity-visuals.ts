@@ -11,7 +11,7 @@ export function createEntityVisual(entity: Body | TargetTrigger) {
   const isGround = entity.id.toLowerCase().includes("ground");
   const isRamp = entity.id.toLowerCase().includes("ramp");
   const name = entity.kind === "target" ? "Target zone" : entity.kind === "dynamic" ? "Projectile" : isGround ? "Ground" : isRamp ? "Inclined plane" : "Platform";
-  const color = entity.kind === "target" ? sceneColors.target : entity.kind === "dynamic" ? sceneColors.reference : sceneColors.ink;
+  const color = entity.kind === "target" ? sceneColors.target : entity.kind === "dynamic" ? sceneColors.reference : isGround ? sceneColors.ground : isRamp ? sceneColors.ramp : sceneColors.platform;
   const caption = notebookLabel(name, color);
   graphic.addChild(selection, geometry, caption);
   let paintKey = "";
@@ -20,7 +20,7 @@ export function createEntityVisual(entity: Body | TargetTrigger) {
     const key = [scale, selected, entered, moveMode].join(":");
     const shape = entity.shape;
     const selectionColor = moveMode ? sceneColors.velocity : color;
-    const selectionWash = moveMode ? 0x7da8b3 : 0xc5a25f;
+    const selectionWash = selectionColor;
     if (key !== paintKey) {
       paintKey = key;
       paintEntity(geometry, entity, scale, entered);

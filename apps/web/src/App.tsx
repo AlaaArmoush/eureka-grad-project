@@ -1,15 +1,26 @@
-import { useCallback, useEffect } from "react";
-import { useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 // Supply the reviewed static observation and its consecutive playback frames.
 import { PROJECTILE_LAB_MOCK, PROJECTILE_PLAYBACK_SNAPSHOTS } from "./lab/mocks.js";
 import type { MoveEntityRequest, PlacementRequest } from "./lab/authoring";
 import { ObjectLibrary } from "./lab/ObjectLibrary";
 import {
   Atom,
+  Activity,
+  ChevronDown,
+  ChevronRight,
+  Crosshair,
+  Layers,
   BookOpen,
-  Folder,
-  Users,
-  Eye,
+  CircleHelp,
+  FolderOpen,
+  GraduationCap,
+  Images,
+  LayoutDashboard,
+  Plus,
+  Settings2,
+  Trophy,
+  UserRound,
+  X,
   Play,
   Pause,
   StepForward,
@@ -17,6 +28,7 @@ import {
   PanelLeft,
   Expand,
   Shrink,
+  Power,
 } from "lucide-react";
 import { useStore } from "zustand";
 import { labStore } from "./lab/store";
@@ -31,27 +43,38 @@ import { SceneInspector } from "./lab/SceneInspector.js";
 import { SceneOutline } from "./lab/SceneOutline.js";
 import { ObservationNotebook } from "./lab/ObservationNotebook.js";
 
-const OVERLAY_OPTIONS = [
-  { key: "trail", label: "Trail" },
-  { key: "velocity", label: "Velocity" },
-  { key: "components", label: "Components" },
-  { key: "prediction", label: "Ideal prediction" },
-  { key: "events", label: "Target entry" },
-  { key: "grid", label: "Grid" },
-  { key: "labels", label: "Labels" },
+const WORKSPACE_NAVIGATION = [
+  { label: "Workspace", items: [
+    { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
+    { id: "laboratory", label: "Physics lab", Icon: Atom },
+    { id: "experiments", label: "My experiments", Icon: FolderOpen },
+  ] },
+  { label: "Learn & teach", items: [
+    { id: "curriculum", label: "Curriculum", Icon: BookOpen },
+    { id: "challenges", label: "Challenges", Icon: Trophy },
+    { id: "classes", label: "Classes", Icon: GraduationCap },
+  ] },
+  { label: "Discover", items: [
+    { id: "gallery", label: "Community gallery", Icon: Images },
+  ] },
 ] as const;
 
 export function App() {
   const [displayedSnapshot, setDisplayedSnapshot] = useState<Snapshot>(
-    PROJECTILE_LAB_MOCK.snapshot,
+    PROJECTILE_PLAYBACK_SNAPSHOTS[0] ?? PROJECTILE_LAB_MOCK.snapshot,
   );
   const [editableScene, setEditableScene] = useState<SceneDefinition>(() =>
     structuredClone(PROJECTILE_LAB_MOCK.scene),
   );
   const [labVisible, setLabVisible] = useState(true);
-  const [sceneOutlineOpen, setSceneOutlineOpen] = useState(false);
+  const [sceneOutlineOpen, setSceneOutlineOpen] = useState(() => window.matchMedia("(min-width: 1101px)").matches);
+  const [inspectorOpen, setInspectorOpen] = useState(() => window.matchMedia("(min-width: 901px)").matches);
+  const [measurementsOpen, setMeasurementsOpen] = useState(true);
+  const [navigationOpen, setNavigationOpen] = useState(() => window.matchMedia("(min-width: 1280px)").matches);
+  const [dockTab, setDockTab] = useState<"scene" | "objects">("scene");
   const outlineToggleRef = useRef<HTMLButtonElement>(null);
-  const viewportRef = useRef<HTMLElement>(null);
+  const inspectorToggleRef = useRef<HTMLButtonElement>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const [viewportExpanded, setViewportExpanded] = useState(false);
   const [viewportError, setViewportError] = useState<string | null>(null);
 
@@ -60,7 +83,35 @@ export function App() {
     outlineToggleRef.current?.focus();
   }
 
-  // Let the browser expand the existing viewport without replacing its mounted canvas.
+  function toggleSceneOutline(): void {
+    setSceneOutlineOpen((open) => !open);
+    setDockTab("scene");
+    if (!sceneOutlineOpen && window.matchMedia("(max-width: 900px)").matches) {
+      setInspectorOpen(false);
+    }
+  }
+
+  function openObjectLibrary(): void {
+    setSceneOutlineOpen(true);
+    setDockTab("objects");
+    if (window.matchMedia("(max-width: 900px)").matches) {
+      setInspectorOpen(false);
+    }
+  }
+
+  function toggleInspector(): void {
+    setInspectorOpen((open) => !open);
+    if (!inspectorOpen && window.matchMedia("(max-width: 900px)").matches) {
+      setSceneOutlineOpen(false);
+    }
+  }
+
+  function closeInspector(): void {
+    setInspectorOpen(false);
+    inspectorToggleRef.current?.focus();
+  }
+
+  // Expand the whole editor so its existing panels and canvas remain interactive.
   async function toggleViewportSize(): Promise<void> {
     const viewport = viewportRef.current;
     if (viewport === null) {
@@ -90,7 +141,6 @@ export function App() {
     (state) => state.selectedEntityId,
   );
   const selectionNotice = useStore(labStore, (state) => state.selectionNotice);
-  const overlayVisibility = useStore(labStore, (state) => state.overlayVisibility);
   let activeSampleSnapshots;
 
   if (
@@ -170,7 +220,7 @@ export function App() {
       return;
     }
     function handleEscKey(event: KeyboardEvent) {
-      if (event.key !== "Escape") {
+      if (event.key !== "Escape" || event.defaultPrevented) {
         return;
       }
 
@@ -293,119 +343,132 @@ export function App() {
     return true;
   }, [reportLabResult]);
   return (
-    <div className="eureka-app">
-      <aside className="site-rail" aria-label="Eureka">
-        <a className="brand" href="#laboratory"><Atom size={24} /><span>Eureka<small>computational physics studio</small></span></a>
-        <nav aria-label="Workspace">
-          <span className="rail-label">Explore</span>
-          <a className="rail-link is-current" href="#laboratory" aria-current="page"><Atom size={17} />Physics laboratory</a>
-          <button className="rail-link" type="button" disabled><BookOpen size={17} />Learning library</button>
-          <span className="rail-label">Your work</span>
-          <button className="rail-link" type="button" disabled><Folder size={17} />My experiments</button>
-          <button className="rail-link" type="button" disabled><Users size={17} />Classes</button>
+    <div className={`eureka-app${navigationOpen ? " navigation-open" : ""}`}>
+      <aside id="eureka-navigation" className="site-rail" aria-label="Eureka">
+        <a className="brand" href="#laboratory" aria-label="Eureka laboratory" title="Eureka laboratory"><Atom size={25} /><span>Eureka<small>The physics workspace</small></span></a>
+        <button className="rail-close" type="button" aria-label="Close main navigation" onClick={() => setNavigationOpen(false)}><X size={17} /></button>
+        <nav aria-label="Main navigation">
+          {WORKSPACE_NAVIGATION.map((section) => (
+            <div className="navigation-group" key={section.label}>
+              <span className="rail-label">{section.label}</span>
+              {section.items.map(({ id, label, Icon }) => id === "laboratory" ? (
+                <a key={id} className="rail-link is-current" href="#laboratory" aria-current="page" aria-label={label} title={label}><Icon size={18} /><span>{label}</span></a>
+              ) : (
+                <button key={id} className="rail-link" type="button" aria-label={label} title={label} disabled><Icon size={18} /><span>{label}</span></button>
+              ))}
+            </div>
+          ))}
         </nav>
-        <div className="rail-footer"><span className="status-dot" />Local laboratory<small>Explore · observe · understand</small></div>
+        <div className="rail-bottom">
+          <button className="rail-link" type="button" aria-label="Help & guides" title="Help & guides" disabled><CircleHelp size={18} /><span>Help & guides</span></button>
+          <button className="rail-link" type="button" aria-label="Settings" title="Settings" disabled><Settings2 size={18} /><span>Settings</span></button>
+          <div className="rail-footer"><span className="guest-avatar"><UserRound size={17} /></span><span>Guest workspace<small>Local session</small></span></div>
+        </div>
       </aside>
+      <button className="navigation-backdrop" type="button" aria-label="Close navigation overlay" hidden={!navigationOpen} onClick={() => setNavigationOpen(false)} />
       <div className="workspace">
-        <div className="workspace-topbar"><span>Workspace <i>/</i> Mechanics <i>/</i> <strong>Projectiles</strong></span><span className="scene-badge">{activeSampleSnapshots === undefined ? "Authored scene" : "Sample scene"}</span></div>
+        <div className="workspace-topbar">
+          <button className="tool-btn navigation-toggle" type="button" aria-label="Toggle main navigation" title="Toggle main navigation" aria-expanded={navigationOpen} aria-controls="eureka-navigation" onClick={() => setNavigationOpen((open) => !open)}><PanelLeft size={18} /></button>
+          <div className="workspace-breadcrumb"><span>Workspace</span><ChevronRight size={12} /><span>Physics lab</span><ChevronRight size={12} /><strong>Projectiles</strong></div>
+          <span className="local-status"><span className="status-dot" />Local workspace</span>
+        </div>
         <main id="laboratory" className="lab-shell">
           <header className="lab-header">
-            <div><p className="eyebrow"><span>01</span>Mechanics laboratory</p><h1>A question of trajectory.</h1><p className="lab-subtitle">Explore the relationship between motion, gravity and geometry.</p></div>
-            <button onClick={() => setLabVisible((visible) => !visible)} type="button">{labVisible ? "Leave lab" : "Enter lab"}</button>
+            <div className="experiment-heading"><span className="experiment-mark"><Atom size={21} /></span><div><h1>Projectile laboratory</h1><p>Build a scene. Follow the physics.</p></div><span className="scene-badge">{activeSampleSnapshots === undefined ? "Authored scene" : "Sample scene"}</span></div>
+            <div className="header-actions">
+              <button className="tool-btn lab-power" onClick={() => setLabVisible((visible) => !visible)} type="button"><Power size={14} />{labVisible ? "Leave lab" : "Enter lab"}</button>
+            </div>
           </header>
-          <div className="lab-layout">
+          <div ref={viewportRef} className={`lab-layout${sceneOutlineOpen ? " scene-open" : ""}${inspectorOpen ? "" : " inspector-closed"}`}>
+            <aside id="editor-panels" className="scene-dock" aria-label="Scene and object library" hidden={!sceneOutlineOpen}>
+              <div className="scene-dock-tabs" aria-label="Editor panels">
+                <button type="button" aria-pressed={dockTab === "scene"} onClick={() => setDockTab("scene")}><Layers size={13} />Scene</button>
+                <button type="button" aria-pressed={dockTab === "objects"} onClick={() => setDockTab("objects")}><Plus size={14} />Objects</button>
+                <button className="dock-close" type="button" aria-label="Close editor panels" onClick={closeSceneOutline}><X size={13} /></button>
+              </div>
+              <div className="scene-content" hidden={dockTab !== "scene"}>
+                {sceneOutlineOpen && <SceneOutline scene={editableScene} selectedEntityId={selectedEntityId} onClose={closeSceneOutline} />}
+                <button className="add-object-button" type="button" onClick={openObjectLibrary}><Plus size={14} />Add an object</button>
+              </div>
+              <div className="object-library" aria-label="Object library" hidden={dockTab !== "objects"}><ObjectLibrary /></div>
+            </aside>
             <div className="workbench-column">
               <div className="playback-bar">
-                {/* Continue the reviewed sample from its current tick. */}
-                <span className="playback-action" title="Play">
-                  <button
-                    aria-label="Play" type="button"
-                    disabled={!playbackReady || playbackState?.playing === true || sampleFinished}
-                    onClick={() => handlePlaybackAction("play")}
-                  >
-                    <Play size={14} />
-                  </button>
-                </span>
-
-                {/* Pause without changing the accepted physical state. */}
-                <span className="playback-action" title="Pause">
-                  <button
-                    aria-label="Pause" type="button"
-                    disabled={playbackState?.playing !== true}
-                    onClick={() => handlePlaybackAction("pause")}
-                  >
-                    <Pause size={14} />
-                  </button>
-                </span>
-
-                {/* Request one outer tick while remaining paused. */}
-                <span className="playback-action" title="Step">
-                  <button
-                    aria-label="Step" type="button"
-                    disabled={!playbackReady || playbackState?.playing === true || sampleFinished}
-                    onClick={() => handlePlaybackAction("stepOnce")}
-                  >
-                    <StepForward size={14} />
-                  </button>
-                </span>
-
-                {/* Restore the starting state while preserving the mounted view and selection. */}
-                <span className="playback-action" title="Reset">
-                  <button
-                    aria-label="Reset" type="button"
+                <div className="transport-controls">
+                  <span className="playback-action" title={playbackState?.playing ? "Pause" : "Play"}>
+                    <button
+                      className="run-button"
+                      aria-label={playbackState?.playing ? "Pause" : "Play"} type="button"
+                      disabled={playbackState?.playing !== true && (!playbackReady || sampleFinished)}
+                      onClick={() => handlePlaybackAction(playbackState?.playing ? "pause" : "play")}
+                    >
+                      {playbackState?.playing ? <Pause size={14} /> : <Play size={14} />}<span>{playbackState?.playing ? "Pause" : "Run"}</span>
+                    </button>
+                  </span>
+                  <span className="playback-action" title="Step">
+                    <button
+                      aria-label="Step" type="button"
+                      disabled={!playbackReady || playbackState?.playing === true || sampleFinished}
+                      onClick={() => handlePlaybackAction("stepOnce")}
+                    >
+                      <StepForward size={14} />
+                    </button>
+                  </span>
+                  <span className="playback-action" title="Reset">
+                    <button
+                      aria-label="Reset" type="button"
+                      disabled={playbackState === null}
+                      onClick={() => handlePlaybackAction("reset")}
+                    >
+                      <RotateCcw size={14} />
+                    </button>
+                  </span>
+                  <span className="transport-divider" />
+                  <label className="visually-hidden" htmlFor="simulation-speed">Playback speed</label>
+                  <select
+                    id="simulation-speed" name="speed"
+                    value={playbackState?.speed ?? 1}
                     disabled={playbackState === null}
-                    onClick={() => handlePlaybackAction("reset")}
+                    onChange={(event) => handleSpeedChange(event.currentTarget.value)}
                   >
-                    <RotateCcw size={14} />
-                  </button>
-                </span>
-                <label htmlFor="simulation-speed">Speed </label>
-                <select
-                  id="simulation-speed" name="speed"
-                  value={playbackState?.speed ?? 1}
-                  disabled={playbackState === null}
-                  onChange={(event) => handleSpeedChange(event.currentTarget.value)}
-                >
-                  {PLAYBACK_SPEEDS.map((speed) => (
-                    <option key={speed} value={speed}>{speed}×</option>
-                  ))}
-                </select>
-                {/* Explain the finite sample's normal stopping point. */}
-                <span role="status">
+                    {PLAYBACK_SPEEDS.map((speed) => (
+                      <option key={speed} value={speed}>{speed}×</option>
+                    ))}
+                  </select>
+                </div>
+                <span className={`playback-status${playbackState?.playing ? " is-playing" : ""}`} role="status">
+                  <span className="status-dot" />
                   {playbackState === null
                     ? "Unavailable"
                     : playbackState.playing
                       ? "Playing"
                       : playbackReady && sampleFinished
-                        ? "Sample finished · Reset to replay"
+                        ? "Finished · Reset to replay"
                         : "Paused"}
                 </span>
-                {playbackState !== null && !playbackReady && (
-                  <span>This edited scene has no playback sample.</span>
-                )}
                 {playbackState?.unableToMaintainRealTimeSpeed && (
                   <span role="status">Unable to maintain real-time speed.</span>
                 )}
-                <p>
-                  Time:
-                  {displayedSnapshot.simulationTimeSeconds.toFixed(3)} s
-                </p>
-                <p>Tick: {displayedSnapshot.tick}</p>
+                <div className="transport-readouts"><span>Time <b>{displayedSnapshot.simulationTimeSeconds.toFixed(3)} <small>s</small></b></span><span>Tick <b>{displayedSnapshot.tick}</b></span></div>
               </div>
-              <section ref={viewportRef} className="canvas" aria-label="Scene viewport">
+              <section className="canvas" aria-label="Scene viewport">
                 <header className="panel-heading">
-                  <h2><Atom size={15} />Scene viewport</h2>
+                  <h2><Crosshair size={14} />Viewport<span className="viewport-dimension">2D</span></h2>
                   <div className="viewport-actions">
+                    <button className="tool-btn add-object-toolbar" type="button" onClick={openObjectLibrary}><Plus size={14} />Add</button>
                     <button
                       ref={outlineToggleRef}
                       className="tool-btn"
                       type="button"
+                      aria-label="Scene"
+                      title="Scene objects"
                       aria-expanded={sceneOutlineOpen}
-                      aria-controls="scene-outline"
-                      onClick={() => setSceneOutlineOpen((open) => !open)}
+                      aria-controls="editor-panels"
+                      onClick={toggleSceneOutline}
                     >
-                      <PanelLeft size={14} />Scene
+                      <PanelLeft size={14} /><span className="tool-label">Scene</span>
                     </button>
+                    <button ref={inspectorToggleRef} className="tool-btn" type="button" aria-label="Toggle inspector" title="Toggle inspector" aria-expanded={inspectorOpen} aria-controls="inspector-dock" onClick={toggleInspector}><Settings2 size={14} /><span className="tool-label">Inspector</span></button>
                     <button
                       className="tool-btn"
                       type="button"
@@ -418,9 +481,7 @@ export function App() {
                     </button>
                   </div>
                 </header>
-                <div className={`canvas-workbench${sceneOutlineOpen ? " outline-open" : ""}`}>
-                  <aside className="object-library" aria-label="Add objects"><ObjectLibrary /></aside>
-                  {sceneOutlineOpen && <SceneOutline scene={editableScene} selectedEntityId={selectedEntityId} onClose={closeSceneOutline} />}
+                <div className="canvas-workbench">
                   <div className="canvas-page">
                     <div className="canvas-heading"><span>— Motion study</span>
                       <CanvasTools />
@@ -435,10 +496,9 @@ export function App() {
                         onMoveRequested={handleMoveRequested} onDeleteRequested={handleDeleteRequested}
                       />
                     ) : <div className="closed-lab"><Atom size={32} /><p>Your laboratory is closed.</p><button type="button" className="tool-btn" onClick={() => setLabVisible(true)}>Enter lab</button></div>}
-                    <div className="canvas-legend" aria-label="Path legend"><span><i className="path-swatch trail" />Recorded trail</span><span><i className="path-swatch prediction" />Ideal prediction</span><span><i className="velocity-swatch" />Velocity</span><span><i className="target-swatch" />Target sensor</span></div>
                   </div>
                 </div>
-                <div className="viewport-status"><span><span className="status-dot" />{activeSampleSnapshots === undefined ? "Authored initial state" : "Handwritten sample"}</span></div>
+                <div className="viewport-status"><span><span className="status-dot" />{activeSampleSnapshots === undefined ? "Authored initial state" : "Sample playback"}</span><span>Metres · Seconds · Kilograms</span></div>
                 {selectionNotice !== null && (
                   <p className="viewport-error" role="status">{selectionNotice}</p>
                 )}
@@ -447,23 +507,14 @@ export function App() {
                 )}
                 {viewportError !== null && <p className="viewport-error" role="alert">{viewportError}</p>}
               </section>
-              <section className="display-panel" aria-label="Display options">
-                <h2><Eye size={15} />Show in viewport</h2>
-                <div className="display-options">
-                  {OVERLAY_OPTIONS.map((option) => (
-                    <label key={option.key}>
-                      <input type="checkbox" checked={overlayVisibility[option.key]} onChange={(event) => labStore.getState().setOverlayVisible(option.key, event.currentTarget.checked)} />
-                      {(option.key === "trail" || option.key === "prediction") && <span aria-hidden="true" className={`path-swatch ${option.key}`} />}
-                      {option.label}
-                    </label>
-                  ))}
-                </div>
+              <section className="measurement-dock" aria-label="Measurement dock">
+                <button className="measurement-toggle" type="button" aria-expanded={measurementsOpen} aria-controls="measurement-content" onClick={() => setMeasurementsOpen((open) => !open)}><Activity size={15} /><span>Measurements & events</span><span className="measurement-source">Snapshot readouts</span><ChevronDown size={14} /></button>
+                <div id="measurement-content" className="measurement-content" hidden={!measurementsOpen}><ObservationNotebook snapshot={displayedSnapshot} selectedEntityId={selectedEntityId} /></div>
               </section>
-              <ObservationNotebook snapshot={displayedSnapshot} selectedEntityId={selectedEntityId} />
             </div>
-            <SceneInspector controllerRef={controllerRef} displayedSnapshot={displayedSnapshot} editableScene={editableScene} selectedEntityId={selectedEntityId} setEditableScene={setEditableScene} playing={playbackState?.playing ?? false} />
+            <div id="inspector-dock" className="inspector-dock" hidden={!inspectorOpen}><SceneInspector onClose={closeInspector} controllerRef={controllerRef} displayedSnapshot={displayedSnapshot} editableScene={editableScene} selectedEntityId={selectedEntityId} setEditableScene={setEditableScene} playing={playbackState?.playing ?? false} /></div>
           </div>
-          <footer className="workspace-footer"><span>Eureka <i>/</i> A place to make physics visible.</span><span>{activeSampleSnapshots === undefined ? "Scene authoring" : "Sample observation"} · SI units</span></footer>
+          <footer className="workspace-footer"><span><span className="status-dot" />{labVisible ? "Laboratory open" : "Laboratory closed"}</span><span>Eureka physics studio<span className="footer-separator">/</span>SI units</span></footer>
         </main>
       </div>
     </div>

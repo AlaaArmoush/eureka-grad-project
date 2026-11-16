@@ -28,33 +28,37 @@ export function CanvasTools() {
   return (
     <div className="canvas-tools">
       <div className="canvas-toolbar" aria-label="Canvas tools">
-        {tools.map(({ kind, label, Icon }) => (
-          <button key={kind} type="button" className="tool-btn" aria-label={label} title={label} aria-pressed={activeTool.kind === kind} onClick={() => labStore.getState().setActiveTool({ kind: activeTool.kind === kind ? "select" : kind })}><Icon size={14} /></button>
-        ))}
+        <div className="canvas-tool-group">
+          {tools.map(({ kind, label, Icon }) => (
+            <button key={kind} type="button" className="tool-btn" aria-label={label} title={label} aria-pressed={activeTool.kind === kind} onClick={() => labStore.getState().setActiveTool({ kind: activeTool.kind === kind ? "select" : kind })}><Icon size={14} /></button>
+          ))}
+        </div>
         <span className="toolbar-divider" />
-        <button type="button" className="tool-btn" aria-label="Zoom out" title="Zoom out" disabled={percent <= CAMERA_ZOOM.minimumPercent} onClick={() => zoomTo(smallerZoom)}><Minus size={14} /></button>
-        <form className="zoom-form" onSubmit={(event) => {
-          event.preventDefault();
-          const text = (zoomDraft ?? String(percent)).trim().replace(/%$/, "");
-          const value = Number(text);
-          if (text === "" || !Number.isFinite(value) || value < CAMERA_ZOOM.minimumPercent || value > CAMERA_ZOOM.maximumPercent) {
-            setZoomError(`Enter a zoom from ${CAMERA_ZOOM.minimumPercent}% to ${CAMERA_ZOOM.maximumPercent}%.`);
-            setZoomDraft(null);
-            event.currentTarget.querySelector<HTMLInputElement>("input")?.focus();
-            return;
-          }
-          zoomTo(value);
-        }}>
-          <input aria-label="Zoom percentage" aria-invalid={zoomError !== null} aria-describedby={zoomError === null ? undefined : "zoom-error"} inputMode="decimal" value={zoomDraft ?? String(Math.round(percent))} onChange={(event) => setZoomDraft(event.currentTarget.value)} onBlur={() => { setZoomDraft(null); setZoomError(null); }} onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.stopPropagation();
+        <div className="canvas-tool-group">
+          <button type="button" className="tool-btn" aria-label="Zoom out" title="Zoom out" disabled={percent <= CAMERA_ZOOM.minimumPercent} onClick={() => zoomTo(smallerZoom)}><Minus size={14} /></button>
+          <form className="zoom-form" onSubmit={(event) => {
+            event.preventDefault();
+            const text = (zoomDraft ?? String(percent)).trim().replace(/%$/, "");
+            const value = Number(text);
+            if (text === "" || !Number.isFinite(value) || value < CAMERA_ZOOM.minimumPercent || value > CAMERA_ZOOM.maximumPercent) {
+              setZoomError(`Enter a zoom from ${CAMERA_ZOOM.minimumPercent}% to ${CAMERA_ZOOM.maximumPercent}%.`);
               setZoomDraft(null);
-              setZoomError(null);
+              event.currentTarget.querySelector<HTMLInputElement>("input")?.focus();
+              return;
             }
-          }} /><span>%</span>
-        </form>
-        <button type="button" className="tool-btn" aria-label="Zoom in" title="Zoom in" disabled={percent >= CAMERA_ZOOM.maximumPercent} onClick={() => zoomTo(largerZoom)}><Plus size={14} /></button>
-        <button type="button" className="tool-btn" aria-label="Fit scene" title="Fit scene" onClick={() => { labStore.getState().fitCamera(); setZoomDraft(null); setZoomError(null); }}><Scan size={14} /></button>
+            zoomTo(value);
+          }}>
+            <input aria-label="Zoom percentage" aria-invalid={zoomError !== null} aria-describedby={zoomError === null ? undefined : "zoom-error"} inputMode="decimal" value={zoomDraft ?? String(Math.round(percent))} onChange={(event) => setZoomDraft(event.currentTarget.value)} onBlur={() => { setZoomDraft(null); setZoomError(null); }} onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.stopPropagation();
+                setZoomDraft(null);
+                setZoomError(null);
+              }
+            }} /><span>%</span>
+          </form>
+          <button type="button" className="tool-btn" aria-label="Zoom in" title="Zoom in" disabled={percent >= CAMERA_ZOOM.maximumPercent} onClick={() => zoomTo(largerZoom)}><Plus size={14} /></button>
+          <button type="button" className="tool-btn" aria-label="Fit scene" title="Fit scene" onClick={() => { labStore.getState().fitCamera(); setZoomDraft(null); setZoomError(null); }}><Scan size={14} /></button>
+        </div>
       </div>
       {zoomError !== null && <p id="zoom-error" role="alert" className="zoom-error">{zoomError}</p>}
     </div>
