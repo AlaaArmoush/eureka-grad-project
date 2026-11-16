@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   Circle,
   RectangleHorizontal,
+  Search,
   Target,
   TriangleRight,
 } from "lucide-react";
@@ -17,6 +18,13 @@ import { NumberField } from "./NumberField.js";
 
 export function ObjectLibrary() {
   const activeTool = useStore(labStore, (state) => state.activeTool);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("all");
+
+  // Keep filtering in the catalogue owner; the existing forms still own placement.
+  function matchesFilter(name: string, group: string): boolean {
+    return (category === "all" || category === group) && name.toLowerCase().includes(search.trim().toLowerCase());
+  }
 
   const [projectileMenuOpen, setProjectileMenuOpen] = useState(false);
   const [projectileFormError, setProjectileFormError] = useState<string | null>(
@@ -47,7 +55,9 @@ export function ObjectLibrary() {
 
   return (
     <>
-      <h2>Objects</h2>
+      <h2>Object library</h2>
+      <label className="catalog-search"><Search size={14} /><span className="visually-hidden">Search object library</span><input type="search" placeholder="Search objects…" value={search} onChange={(event) => setSearch(event.currentTarget.value)} /></label>
+      <label className="catalog-category"><span>Category</span><select aria-label="Object category" value={category} onChange={(event) => setCategory(event.currentTarget.value)}><option value="all">All objects</option><option value="bodies">Bodies</option><option value="surfaces">Surfaces</option><option value="sensors">Sensors</option></select></label>
       <ul
         className="tools"
         onClick={(event) => {
@@ -74,7 +84,7 @@ export function ObjectLibrary() {
           }
         }}
       >
-        <li>
+        <li hidden={!matchesFilter("Projectile moving ball mass velocity", "bodies")}>
           <button
             className="object-tool-button"
             type="button"
@@ -195,7 +205,7 @@ export function ObjectLibrary() {
             </form>
           )}
         </li>
-        <li>
+        <li hidden={!matchesFilter("Wall / platform fixed rectangle collision surface", "surfaces")}>
           <button
             className="object-tool-button"
             type="button"
@@ -302,7 +312,7 @@ export function ObjectLibrary() {
             </form>
           )}
         </li>
-        <li>
+        <li hidden={!matchesFilter("Ramp inclined plane surface", "surfaces")}>
           <button
             className="object-tool-button"
             type="button"
@@ -413,7 +423,7 @@ export function ObjectLibrary() {
           )}
         </li>
 
-        <li>
+        <li hidden={!matchesFilter("Target zone sensor", "sensors")}>
           <button
             className="object-tool-button"
             type="button"
@@ -493,6 +503,7 @@ export function ObjectLibrary() {
             </form>
           )}
         </li>
+        <li className="catalog-empty" role="status">No matching objects.</li>
       </ul>
     </>
   );

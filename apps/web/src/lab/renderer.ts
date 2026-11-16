@@ -17,7 +17,7 @@ import {
 
 import { CAMERA_ZOOM, labStore } from "./store.js";
 import type { MoveEntityRequest, PlacementRequest } from "./authoring.js";
-import { createPaperTexture } from "./materials.js";
+import { createPaperTexture, sceneColors } from "./materials.js";
 import { createNotebookGrid } from "./sketchbook.js";
 import { createEntityVisual } from "./entity-visuals.js";
 
@@ -110,8 +110,8 @@ function drawVelocityArrow(graphic: Graphics, start: Vector2, tip: Vector2, widt
 
   // Back the blue strokes with paper for contrast.
   for (const stroke of [
-    { color: 0xe8e0cd, width: 4 },
-    { color: 0x357ea0, width: widthPixels },
+    { color: sceneColors.paper, width: 4 },
+    { color: sceneColors.velocity, width: widthPixels },
   ]) {
     graphic
       .moveTo(start.x, start.y)
@@ -254,8 +254,8 @@ export function mountLabRenderer(
     if (event.key === "Delete" || event.key === "Backspace") {
       event.preventDefault();
 
-      if (!event.repeat && state.selectedEntityId !== null && onDeleteRequested(state.selectedEntityId)) {
-        labStore.getState().setActiveTool({ kind: "select" });
+      if (!event.repeat && state.selectedEntityId !== null) {
+        onDeleteRequested(state.selectedEntityId);
       }
 
       return;
@@ -320,9 +320,9 @@ export function mountLabRenderer(
 
     // Put a faint backing beneath the dashed reference.
     predictionGraphic.stroke({
-      color: 0xdd875d,
+      color: sceneColors.reference,
       width: 7,
-      alpha: 0.08,
+      alpha: 0.12,
       cap: "round",
       join: "round",
     });
@@ -339,9 +339,9 @@ export function mountLabRenderer(
     }
 
     predictionGraphic.stroke({
-      color: 0xb86f4c,
-      width: 1.7,
-      alpha: 0.9,
+      color: sceneColors.reference,
+      width: 2.2,
+      alpha: 1,
       cap: "round",
       join: "round",
     });
@@ -390,7 +390,7 @@ export function mountLabRenderer(
     }
 
     trailGraphic.stroke({
-      color: 0x555449,
+      color: sceneColors.trail,
       width: 1.7,
       alpha: 0.86,
       cap: "round",
@@ -591,12 +591,7 @@ export function mountLabRenderer(
       return;
     }
 
-    const deleted = onDeleteRequested(item.entityId);
-
-    if (deleted) {
-      labStore.getState().setActiveTool({ kind: "select" });
-    }
-
+    onDeleteRequested(item.entityId);
     event.stopPropagation();
   }
 
@@ -838,7 +833,7 @@ export function mountLabRenderer(
       antialias: true,
       autoDensity: true,
       autoStart: false,
-      backgroundColor: 0xe8e0cd,
+      backgroundColor: sceneColors.paper,
       height: Math.max(1, host.clientHeight),
       resolution: window.devicePixelRatio,
       width: Math.max(1, host.clientWidth),

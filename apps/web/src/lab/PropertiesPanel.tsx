@@ -229,7 +229,7 @@ export function PropertiesPanel(props: {
                       }
                     }}
                   >
-                    <NumberField label={`${axis.toUpperCase()} position (m)`} name={`edit-position-${axis}`} defaultValue={selectedPose.positionMeters[axis].toFixed(3)} compact />
+                    <NumberField key={displayedSnapshot.tick} label={`${axis.toUpperCase()} position (m)`} name={`edit-position-${axis}`} defaultValue={selectedPose.positionMeters[axis].toFixed(3)} compact />
                     <span className="coordinate-unit">m</span>
                   </form>
                 )}
