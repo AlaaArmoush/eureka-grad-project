@@ -64,7 +64,7 @@
   --red: #a7483d;
   --font-sans: "Eureka Plex Sans", sans-serif;
   --font-mono: "Eureka Plex Mono", monospace;
-  --canvas-height: clamp(340px, calc(100dvh - 565px), 1000px);
+  --canvas-height: 380px;
   font-family: var(--font-sans);
   font-size: 13px;
   color: var(--text);
@@ -114,7 +114,7 @@ svg { flex-shrink: 0; stroke-width: 1.6; }
 .workspace-breadcrumb strong { color: var(--text-2); font-weight: 500; }
 .local-status { margin-left: auto; color: var(--text-3); font-size: 11px; white-space: nowrap; }
 .lab-shell { padding: 0 18px; }
-.lab-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 78px; }
+.lab-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-height: 60px; }
 .experiment-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .experiment-mark { display: grid; place-items: center; width: 40px; height: 40px; border: 1px solid var(--accent-line); border-radius: 9px; background: var(--bg-2); color: var(--accent); }
 .lab-header h1 { margin: 0; font-size: 20px; line-height: 1.4; font-weight: 600; letter-spacing: -.4px; }
@@ -135,12 +135,12 @@ svg { flex-shrink: 0; stroke-width: 1.6; }
 .panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 41px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--bg-2); }
 .panel-heading h2 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 11px; font-weight: 500; color: var(--text-2); }
 .panel-heading > span { font-size: 10px; color: var(--text-3); overflow-wrap: anywhere; }
-.scene-dock { display: flex; flex-direction: column; min-width: 0; height: calc(var(--canvas-height) + 166px); border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2); }
+.scene-dock { display: flex; flex-direction: column; min-width: 0; height: var(--scene-dock-height, calc(var(--canvas-height) + 166px)); border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2); }
 .scene-dock-tabs { display: grid; grid-template-columns: 1fr 1fr 22px; gap: 4px; padding: 9px; border-bottom: 1px solid var(--line); background: var(--bg-0); border-radius: 8px 8px 0 0; }
 .scene-dock-tabs button { display: flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 4px; border: 1px solid transparent; border-radius: 4px; color: var(--text-3); background: transparent; font-size: 11px; }
 .scene-dock-tabs button[aria-pressed="true"] { border-color: var(--line); color: var(--accent); background: var(--bg-2); }
 .scene-content { display: flex; flex: 1; flex-direction: column; min-height: 0; }
-.scene-outline { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
+.scene-outline { display: flex; flex: 0 1 auto; flex-direction: column; min-height: 0; min-width: 0; }
 .add-object-button { display: flex; align-items: center; justify-content: center; gap: 8px; flex-shrink: 0; margin: 12px; padding: 9px 5px; border: 1px solid var(--line-2); border-radius: 5px; color: var(--accent); background: var(--bg-2); font-size: 11px; }
 .add-object-button:hover { background: var(--bg-3); }
 .outline-heading { display: flex; align-items: center; justify-content: space-between; min-height: 47px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
@@ -274,6 +274,17 @@ svg { flex-shrink: 0; stroke-width: 1.6; }
 .placement-submenu__actions button[type="submit"]:hover, .property-editor-inline__actions button[type="submit"]:hover { background: var(--accent-2); }
 .property-editor-inline { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 10px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
 .property-editor-inline__actions, .property-editor-inline > [role="alert"] { grid-column: 1 / -1; }
+/* Keep the inspector compact without changing forms elsewhere. */
+.scene-inspector .inspector-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; padding: 6px; }
+.scene-inspector .properties { padding: 12px; }
+.scene-inspector .property-identity { padding-bottom: 9px; }
+.scene-inspector .property-identity h2 { margin-bottom: 4px; font-size: 15px; }
+.scene-inspector .property-position { gap: 8px; margin: 11px 0; }
+.scene-inspector .property-editor-inline { gap: 10px; margin-top: 10px; padding-top: 10px; }
+.scene-inspector .environment-form { margin: 0; padding: 0; border: 0; }
+.gravity-direction { grid-column: 1 / -1; }
+.gravity-direction summary { color: var(--text-2); font-size: 11px; cursor: pointer; }
+.gravity-direction label { margin-top: 9px; }
 .measurement-dock { margin-top: 12px; min-width: 0; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; background: var(--bg-2); container-type: inline-size; }
 .measurement-toggle { display: flex; align-items: center; gap: 8px; width: 100%; padding: 12px; border: 0; color: var(--text-2); background: var(--bg-2); text-align: left; font-size: 11px; }
 .measurement-toggle:hover { background: var(--bg-3); }
@@ -305,9 +316,22 @@ svg { flex-shrink: 0; stroke-width: 1.6; }
 .panel-empty { padding: 0 12px 10px; color: var(--text-3); font-size: 11px; }
 .lab-diagnostics { padding: 12px; border-top: 1px solid var(--line); color: var(--red); font-size: 11px; }
 .lab-diagnostics h2 { margin: 0; font-size: 12px; }
-.workspace-footer { display: flex; justify-content: space-between; align-items: center; gap: 12px; min-height: 43px; color: var(--text-3); font-size: 9px; }
-.workspace-footer .status-dot { width: 4px; height: 4px; }
-.footer-separator { margin: 0 10px; color: var(--line-3); }
+
+/* Give the taller desktop canvas room without pushing measurement values below the fold. */
+@media (min-width: 701px) {
+  .workspace-topbar { height: 45px; }
+  .lab-header { min-height: 56px; }
+  .canvas > .panel-heading { min-height: 36px; padding: 3px 12px; }
+  .playback-bar { min-height: 42px; padding: 5px 10px; }
+  .viewport-status { min-height: 22px; padding: 4px 12px; }
+  .measurement-dock { margin-top: 8px; }
+  .measurement-toggle { padding: 9px 12px; }
+  .measurement-dock .observation-notebook .panel-heading { min-height: 29px; padding-top: 5px; }
+  .measurement-dock .notebook-values { padding: 8px 0; }
+  .measurement-dock .notebook-values dt { margin-bottom: 6px; }
+  .measurement-dock .notebook-values dd { margin-bottom: 4px; }
+  .measurement-dock .event-notebook summary { padding: 9px 12px; }
+}
 
 @container (max-width: 600px) {
   .canvas-heading { justify-content: flex-end; }
@@ -396,7 +420,6 @@ svg { flex-shrink: 0; stroke-width: 1.6; }
   .notebook-values dd { font-size: 14px; }
   .measurement-source { display: none; }
   .measurement-toggle .measurement-source + svg { margin-left: auto; }
-  .workspace-footer > span:last-child { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }

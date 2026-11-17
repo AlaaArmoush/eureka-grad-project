@@ -31,6 +31,7 @@ import {
   updateTargetInScene,
   moveEntityInScene,
   deleteEntityFromScene,
+  updateEnvironmentInScene
 } from "./authoring.js";
 
 export const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 2, 4] as const;
@@ -70,6 +71,7 @@ export interface LabController {
   dispose(options?: { readonly preserveView?: boolean }): EngineStatus;
 
   copyScene(): SceneDefinition;
+  updateEnvironment(environment: SceneDefinition["environment"]): EngineResult<SceneDefinition>;
 
   placeRamp(
     positionMeters: Vector2,
@@ -139,7 +141,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
 
   // Reject a stopping boundary that cannot represent a future or current whole tick.
   if (stopAtTick !== undefined &&
-      (!Number.isSafeInteger(stopAtTick) || stopAtTick < initialSnapshot.value.tick)) {
+    (!Number.isSafeInteger(stopAtTick) || stopAtTick < initialSnapshot.value.tick)) {
     return {
       ok: false,
       diagnostics: [{
@@ -541,6 +543,29 @@ export function createLabController(options: LabControllerOptions): EngineResult
     }
 
     return currentEngine.dispose();
+  }
+
+  // Accept environment starting conditions without changing the active engine.
+  function updateEnvironment(environment: SceneDefinition["environment"]): EngineResult<SceneDefinition> {
+    const status = pausedAuthoringStatus();
+
+    if (!status.ok) {
+      return status;
+    }
+
+    const nextScene = updateEnvironmentInScene(currentScene, environment);
+    const validationResult = validateScene(nextScene);
+
+    if (!validationResult.ok) {
+      return validationResult;
+    }
+
+    currentScene = structuredClone(nextScene);
+
+    return {
+      ok: true,
+      value: structuredClone(currentScene),
+    };
   }
 
   function placeRamp(
@@ -953,6 +978,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
       reset,
       dispose,
       copyScene: () => structuredClone(currentScene),
+      updateEnvironment,
       placeRamp,
       placeProjectile,
       placePlatform,

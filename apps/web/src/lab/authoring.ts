@@ -6,6 +6,16 @@ import type {
   TargetTrigger,
   Vector2,
 } from "@eureka/contracts";
+
+// Build starting conditions without changing any scene object's identity.
+export function updateEnvironmentInScene(scene: SceneDefinition, environment: SceneDefinition["environment"]): SceneDefinition {
+  return {
+    ...scene,
+    revision: scene.revision + 1,
+    environment: structuredClone(environment),
+  };
+}
+
 export type PlaceableEntityKind = "projectile" | "platform" | "ramp" | "target";
 
 export interface PlacementRequest {

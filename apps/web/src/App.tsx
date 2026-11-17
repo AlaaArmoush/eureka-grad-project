@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 // Supply the reviewed static observation and its consecutive playback frames.
 import { PROJECTILE_LAB_MOCK, PROJECTILE_PLAYBACK_SNAPSHOTS } from "./lab/mocks.js";
 import type { MoveEntityRequest, PlacementRequest } from "./lab/authoring";
@@ -136,6 +136,82 @@ export function App() {
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
+
+  // Fill the available desktop space while keeping the complete measurement panel visible.
+  useLayoutEffect(() => {
+    const layout = viewportRef.current;
+
+    if (layout === null) {
+      return;
+    }
+
+    const canvasPage = layout.querySelector<HTMLElement>(".canvas-page");
+    const canvasFrame = layout.querySelector<HTMLElement>(".canvas");
+    const measurements = layout.querySelector<HTMLElement>(".measurement-dock");
+
+    if (canvasPage === null || canvasFrame === null || measurements === null) {
+      return;
+    }
+
+    let pendingFrame: number | null = null;
+
+    const sizeCanvas = (): void => {
+      // Mobile and expanded-editor modes retain their dedicated CSS layouts.
+      if (window.matchMedia("(max-width: 700px)").matches || document.fullscreenElement === layout) {
+        layout.style.removeProperty("--canvas-height");
+        layout.style.removeProperty("--scene-dock-height");
+        return;
+      }
+
+      const canvasBounds = canvasPage.getBoundingClientRect();
+      const belowCanvas = measurements.getBoundingClientRect().bottom - canvasBounds.bottom;
+      const canvasTop = canvasBounds.top + window.scrollY;
+      const availableHeight = document.documentElement.clientHeight - canvasTop - belowCanvas - 12;
+      const height = `${Math.max(160, Math.min(1000, Math.floor(availableHeight)))}px`;
+
+      if (layout.style.getPropertyValue("--canvas-height") !== height) {
+        layout.style.setProperty("--canvas-height", height);
+      }
+
+      // Align the scene dock to the canvas frame rather than an estimated toolbar height.
+      const dockHeight = `${Math.ceil(canvasFrame.getBoundingClientRect().bottom - layout.getBoundingClientRect().top)}px`;
+
+      if (layout.style.getPropertyValue("--scene-dock-height") !== dockHeight) {
+        layout.style.setProperty("--scene-dock-height", dockHeight);
+      }
+    };
+
+    // Coalesce layout notifications and avoid writing sizes inside an observer callback.
+    function scheduleSizing(): void {
+      if (pendingFrame !== null) {
+        return;
+      }
+
+      pendingFrame = window.requestAnimationFrame(() => {
+        pendingFrame = null;
+        sizeCanvas();
+      });
+    }
+
+    const observer = new ResizeObserver(scheduleSizing);
+    observer.observe(layout);
+    observer.observe(measurements);
+    window.addEventListener("resize", scheduleSizing);
+    document.addEventListener("fullscreenchange", scheduleSizing);
+    sizeCanvas();
+
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", scheduleSizing);
+      document.removeEventListener("fullscreenchange", scheduleSizing);
+      if (pendingFrame !== null) {
+        window.cancelAnimationFrame(pendingFrame);
+      }
+      layout.style.removeProperty("--canvas-height");
+      layout.style.removeProperty("--scene-dock-height");
+    };
+  }, []);
+
   const selectedEntityId = useStore(
     labStore,
     (state) => state.selectedEntityId,
@@ -514,7 +590,6 @@ export function App() {
             </div>
             <div id="inspector-dock" className="inspector-dock" hidden={!inspectorOpen}><SceneInspector onClose={closeInspector} controllerRef={controllerRef} displayedSnapshot={displayedSnapshot} editableScene={editableScene} selectedEntityId={selectedEntityId} setEditableScene={setEditableScene} playing={playbackState?.playing ?? false} /></div>
           </div>
-          <footer className="workspace-footer"><span><span className="status-dot" />{labVisible ? "Laboratory open" : "Laboratory closed"}</span><span>Eureka physics studio<span className="footer-separator">/</span>SI units</span></footer>
         </main>
       </div>
     </div>
