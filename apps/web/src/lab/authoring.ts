@@ -1,6 +1,7 @@
 // Supplies the physical types used to construct editable scene objects.
 import type {
-  DynamicBody,
+  Body,
+  DynamicCircleBody,
   SceneDefinition,
   StaticBody,
   TargetTrigger,
@@ -111,10 +112,9 @@ export function updateStaticBodyInScene(
 ): SceneDraftChange {
   const angleRadians = (properties.angleDegrees * Math.PI) / 180;
 
-  const updatedBodies = scene.bodies.map((body) => {
-    const isSelectedStaticBody = body.id === bodyId && body.kind === "static";
-
-    if (!isSelectedStaticBody) {
+  const updatedBodies = scene.bodies.map<Body>((body) => {
+    // Only the selected static body receives these dimension and angle edits.
+    if (body.id !== bodyId || body.kind !== "static") {
       return body;
     }
 
@@ -126,6 +126,7 @@ export function updateStaticBodyInScene(
         heightMeters: properties.heightMeters,
       },
       material: {
+        ...body.material,
         restitution: properties.restitution,
       },
       pose: {
@@ -164,7 +165,7 @@ function createProjectile(
   id: string,
   positionMeters: Vector2,
   properties: ProjectilePlacementProperties,
-): DynamicBody {
+): DynamicCircleBody {
   const launchAngleRadians = (properties.launchAngleDegrees * Math.PI) / 180;
 
   return {
@@ -221,22 +222,25 @@ export function updateProjectileInScene(
   const velocityY =
     properties.launchSpeedMetersPerSecond * Math.sin(angleRadians);
 
-  const updatedBodies = scene.bodies.map((body) => {
-    const isSelectedProjectile =
-      body.id === projectileId && body.kind === "dynamic";
-
-    if (!isSelectedProjectile) {
+  const updatedBodies = scene.bodies.map<Body>((body) => {
+    // The projectile form edits moving circles, not moving boxes.
+    if (
+      body.id !== projectileId ||
+      body.kind !== "dynamic" ||
+      body.shape.kind !== "circle"
+    ) {
       return body;
     }
 
     return {
       ...body,
       shape: {
-        ...body.shape,
+        kind: "circle",
         radiusMeters: properties.radiusMeters,
       },
       massKilograms: properties.massKilograms,
       material: {
+        ...body.material,
         restitution: properties.restitution,
       },
       velocity: {

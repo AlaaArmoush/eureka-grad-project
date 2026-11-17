@@ -4,6 +4,7 @@ import type {
   Material,
   SceneDefinition,
   Vector2,
+  SinusoidalForceDefinition,
 } from "@eureka/contracts";
 import {
   failure,
@@ -108,7 +109,68 @@ function validateMaterial(
       : undefined)
   );
 }
+// Check one scheduled force version, values and body reference
+function validateSinusoidalForce(
+  force: SinusoidalForceDefinition,
+  path: string,
+  bodies: readonly Body[],
+): EngineFailure | undefined {
+  if (force.forceVersion !== 1) {
+    return failure(
+      "UNSUPPORTED_SCENE_FEATURE",
+      `${path}.forceVersion`,
+      "Unsupported force version.",
+    );
+  }
 
+  //checks for finite values and allowed numeric ranges
+  const fieldFailure =
+    checkId(force.id, `${path}.id`) ??
+    checkId(force.bodyId, `${path}.bodyId`) ??
+    validateVector(force.amplitudeNewtons, `${path}.amplitudeNewtons`) ??
+    checkNonnegative(
+      force.angularFrequencyRadiansPerSecond,
+      `${path}.angularFrequencyRadiansPerSecond`,
+    ) ??
+    checkNonnegative(force.startTimeSeconds, `${path}.startTimeSeconds`) ??
+    checkFinite(force.endTimeSeconds, `${path}.endTimeSeconds`);
+
+  if (fieldFailure !== undefined) {
+    return fieldFailure;
+  }
+
+  // force needs a nonempty active interval
+  if (force.endTimeSeconds <= force.startTimeSeconds) {
+    return failure(
+      "OUT_OF_RANGE",
+      `${path}.endTimeSeconds`,
+      "End time must be later than start time.",
+    );
+  }
+
+  // Forces must reference an existing dynamic body that can respond to them
+  const body = bodies.find((candidate) => candidate.id === force.bodyId);
+
+  if (body === undefined) {
+    return failure(
+      "UNKNOWN_ENTITY_ID",
+      `${path}.bodyId`,
+      `Force body "${force.bodyId}" does not exist.`,
+      force.bodyId,
+    );
+  }
+
+  if (body.kind !== "dynamic") {
+    return failure(
+      "INVALID_BODY_KIND",
+      `${path}.bodyId`,
+      "A scheduled force requires a dynamic body.",
+      force.bodyId,
+    );
+  }
+
+  return undefined;
+}
 // Reject a proposed placement that starts a projectile inside a static body.
 export function validateBodyPlacements(
   bodies: readonly Body[],
@@ -168,7 +230,19 @@ export function validateScene(
   if (sceneFailure !== undefined) {
     return sceneFailure;
   }
+  const restitutionThreshold =
+    scene.numericalProfile.restitutionSpeedThresholdMetersPerSecond;
 
+  if (restitutionThreshold !== undefined) {
+    const thresholdFailure = checkNonnegative(
+      restitutionThreshold,
+      "numericalProfile.restitutionSpeedThresholdMetersPerSecond",
+    );
+
+    if (thresholdFailure !== undefined) {
+      return thresholdFailure;
+    }
+  }
   const entityIds = new Set<string>();
 
   for (const [bodyIndex, body] of scene.bodies.entries()) {
@@ -237,7 +311,6 @@ export function validateScene(
         body.kind === "dynamic" &&
         body.momentOfInertiaKilogramMetersSquared !== undefined
       ) {
-        // I = m r^2
         const inertiaFailure = checkPositive(
           body.momentOfInertiaKilogramMetersSquared,
           `${bodyPath}.momentOfInertiaKilogramMetersSquared`,
@@ -348,6 +421,31 @@ export function validateScene(
     seenWeldPairs.add(pairKey);
   }
 
+  const seenForceIds = new Set<string>();
+
+  for (const [forceIndex, force] of (scene.sinusoidalForces ?? []).entries()) {
+    const forcePath = `sinusoidalForces[${forceIndex}]`;
+    const forceFailure = validateSinusoidalForce(
+      force,
+      forcePath,
+      scene.bodies,
+    );
+
+    if (forceFailure !== undefined) {
+      return forceFailure;
+    }
+
+    if (seenForceIds.has(force.id)) {
+      return failure(
+        "DUPLICATE_ENTITY_ID",
+        `${forcePath}.id`,
+        `Force ID "${force.id}" is duplicated.`,
+        force.id,
+      );
+    }
+
+    seenForceIds.add(force.id);
+  }
   // Reject initial overlaps before accepting the scene.
   return validateBodyPlacements(scene.bodies) ?? { ok: true, value: scene };
 }

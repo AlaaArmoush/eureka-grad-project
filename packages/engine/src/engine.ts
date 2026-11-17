@@ -613,7 +613,14 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
   if (!validation.ok) {
     return validation;
   }
-
+  // Scheduled-force evaluation is implemented in the later solver session
+  if ((scene.sinusoidalForces?.length ?? 0) > 0) {
+    return failure(
+      "UNSUPPORTED_SCENE_FEATURE",
+      "sinusoidalForces",
+      "This engine build does not yet evaluate scheduled sinusoidal forces.",
+    );
+  }
   // Moving boxes are no yet implemented
   for (const [bodyIndex, body] of scene.bodies.entries()) {
     if (body.kind === "dynamic" && body.shape.kind !== "circle") {

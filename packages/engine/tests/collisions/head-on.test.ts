@@ -17,6 +17,7 @@ describe("elastic head-on collisions", () => {
       numericalProfile: {
         fixedTimeStepSeconds: 1 / 60,
         substeps: 1,
+        restitutionSpeedThresholdMetersPerSecond: 0,
         scales: { lengthMeters: 1, massKilograms: 1, timeSeconds: 1 },
       },
       environment: {

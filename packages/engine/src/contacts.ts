@@ -14,7 +14,6 @@ export interface SurfaceContactGeometry {
   readonly pointMeters: Vector2;
   readonly normal: Vector2;
 }
-
 export interface InitialSurfaceOverlap {
   readonly bodyIndex: number;
   readonly bodyId: string;
@@ -91,7 +90,7 @@ export function findInitialSurfaceOverlap(bodies: readonly Body[]): InitialSurfa
   for (let bodyIndex = 0; bodyIndex < bodies.length; bodyIndex += 1) {
     const body = bodies[bodyIndex];
 
-    if (body?.kind !== "dynamic") {
+    if (body?.kind !== "dynamic" || body.shape.kind !== "circle") {
       continue;
     }
 

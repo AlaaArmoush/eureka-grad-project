@@ -5,11 +5,11 @@ interface MutableBodyBase {
   readonly id: string;
   material: Material;
   pose: {
-    positionMeters: { x: number; y: number; };
+    positionMeters: { x: number; y: number };
     angleRadians: number;
   };
   velocity: {
-    linearMetersPerSecond: { x: number; y: number; };
+    linearMetersPerSecond: { x: number; y: number };
     angularRadiansPerSecond: number;
   };
 }
@@ -17,7 +17,7 @@ interface MutableBodyBase {
 // Keep each projectile's measurement reference with its engine-owned state.
 export interface MutableDynamicBody extends MutableBodyBase {
   readonly kind: "dynamic";
-  readonly shape: { readonly kind: "circle"; readonly radiusMeters: number; };
+  readonly shape: { readonly kind: "circle"; readonly radiusMeters: number };
   massKilograms: number;
   flight: {
     readonly launchTick: number;
@@ -28,7 +28,11 @@ export interface MutableDynamicBody extends MutableBodyBase {
 
 export interface MutableStaticBody extends MutableBodyBase {
   readonly kind: "static";
-  readonly shape: { readonly kind: "box"; readonly widthMeters: number; readonly heightMeters: number; };
+  readonly shape: {
+    readonly kind: "box";
+    readonly widthMeters: number;
+    readonly heightMeters: number;
+  };
 }
 
 export type MutableBodyState = MutableDynamicBody | MutableStaticBody;
@@ -40,25 +44,31 @@ export function createMutableBody(body: Body): MutableBodyState {
     material: { ...body.material },
     pose: {
       positionMeters: { ...body.pose.positionMeters },
-      angleRadians: body.pose.angleRadians
-    }
+      angleRadians: body.pose.angleRadians,
+    },
   };
 
   if (body.kind === "dynamic") {
+    const shape = body.shape;
+    if (shape.kind !== "circle") {
+      throw new Error(
+        "Internal error: unsupported moving shape reached body initialization.",
+      );
+    }
     return {
       ...sharedState,
       kind: "dynamic",
-      shape: { ...body.shape },
+      shape: { ...shape },
       massKilograms: body.massKilograms,
       flight: {
         launchTick: 0,
         launchPositionXMeters: body.pose.positionMeters.x,
-        firstContactTimeSeconds: undefined
+        firstContactTimeSeconds: undefined,
       },
       velocity: {
         linearMetersPerSecond: { ...body.velocity.linearMetersPerSecond },
-        angularRadiansPerSecond: body.velocity.angularRadiansPerSecond
-      }
+        angularRadiansPerSecond: body.velocity.angularRadiansPerSecond,
+      },
     };
   }
 
@@ -68,25 +78,27 @@ export function createMutableBody(body: Body): MutableBodyState {
     shape: { ...body.shape },
     velocity: {
       linearMetersPerSecond: { x: 0, y: 0 },
-      angularRadiansPerSecond: 0
-    }
+      angularRadiansPerSecond: 0,
+    },
   };
 }
 
 // Copy each body so a tick can change it freely and throw it away if something fails.
-export function cloneBodies(bodies: readonly MutableBodyState[]): MutableBodyState[] {
+export function cloneBodies(
+  bodies: readonly MutableBodyState[],
+): MutableBodyState[] {
   return bodies.map((body) => {
     const sharedState = {
       id: body.id,
       material: { ...body.material },
       pose: {
         positionMeters: { ...body.pose.positionMeters },
-        angleRadians: body.pose.angleRadians
+        angleRadians: body.pose.angleRadians,
       },
       velocity: {
         linearMetersPerSecond: { ...body.velocity.linearMetersPerSecond },
-        angularRadiansPerSecond: body.velocity.angularRadiansPerSecond
-      }
+        angularRadiansPerSecond: body.velocity.angularRadiansPerSecond,
+      },
     };
 
     if (body.kind === "dynamic") {
@@ -95,14 +107,14 @@ export function cloneBodies(bodies: readonly MutableBodyState[]): MutableBodySta
         kind: "dynamic",
         shape: { ...body.shape },
         massKilograms: body.massKilograms,
-        flight: { ...body.flight }
+        flight: { ...body.flight },
       };
     }
 
     return {
       ...sharedState,
       kind: "static",
-      shape: { ...body.shape }
+      shape: { ...body.shape },
     };
   });
 }
