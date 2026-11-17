@@ -1,10 +1,35 @@
-import type { Command, ProjectileReadout, SceneDefinition, Snapshot, SnapshotBody, SnapshotEvent, TargetTrigger } from "@eureka/contracts";
+import type {
+  Command,
+  ProjectileReadout,
+  SceneDefinition,
+  Snapshot,
+  SnapshotBody,
+  SnapshotEvent,
+  TargetTrigger,
+} from "@eureka/contracts";
 
-import { cloneBodies, createMutableBody, type MutableBodyState } from "./body-state.js";
-import { failure, type EngineFailure, type EngineResult, type EngineStatus } from "./diagnostics.js";
-import { collectInsideTargetPairs, simulateTick, type StepSettings } from "./stepping.js";
+import {
+  cloneBodies,
+  createMutableBody,
+  type MutableBodyState,
+} from "./body-state.js";
+import {
+  failure,
+  type EngineFailure,
+  type EngineResult,
+  type EngineStatus,
+} from "./diagnostics.js";
+import {
+  collectInsideTargetPairs,
+  simulateTick,
+  type StepSettings,
+} from "./stepping.js";
 import type { ForceInteraction } from "./mechanics.js";
-import { validateBodyPlacements, validateCommand, validateScene } from "./validation.js";
+import {
+  validateBodyPlacements,
+  validateCommand,
+  validateScene,
+} from "./validation.js";
 
 export interface CommandAcceptance {
   readonly sequence: number;
@@ -30,8 +55,11 @@ interface QueuedCommand {
 
 // Build a finite public snapshot without exposing internal body or flight records.
 function makeSnapshot(
-  bodies: readonly MutableBodyState[], events: readonly SnapshotEvent[],
-  tick: number, fixedTimeStepSeconds: number, userInteractionWorkJoules: number
+  bodies: readonly MutableBodyState[],
+  events: readonly SnapshotEvent[],
+  tick: number,
+  fixedTimeStepSeconds: number,
+  userInteractionWorkJoules: number,
 ): EngineResult<Snapshot> {
   const simulationTimeSeconds = tick * fixedTimeStepSeconds;
   const snapshotBodies: SnapshotBody[] = [];
@@ -40,13 +68,18 @@ function makeSnapshot(
   // Reject an unrepresentable public time before accepting the proposed tick.
   if (!Number.isFinite(simulationTimeSeconds)) {
     return failure(
-      "NONFINITE_STATE", "simulationTimeSeconds",
-      `Tick ${tick} would expose a nonfinite simulation time.`
+      "NONFINITE_STATE",
+      "simulationTimeSeconds",
+      `Tick ${tick} would expose a nonfinite simulation time.`,
     );
   }
 
   if (!Number.isFinite(userInteractionWorkJoules)) {
-    return failure("NONFINITE_STATE", "userInteractionWorkJoules", `Tick ${tick} would expose nonfinite interaction work.`);
+    return failure(
+      "NONFINITE_STATE",
+      "userInteractionWorkJoules",
+      `Tick ${tick} would expose nonfinite interaction work.`,
+    );
   }
 
   for (const body of bodies) {
@@ -55,14 +88,18 @@ function makeSnapshot(
 
     // Contact response and all other updates must leave public body values finite.
     if (
-      !Number.isFinite(position.x) || !Number.isFinite(position.y) ||
+      !Number.isFinite(position.x) ||
+      !Number.isFinite(position.y) ||
       !Number.isFinite(body.pose.angleRadians) ||
-      !Number.isFinite(velocity.x) || !Number.isFinite(velocity.y) ||
+      !Number.isFinite(velocity.x) ||
+      !Number.isFinite(velocity.y) ||
       !Number.isFinite(body.velocity.angularRadiansPerSecond)
     ) {
       return failure(
-        "NONFINITE_STATE", "bodies",
-        `Tick ${tick} would expose nonfinite state for body "${body.id}".`, body.id
+        "NONFINITE_STATE",
+        "bodies",
+        `Tick ${tick} would expose nonfinite state for body "${body.id}".`,
+        body.id,
       );
     }
 
@@ -70,12 +107,12 @@ function makeSnapshot(
       id: body.id,
       pose: {
         positionMeters: { ...position },
-        angleRadians: body.pose.angleRadians
+        angleRadians: body.pose.angleRadians,
       },
       velocity: {
         linearMetersPerSecond: { ...velocity },
-        angularRadiansPerSecond: body.velocity.angularRadiansPerSecond
-      }
+        angularRadiansPerSecond: body.velocity.angularRadiansPerSecond,
+      },
     });
 
     if (body.kind === "static") {
@@ -89,14 +126,21 @@ function makeSnapshot(
       flightEndTimeSeconds = body.flight.firstContactTimeSeconds;
     }
 
-    const flightTimeSeconds = flightEndTimeSeconds - body.flight.launchTick * fixedTimeStepSeconds;
-    const horizontalDisplacementMeters = position.x - body.flight.launchPositionXMeters;
+    const flightTimeSeconds =
+      flightEndTimeSeconds - body.flight.launchTick * fixedTimeStepSeconds;
+    const horizontalDisplacementMeters =
+      position.x - body.flight.launchPositionXMeters;
 
     // Finite positions can still produce an overflowing displacement.
-    if (!Number.isFinite(flightTimeSeconds) || !Number.isFinite(horizontalDisplacementMeters)) {
+    if (
+      !Number.isFinite(flightTimeSeconds) ||
+      !Number.isFinite(horizontalDisplacementMeters)
+    ) {
       return failure(
-        "NONFINITE_STATE", "projectileReadouts",
-        `Tick ${tick} would expose a nonfinite readout for body "${body.id}".`, body.id
+        "NONFINITE_STATE",
+        "projectileReadouts",
+        `Tick ${tick} would expose a nonfinite readout for body "${body.id}".`,
+        body.id,
       );
     }
 
@@ -104,13 +148,15 @@ function makeSnapshot(
       bodyId: body.id,
       flightTimeSeconds,
       horizontalDisplacementMeters,
-      heightMeters: position.y
+      heightMeters: position.y,
     });
   }
 
   // Publish entity collections in stable ID order.
   snapshotBodies.sort((left, right) => left.id.localeCompare(right.id));
-  projectileReadouts.sort((left, right) => left.bodyId.localeCompare(right.bodyId));
+  projectileReadouts.sort((left, right) =>
+    left.bodyId.localeCompare(right.bodyId),
+  );
 
   return {
     ok: true,
@@ -124,8 +170,8 @@ function makeSnapshot(
       projectileReadouts,
       userInteractionWorkJoules,
       events: structuredClone(events),
-      diagnostics: []
-    }
+      diagnostics: [],
+    },
   };
 }
 
@@ -146,14 +192,14 @@ function applyCommand(command: Command, bodies: MutableBodyState[]): void {
     body.pose.positionMeters = { ...payload.positionMeters };
     body.velocity = {
       linearMetersPerSecond: { ...payload.velocity.linearMetersPerSecond },
-      angularRadiansPerSecond: payload.velocity.angularRadiansPerSecond
+      angularRadiansPerSecond: payload.velocity.angularRadiansPerSecond,
     };
     // An explicit launch starts a new measurement interval.
     if (body.kind === "dynamic") {
       body.flight = {
         launchTick: command.targetTick,
         launchPositionXMeters: payload.positionMeters.x,
-        firstContactTimeSeconds: undefined
+        firstContactTimeSeconds: undefined,
       };
     }
     return;
@@ -170,14 +216,16 @@ function applyCommand(command: Command, bodies: MutableBodyState[]): void {
   if (payload.changes.pose !== undefined) {
     body.pose = {
       positionMeters: { ...payload.changes.pose.positionMeters },
-      angleRadians: payload.changes.pose.angleRadians
+      angleRadians: payload.changes.pose.angleRadians,
     };
   }
 
   if (payload.changes.velocity !== undefined) {
     body.velocity = {
-      linearMetersPerSecond: { ...payload.changes.velocity.linearMetersPerSecond },
-      angularRadiansPerSecond: payload.changes.velocity.angularRadiansPerSecond
+      linearMetersPerSecond: {
+        ...payload.changes.velocity.linearMetersPerSecond,
+      },
+      angularRadiansPerSecond: payload.changes.velocity.angularRadiansPerSecond,
     };
   }
 }
@@ -202,13 +250,17 @@ class EngineInstance implements Engine {
   constructor(scene: SceneDefinition) {
     this.#initialBodies = scene.bodies.map(createMutableBody);
     const scales = scene.numericalProfile.scales;
-    let defaultMaximumForce = 100 * scales.massKilograms * scales.lengthMeters / scales.timeSeconds ** 2;
+    let defaultMaximumForce =
+      (100 * scales.massKilograms * scales.lengthMeters) /
+      scales.timeSeconds ** 2;
 
     // Recover a representable default when only an intermediate product overflowed.
     if (!Number.isFinite(defaultMaximumForce) || defaultMaximumForce <= 0) {
       defaultMaximumForce = Math.exp(
-        Math.log(100) + Math.log(scales.massKilograms) + Math.log(scales.lengthMeters) -
-        2 * Math.log(scales.timeSeconds)
+        Math.log(100) +
+          Math.log(scales.massKilograms) +
+          Math.log(scales.lengthMeters) -
+          2 * Math.log(scales.timeSeconds),
       );
     }
 
@@ -223,8 +275,8 @@ class EngineInstance implements Engine {
         shape: { ...target.shape },
         pose: {
           positionMeters: { ...target.pose.positionMeters },
-          angleRadians: target.pose.angleRadians
-        }
+          angleRadians: target.pose.angleRadians,
+        },
       });
     }
 
@@ -233,9 +285,12 @@ class EngineInstance implements Engine {
     this.#settings = {
       fixedTimeStepSeconds: scene.numericalProfile.fixedTimeStepSeconds,
       substepCount: scene.numericalProfile.substeps,
-      gravityMetersPerSecondSquared: { ...scene.environment.gravityMetersPerSecondSquared },
-      linearDragKilogramsPerSecond: scene.environment.linearDragKilogramsPerSecond,
-      targets
+      gravityMetersPerSecondSquared: {
+        ...scene.environment.gravityMetersPerSecondSquared,
+      },
+      linearDragKilogramsPerSecond:
+        scene.environment.linearDragKilogramsPerSecond,
+      targets,
     };
     this.#bodies = cloneBodies(this.#initialBodies);
     this.#insideTargetPairs = collectInsideTargetPairs(this.#bodies, targets);
@@ -264,11 +319,19 @@ class EngineInstance implements Engine {
     }
 
     if (this.#acceptedCommandIds.has(command.id)) {
-      return failure("DUPLICATE_COMMAND_ID", "id", "Command ID has already been accepted.");
+      return failure(
+        "DUPLICATE_COMMAND_ID",
+        "id",
+        "Command ID has already been accepted.",
+      );
     }
 
     if (command.targetTick < this.#tick) {
-      return failure("PAST_TARGET_TICK", "targetTick", "Command target tick is earlier than the current tick.");
+      return failure(
+        "PAST_TARGET_TICK",
+        "targetTick",
+        "Command target tick is earlier than the current tick.",
+      );
     }
 
     if (command.payload.kind !== "endForceInteraction") {
@@ -276,32 +339,55 @@ class EngineInstance implements Engine {
       const targetBody = this.#bodies.find((body) => body.id === bodyId);
 
       if (targetBody === undefined) {
-        return failure("UNKNOWN_ENTITY_ID", "payload.bodyId", `Body "${bodyId}" does not exist.`, bodyId);
+        return failure(
+          "UNKNOWN_ENTITY_ID",
+          "payload.bodyId",
+          `Body "${bodyId}" does not exist.`,
+          bodyId,
+        );
       }
 
       if (
         targetBody.kind === "static" &&
-        (command.payload.kind === "launchBody" || command.payload.kind === "setForceInteraction" ||
+        (command.payload.kind === "launchBody" ||
+          command.payload.kind === "setForceInteraction" ||
           (command.payload.kind === "editBody" &&
-            (command.payload.changes.massKilograms !== undefined || command.payload.changes.velocity !== undefined)))
+            (command.payload.changes.massKilograms !== undefined ||
+              command.payload.changes.velocity !== undefined)))
       ) {
-        return failure("INVALID_BODY_KIND", "payload.bodyId", "This command requires a dynamic body.", targetBody.id);
+        return failure(
+          "INVALID_BODY_KIND",
+          "payload.bodyId",
+          "This command requires a dynamic body.",
+          targetBody.id,
+        );
       }
 
       if (
-        command.payload.kind === "setForceInteraction" && command.payload.maximumForceNewtons === undefined &&
-        (!Number.isFinite(this.#defaultMaximumForceNewtons) || this.#defaultMaximumForceNewtons <= 0)
+        command.payload.kind === "setForceInteraction" &&
+        command.payload.maximumForceNewtons === undefined &&
+        (!Number.isFinite(this.#defaultMaximumForceNewtons) ||
+          this.#defaultMaximumForceNewtons <= 0)
       ) {
-        return failure("OUT_OF_RANGE", "payload.maximumForceNewtons", "The scene-scale default is not positive and finite; supply an explicit force limit.", bodyId);
+        return failure(
+          "OUT_OF_RANGE",
+          "payload.maximumForceNewtons",
+          "The scene-scale default is not positive and finite; supply an explicit force limit.",
+          bodyId,
+        );
       }
     }
 
     const queued = {
       command: structuredClone(command),
-      sequence: this.#nextSequence
+      sequence: this.#nextSequence,
     };
     this.#pendingCommands.push(queued);
-    this.#pendingCommands.sort((left, right) => left.command.targetTick - right.command.targetTick || left.sequence - right.sequence);
+    this.#pendingCommands.sort(
+      (left, right) =>
+        left.command.targetTick - right.command.targetTick ||
+        left.sequence - right.sequence,
+    );
     this.#acceptedCommandIds.add(command.id);
     this.#nextSequence += 1;
 
@@ -317,19 +403,33 @@ class EngineInstance implements Engine {
     }
 
     if (!Number.isSafeInteger(tickCount) || tickCount < 0) {
-      return failure("INVALID_ADVANCE_COUNT", "tickCount", "Tick count must be a nonnegative safe integer.");
+      return failure(
+        "INVALID_ADVANCE_COUNT",
+        "tickCount",
+        "Tick count must be a nonnegative safe integer.",
+      );
     }
 
     for (let stepIndex = 0; stepIndex < tickCount; stepIndex += 1) {
       const nextBodies = cloneBodies(this.#bodies);
       const nextInteractions = new Map(this.#interactions);
-      const commandFailure = this.#applyScheduledCommands(nextBodies, nextInteractions);
+      const commandFailure = this.#applyScheduledCommands(
+        nextBodies,
+        nextInteractions,
+      );
 
       if (commandFailure !== undefined) {
         return commandFailure;
       }
 
-      const step = simulateTick(nextBodies, this.#insideTargetPairs, this.#tick, this.#settings, nextInteractions, this.#userInteractionWorkJoules);
+      const step = simulateTick(
+        nextBodies,
+        this.#insideTargetPairs,
+        this.#tick,
+        this.#settings,
+        nextInteractions,
+        this.#userInteractionWorkJoules,
+      );
 
       if (!step.ok) {
         return step;
@@ -337,8 +437,11 @@ class EngineInstance implements Engine {
 
       // Validate the observations before committing the proposed physical state.
       const nextSnapshot = makeSnapshot(
-        nextBodies, step.value.events, this.#tick + 1, this.#settings.fixedTimeStepSeconds,
-        step.value.userInteractionWorkJoules
+        nextBodies,
+        step.value.events,
+        this.#tick + 1,
+        this.#settings.fixedTimeStepSeconds,
+        step.value.userInteractionWorkJoules,
       );
 
       if (!nextSnapshot.ok) {
@@ -378,8 +481,11 @@ class EngineInstance implements Engine {
 
     if (this.#borrowedSnapshot === undefined) {
       const snapshot = makeSnapshot(
-        this.#bodies, this.#currentEvents, this.#tick, this.#settings.fixedTimeStepSeconds,
-        this.#userInteractionWorkJoules
+        this.#bodies,
+        this.#currentEvents,
+        this.#tick,
+        this.#settings.fixedTimeStepSeconds,
+        this.#userInteractionWorkJoules,
       );
 
       if (!snapshot.ok) {
@@ -412,7 +518,10 @@ class EngineInstance implements Engine {
     }
 
     this.#bodies = cloneBodies(this.#initialBodies);
-    this.#insideTargetPairs = collectInsideTargetPairs(this.#bodies, this.#settings.targets);
+    this.#insideTargetPairs = collectInsideTargetPairs(
+      this.#bodies,
+      this.#settings.targets,
+    );
     this.#currentEvents = [];
     this.#tick = 0;
     this.#nextSequence = 0;
@@ -443,7 +552,10 @@ class EngineInstance implements Engine {
   }
 
   // Apply due commands only to the draft, then check the resulting placement.
-  #applyScheduledCommands(nextBodies: MutableBodyState[], nextInteractions: Map<string, ForceInteraction>): EngineFailure | undefined {
+  #applyScheduledCommands(
+    nextBodies: MutableBodyState[],
+    nextInteractions: Map<string, ForceInteraction>,
+  ): EngineFailure | undefined {
     let hasPlacementCommand = false;
 
     for (const queued of this.#pendingCommands) {
@@ -456,7 +568,8 @@ class EngineInstance implements Engine {
       if (payload.kind === "setForceInteraction") {
         nextInteractions.set(payload.interactionId, {
           ...payload,
-          maximumForceNewtons: payload.maximumForceNewtons ?? this.#defaultMaximumForceNewtons
+          maximumForceNewtons:
+            payload.maximumForceNewtons ?? this.#defaultMaximumForceNewtons,
         });
         continue;
       }
@@ -468,7 +581,10 @@ class EngineInstance implements Engine {
 
       applyCommand(queued.command, nextBodies);
 
-      if (payload.kind === "launchBody" || (payload.kind === "editBody" && payload.changes.pose !== undefined)) {
+      if (
+        payload.kind === "launchBody" ||
+        (payload.kind === "editBody" && payload.changes.pose !== undefined)
+      ) {
         hasPlacementCommand = true;
       }
     }
@@ -496,6 +612,18 @@ export function createEngine(scene: SceneDefinition): EngineResult<Engine> {
 
   if (!validation.ok) {
     return validation;
+  }
+
+  // Moving boxes are no yet implemented
+  for (const [bodyIndex, body] of scene.bodies.entries()) {
+    if (body.kind === "dynamic" && body.shape.kind !== "circle") {
+      return failure(
+        "UNSUPPORTED_SCENE_FEATURE",
+        `bodies[${bodyIndex}].shape`,
+        "This engine build supports moving circles only.",
+        body.id,
+      );
+    }
   }
 
   return { ok: true, value: new EngineInstance(scene) };

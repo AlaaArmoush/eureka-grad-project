@@ -15,8 +15,18 @@ export interface Velocity {
 
 export interface Material {
   readonly restitution: number;
-}
 
+  // Resistance to starting a slide
+  readonly staticFrictionCoefficient?: number;
+
+  // Resistance during sliding
+  readonly kineticFrictionCoefficient?: number;
+}
+// If the bodies stay together after collision
+export interface WeldOnImpactPair {
+  readonly bodyAId: string;
+  readonly bodyBId: string;
+}
 export interface CircleShape {
   readonly kind: "circle";
   readonly radiusMeters: number;
@@ -28,15 +38,29 @@ export interface BoxShape {
   readonly heightMeters: number;
 }
 
-export interface DynamicBody {
+// circles or boxes
+interface DynamicBodyProperties {
   readonly id: string;
   readonly kind: "dynamic";
-  readonly shape: CircleShape;
   readonly massKilograms: number;
   readonly material: Material;
   readonly pose: Pose;
   readonly velocity: Velocity;
+  // in circles
+  readonly momentOfInertiaKilogramMetersSquared?: number;
 }
+
+// A moving circle has a radius
+export interface DynamicCircleBody extends DynamicBodyProperties {
+  readonly shape: CircleShape;
+}
+
+// A moving box has width and height
+export interface DynamicBoxBody extends DynamicBodyProperties {
+  readonly shape: BoxShape;
+}
+// because now only circle consumers are prepared
+export type DynamicBody = DynamicCircleBody;
 
 export interface StaticBody {
   readonly id: string;
@@ -76,6 +100,8 @@ export interface SceneDefinition {
     readonly linearDragKilogramsPerSecond: number;
   };
   readonly bodies: readonly Body[];
+  // nothing means no pairs are configured to weld on impact
+  readonly weldOnImpactPairs?: readonly WeldOnImpactPair[];
   readonly triggers: readonly TargetTrigger[];
 }
 
@@ -119,9 +145,7 @@ export interface GroundContactEvent {
   readonly normal: Vector2;
 }
 
-export type SnapshotEvent =
-  | TargetEnteredEvent
-  | GroundContactEvent;
+export type SnapshotEvent = TargetEnteredEvent | GroundContactEvent;
 
 export interface Snapshot {
   readonly contractVersion: 1;

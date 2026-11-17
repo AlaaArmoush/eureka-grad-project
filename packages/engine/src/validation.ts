@@ -1,5 +1,15 @@
-import type { Body, Command, Material, SceneDefinition, Vector2 } from "@eureka/contracts";
-import { failure, type EngineFailure, type EngineResult } from "./diagnostics.js";
+import type {
+  Body,
+  Command,
+  Material,
+  SceneDefinition,
+  Vector2,
+} from "@eureka/contracts";
+import {
+  failure,
+  type EngineFailure,
+  type EngineResult,
+} from "./diagnostics.js";
 
 // Contact geometry owns cross-body circle/static-box overlap checks.
 import { findInitialSurfaceOverlap } from "./contacts.js";
@@ -21,58 +31,88 @@ function checkFinite(value: number, path: string): EngineFailure | undefined {
 }
 
 function checkPositive(value: number, path: string): EngineFailure | undefined {
-  return checkFinite(value, path) ??
+  return (
+    checkFinite(value, path) ??
     (value <= 0
       ? failure("OUT_OF_RANGE", path, "Value must be greater than zero.")
-      : undefined);
+      : undefined)
+  );
 }
 
-function checkNonnegative(value: number, path: string): EngineFailure | undefined {
-  return checkFinite(value, path) ??
+function checkNonnegative(
+  value: number,
+  path: string,
+): EngineFailure | undefined {
+  return (
+    checkFinite(value, path) ??
     (value < 0
       ? failure("OUT_OF_RANGE", path, "Value must be nonnegative.")
-      : undefined);
+      : undefined)
+  );
 }
 
-function checkSafeInteger(value: number, path: string, minimum?: number): EngineFailure | undefined {
+function checkSafeInteger(
+  value: number,
+  path: string,
+  minimum?: number,
+): EngineFailure | undefined {
   if (
     !Number.isSafeInteger(value) ||
     (minimum !== undefined && value < minimum)
   ) {
-    const requirement = minimum === undefined
-      ? "Value must be a safe integer."
-      : `Value must be a safe integer greater than or equal to ${minimum}.`;
+    const requirement =
+      minimum === undefined
+        ? "Value must be a safe integer."
+        : `Value must be a safe integer greater than or equal to ${minimum}.`;
 
-    return failure(
-      "INVALID_INTEGER",
-      path,
-      requirement
-    );
+    return failure("INVALID_INTEGER", path, requirement);
   }
 
   return undefined;
 }
 
-function validateVector(value: Vector2, path: string): EngineFailure | undefined {
-  return checkFinite(value.x, `${path}.x`) ??
-    checkFinite(value.y, `${path}.y`);
+function validateVector(
+  value: Vector2,
+  path: string,
+): EngineFailure | undefined {
+  return checkFinite(value.x, `${path}.x`) ?? checkFinite(value.y, `${path}.y`);
 }
 
-function validateMaterial(material: Material, path: string): EngineFailure | undefined {
+function validateMaterial(
+  material: Material,
+  path: string,
+): EngineFailure | undefined {
   const restitutionPath = `${path}.restitution`;
 
-  return checkFinite(material.restitution, restitutionPath) ??
+  // Use zero defaults when the are no friction fields
+  const staticFriction = material.staticFrictionCoefficient ?? 0;
+  const kineticFriction = material.kineticFrictionCoefficient ?? 0;
+
+  return (
+    checkFinite(material.restitution, restitutionPath) ??
     (material.restitution < 0 || material.restitution > 1
       ? failure(
-        "OUT_OF_RANGE",
-        restitutionPath,
-        "Restitution must be between zero and one."
-      )
-      : undefined);
+          "OUT_OF_RANGE",
+          restitutionPath,
+          "Restitution must be between zero and one.",
+        )
+      : undefined) ??
+    checkNonnegative(staticFriction, `${path}.staticFrictionCoefficient`) ??
+    checkNonnegative(kineticFriction, `${path}.kineticFrictionCoefficient`) ??
+    (kineticFriction > staticFriction
+      ? failure(
+          "OUT_OF_RANGE",
+          `${path}.kineticFrictionCoefficient`,
+          "Kinetic friction must not exceed static friction.",
+        )
+      : undefined)
+  );
 }
 
 // Reject a proposed placement that starts a projectile inside a static body.
-export function validateBodyPlacements(bodies: readonly Body[]): EngineFailure | undefined {
+export function validateBodyPlacements(
+  bodies: readonly Body[],
+): EngineFailure | undefined {
   const initialOverlap = findInitialSurfaceOverlap(bodies);
 
   if (initialOverlap === undefined) {
@@ -82,43 +122,47 @@ export function validateBodyPlacements(bodies: readonly Body[]): EngineFailure |
   return failure(
     "INVALID_INITIAL_OVERLAP",
     `bodies[${initialOverlap.bodyIndex}].pose.positionMeters`,
-    (
-      `Body "${initialOverlap.bodyId}" initially overlaps ` +
-      `static surface "${initialOverlap.surfaceBodyId}".`
-    ),
-    initialOverlap.bodyId
+    `Body "${initialOverlap.bodyId}" initially overlaps ` +
+      `static surface "${initialOverlap.surfaceBodyId}".`,
+    initialOverlap.bodyId,
   );
 }
 
-export function validateScene(scene: SceneDefinition): EngineResult<SceneDefinition> {
+export function validateScene(
+  scene: SceneDefinition,
+): EngineResult<SceneDefinition> {
   const sceneFailure =
     checkId(scene.id, "id") ??
     checkSafeInteger(scene.revision, "revision", 0) ??
     checkSafeInteger(scene.seed, "seed") ??
     checkPositive(
       scene.numericalProfile.fixedTimeStepSeconds,
-      "numericalProfile.fixedTimeStepSeconds"
+      "numericalProfile.fixedTimeStepSeconds",
     ) ??
-    checkSafeInteger(scene.numericalProfile.substeps, "numericalProfile.substeps", 1) ??
+    checkSafeInteger(
+      scene.numericalProfile.substeps,
+      "numericalProfile.substeps",
+      1,
+    ) ??
     checkPositive(
       scene.numericalProfile.scales.lengthMeters,
-      "numericalProfile.scales.lengthMeters"
+      "numericalProfile.scales.lengthMeters",
     ) ??
     checkPositive(
       scene.numericalProfile.scales.massKilograms,
-      "numericalProfile.scales.massKilograms"
+      "numericalProfile.scales.massKilograms",
     ) ??
     checkPositive(
       scene.numericalProfile.scales.timeSeconds,
-      "numericalProfile.scales.timeSeconds"
+      "numericalProfile.scales.timeSeconds",
     ) ??
     validateVector(
       scene.environment.gravityMetersPerSecondSquared,
-      "environment.gravityMetersPerSecondSquared"
+      "environment.gravityMetersPerSecondSquared",
     ) ??
     checkNonnegative(
       scene.environment.linearDragKilogramsPerSecond,
-      "environment.linearDragKilogramsPerSecond"
+      "environment.linearDragKilogramsPerSecond",
     );
 
   if (sceneFailure !== undefined) {
@@ -132,7 +176,10 @@ export function validateScene(scene: SceneDefinition): EngineResult<SceneDefinit
     const bodyFailure =
       checkId(body.id, `${bodyPath}.id`) ??
       validateMaterial(body.material, `${bodyPath}.material`) ??
-      validateVector(body.pose.positionMeters, `${bodyPath}.pose.positionMeters`) ??
+      validateVector(
+        body.pose.positionMeters,
+        `${bodyPath}.pose.positionMeters`,
+      ) ??
       checkFinite(body.pose.angleRadians, `${bodyPath}.pose.angleRadians`);
 
     if (bodyFailure !== undefined) {
@@ -144,28 +191,62 @@ export function validateScene(scene: SceneDefinition): EngineResult<SceneDefinit
         "DUPLICATE_ENTITY_ID",
         `${bodyPath}.id`,
         `Entity ID "${body.id}" is duplicated.`,
-        body.id
+        body.id,
       );
     }
 
     entityIds.add(body.id);
 
-    const kindFailure = body.kind === "dynamic"
-      ? checkPositive(body.shape.radiusMeters, `${bodyPath}.shape.radiusMeters`) ??
-      checkPositive(body.massKilograms, `${bodyPath}.massKilograms`) ??
-      validateVector(
-        body.velocity.linearMetersPerSecond,
-        `${bodyPath}.velocity.linearMetersPerSecond`
-      ) ??
-      checkFinite(
-        body.velocity.angularRadiansPerSecond,
-        `${bodyPath}.velocity.angularRadiansPerSecond`
-      )
-      : checkPositive(body.shape.widthMeters, `${bodyPath}.shape.widthMeters`) ??
-      checkPositive(body.shape.heightMeters, `${bodyPath}.shape.heightMeters`);
+    const shapeFailure =
+      body.shape.kind === "circle"
+        ? checkPositive(
+            body.shape.radiusMeters,
+            `${bodyPath}.shape.radiusMeters`,
+          )
+        : (checkPositive(
+            body.shape.widthMeters,
+            `${bodyPath}.shape.widthMeters`,
+          ) ??
+          checkPositive(
+            body.shape.heightMeters,
+            `${bodyPath}.shape.heightMeters`,
+          ));
 
-    if (kindFailure !== undefined) {
-      return kindFailure;
+    if (shapeFailure !== undefined) {
+      return shapeFailure;
+    }
+
+    // Only dynamic bodies carry mass, velocity and rotational inertia.
+    if (body.kind === "dynamic") {
+      const motionFailure =
+        checkPositive(body.massKilograms, `${bodyPath}.massKilograms`) ??
+        validateVector(
+          body.velocity.linearMetersPerSecond,
+          `${bodyPath}.velocity.linearMetersPerSecond`,
+        ) ??
+        checkFinite(
+          body.velocity.angularRadiansPerSecond,
+          `${bodyPath}.velocity.angularRadiansPerSecond`,
+        );
+
+      if (motionFailure !== undefined) {
+        return motionFailure;
+      }
+      // Validate explicit inertia
+      if (
+        body.kind === "dynamic" &&
+        body.momentOfInertiaKilogramMetersSquared !== undefined
+      ) {
+        // I = m r^2
+        const inertiaFailure = checkPositive(
+          body.momentOfInertiaKilogramMetersSquared,
+          `${bodyPath}.momentOfInertiaKilogramMetersSquared`,
+        );
+
+        if (inertiaFailure !== undefined) {
+          return inertiaFailure;
+        }
+      }
     }
   }
 
@@ -173,12 +254,18 @@ export function validateScene(scene: SceneDefinition): EngineResult<SceneDefinit
     const triggerPath = `triggers[${triggerIndex}]`;
     const triggerFailure =
       checkId(trigger.id, `${triggerPath}.id`) ??
-      checkPositive(trigger.shape.radiusMeters, `${triggerPath}.shape.radiusMeters`) ??
+      checkPositive(
+        trigger.shape.radiusMeters,
+        `${triggerPath}.shape.radiusMeters`,
+      ) ??
       validateVector(
         trigger.pose.positionMeters,
-        `${triggerPath}.pose.positionMeters`
+        `${triggerPath}.pose.positionMeters`,
       ) ??
-      checkFinite(trigger.pose.angleRadians, `${triggerPath}.pose.angleRadians`);
+      checkFinite(
+        trigger.pose.angleRadians,
+        `${triggerPath}.pose.angleRadians`,
+      );
 
     if (triggerFailure !== undefined) {
       return triggerFailure;
@@ -189,11 +276,76 @@ export function validateScene(scene: SceneDefinition): EngineResult<SceneDefinit
         "DUPLICATE_ENTITY_ID",
         `${triggerPath}.id`,
         `Entity ID "${trigger.id}" is duplicated.`,
-        trigger.id
+        trigger.id,
       );
     }
 
     entityIds.add(trigger.id);
+  }
+  // check for sticking objects
+  // store the weldPairs
+  const seenWeldPairs = new Set<string>();
+  for (const [pairIndex, pair] of (scene.weldOnImpactPairs ?? []).entries()) {
+    const pairPath = `weldOnImpactPairs[${pairIndex}]`;
+
+    const idFailure =
+      checkId(pair.bodyAId, `${pairPath}.bodyAId`) ??
+      checkId(pair.bodyBId, `${pairPath}.bodyBId`);
+
+    if (idFailure !== undefined) {
+      return idFailure;
+    }
+
+    const bodyA = scene.bodies.find((body) => body.id === pair.bodyAId);
+    const bodyB = scene.bodies.find((body) => body.id === pair.bodyBId);
+
+    if (bodyA === undefined) {
+      return failure(
+        "UNKNOWN_ENTITY_ID",
+        `${pairPath}.bodyAId`,
+        `Weld participant "${pair.bodyAId}" does not identify a body`,
+        pair.bodyAId,
+      );
+    }
+
+    if (bodyB === undefined) {
+      return failure(
+        "UNKNOWN_ENTITY_ID",
+        `${pairPath}.bodyBId`,
+        `Weld participant "${pair.bodyBId}" does not identify a body`,
+        pair.bodyBId,
+      );
+    }
+    //two different physical bodies
+    if (pair.bodyAId === pair.bodyBId) {
+      return failure(
+        "DUPLICATE_ENTITY_ID",
+        `${pairPath}.bodyBId`,
+        "A weld pair must reference two different bodies.",
+        pair.bodyBId,
+      );
+    }
+
+    // one has to be dynamic
+    if (bodyA.kind === "static" && bodyB.kind === "static") {
+      return failure(
+        "INVALID_BODY_KIND",
+        pairPath,
+        "A weld pair requires at least one dynamic body.",
+      );
+    }
+    // Sorting makes A–B and B–A produce the same
+    const pairKey = JSON.stringify([pair.bodyAId, pair.bodyBId].sort());
+
+    if (seenWeldPairs.has(pairKey)) {
+      return failure(
+        "DUPLICATE_ENTITY_ID",
+        pairPath,
+        "This body pair is already configured to weld.",
+      );
+    }
+
+    seenWeldPairs.add(pairKey);
   }
 
   // Reject initial overlaps before accepting the scene.
@@ -218,7 +370,7 @@ export function validateCommand(command: Command): EngineFailure | undefined {
       if (changes.massKilograms !== undefined) {
         const massFailure = checkPositive(
           changes.massKilograms,
-          "payload.changes.massKilograms"
+          "payload.changes.massKilograms",
         );
 
         if (massFailure !== undefined) {
@@ -229,7 +381,7 @@ export function validateCommand(command: Command): EngineFailure | undefined {
       if (changes.material !== undefined) {
         const materialFailure = validateMaterial(
           changes.material,
-          "payload.changes.material"
+          "payload.changes.material",
         );
 
         if (materialFailure !== undefined) {
@@ -238,13 +390,15 @@ export function validateCommand(command: Command): EngineFailure | undefined {
       }
 
       if (changes.pose !== undefined) {
-        const poseFailure = validateVector(
-          changes.pose.positionMeters,
-          "payload.changes.pose.positionMeters"
-        ) ?? checkFinite(
-          changes.pose.angleRadians,
-          "payload.changes.pose.angleRadians"
-        );
+        const poseFailure =
+          validateVector(
+            changes.pose.positionMeters,
+            "payload.changes.pose.positionMeters",
+          ) ??
+          checkFinite(
+            changes.pose.angleRadians,
+            "payload.changes.pose.angleRadians",
+          );
 
         if (poseFailure !== undefined) {
           return poseFailure;
@@ -252,13 +406,15 @@ export function validateCommand(command: Command): EngineFailure | undefined {
       }
 
       if (changes.velocity !== undefined) {
-        const velocityFailure = validateVector(
-          changes.velocity.linearMetersPerSecond,
-          "payload.changes.velocity.linearMetersPerSecond"
-        ) ?? checkFinite(
-          changes.velocity.angularRadiansPerSecond,
-          "payload.changes.velocity.angularRadiansPerSecond"
-        );
+        const velocityFailure =
+          validateVector(
+            changes.velocity.linearMetersPerSecond,
+            "payload.changes.velocity.linearMetersPerSecond",
+          ) ??
+          checkFinite(
+            changes.velocity.angularRadiansPerSecond,
+            "payload.changes.velocity.angularRadiansPerSecond",
+          );
 
         if (velocityFailure !== undefined) {
           return velocityFailure;
@@ -269,30 +425,36 @@ export function validateCommand(command: Command): EngineFailure | undefined {
     }
 
     case "launchBody":
-      return validateVector(payload.positionMeters, "payload.positionMeters") ??
+      return (
+        validateVector(payload.positionMeters, "payload.positionMeters") ??
         validateVector(
           payload.velocity.linearMetersPerSecond,
-          "payload.velocity.linearMetersPerSecond"
+          "payload.velocity.linearMetersPerSecond",
         ) ??
         checkFinite(
           payload.velocity.angularRadiansPerSecond,
-          "payload.velocity.angularRadiansPerSecond"
-        );
+          "payload.velocity.angularRadiansPerSecond",
+        )
+      );
 
     case "setForceInteraction": {
-      const interactionFailure = checkId(payload.interactionId, "payload.interactionId") ??
-        validateVector(payload.localAnchorMeters, "payload.localAnchorMeters") ??
+      const interactionFailure =
+        checkId(payload.interactionId, "payload.interactionId") ??
+        validateVector(
+          payload.localAnchorMeters,
+          "payload.localAnchorMeters",
+        ) ??
         validateVector(
           payload.targetPositionMeters,
-          "payload.targetPositionMeters"
+          "payload.targetPositionMeters",
         ) ??
         checkNonnegative(
           payload.stiffnessNewtonsPerMeter,
-          "payload.stiffnessNewtonsPerMeter"
+          "payload.stiffnessNewtonsPerMeter",
         ) ??
         checkNonnegative(
           payload.dampingKilogramsPerSecond,
-          "payload.dampingKilogramsPerSecond"
+          "payload.dampingKilogramsPerSecond",
         );
 
       if (interactionFailure !== undefined) {
@@ -300,7 +462,10 @@ export function validateCommand(command: Command): EngineFailure | undefined {
       }
 
       if (payload.maximumForceNewtons !== undefined) {
-        return checkPositive(payload.maximumForceNewtons, "payload.maximumForceNewtons");
+        return checkPositive(
+          payload.maximumForceNewtons,
+          "payload.maximumForceNewtons",
+        );
       }
 
       return undefined;
