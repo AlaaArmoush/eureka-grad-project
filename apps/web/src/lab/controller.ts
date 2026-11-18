@@ -118,6 +118,7 @@ export interface LabControllerOptions {
   readonly consumeSnapshot: SnapshotConsumer;
   // Receive owned snapshots for retained HTML measurements.
   readonly consumeReadout?: SnapshotConsumer | undefined;
+  readonly consumeTick?: SnapshotConsumer | undefined;
   // Pause after accepting this final tick when using a bounded playback source.
   readonly stopAtTick?: number | undefined;
   readonly releaseView: () => void;
@@ -128,7 +129,7 @@ export interface LabControllerOptions {
 
 export function createLabController(options: LabControllerOptions): EngineResult<LabController> {
   const {
-    engine, initialScene, consumeSnapshot, consumeReadout, releaseView,
+    engine, initialScene, consumeSnapshot, consumeReadout, consumeTick, releaseView,
     nowMilliseconds = () => performance.now(),
     playbackBrowser, onPlaybackChange, stopAtTick,
   } = options;
@@ -369,6 +370,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
     // Record the accepted tick before handing its borrowed snapshot to drawing.
     currentTick = snapshotResult.value.tick;
     consumeSnapshot(snapshotResult.value);
+    consumeTick?.(snapshotResult.value);
     return { ok: true };
   }
 

@@ -1,9 +1,10 @@
-export type WorkspacePage = "laboratory" | "curriculum" | "projectiles";
+export type WorkspacePage = "laboratory" | "curriculum" | "projectiles" | "challenges";
 
 const pageHashes: Readonly<Record<WorkspacePage, string>> = {
   laboratory: "#/lab",
   curriculum: "#/curriculum",
   projectiles: "#/curriculum/projectiles",
+  challenges: "#/challenges"
 };
 
 interface NavigationBrowser {
@@ -19,6 +20,7 @@ export function createWorkspaceNavigation(browser: NavigationBrowser) {
   const getSnapshot = (): WorkspacePage => {
     const hash = browser.location.hash.replace(/\/$/, "");
     if (hash === pageHashes.projectiles) return "projectiles";
+    if (hash === pageHashes.challenges) return "challenges";
     if (hash === pageHashes.curriculum) return "curriculum";
     return "laboratory";
   };

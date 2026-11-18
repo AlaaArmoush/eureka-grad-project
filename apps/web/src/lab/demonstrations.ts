@@ -231,11 +231,13 @@ export const TOPIC_ONE_DEMONSTRATIONS: readonly DemonstrationDefinition[] = [
     },
     lookFor: "The drag path is shorter and steeper on the way down. Try mass 0.1 kg: acceleration from drag is (b/m)·v, so a light ball is slowed far more than a 10 kg one.",
     scenarioReference: "S01-02 / D01-02 / A01-02",
-    primary: { key: "drag", label: "Drag coefficient b", options: [
-      { value: "0", label: "None" },
-      { value: "0.1", label: "0.1 kg/s" },
-      { value: "0.5", label: "0.5 kg/s" },
-    ] },
+    primary: {
+      key: "drag", label: "Drag coefficient b", options: [
+        { value: "0", label: "None" },
+        { value: "0.1", label: "0.1 kg/s" },
+        { value: "0.5", label: "0.5 kg/s" },
+      ]
+    },
     reference: "0",
     comparison: "0.5",
     shared: [{ key: "mass", label: "Mass", options: massOptions }],

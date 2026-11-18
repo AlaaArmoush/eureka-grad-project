@@ -151,11 +151,21 @@ function paintPigmentGrain(g: Graphics, width: number, height: number, color: nu
   }
 }
 
-function paintTarget(g: Graphics, radius: number, entered: boolean): void {
-  const green = sceneColors.target;
+// A challenge zone's target: red until reached, green once reached, amber when too close to call.
+export const zoneColors = {
+  waiting: { ink: 0xb3372b, wash: 0xe8705f, inner: 0xf3b0a3 },
+  missed: { ink: 0xb3372b, wash: 0xe8705f, inner: 0xf3b0a3 },
+  reached: { ink: sceneColors.target, wash: 0x2fc98d, inner: 0x91e6a8 },
+  borderline: { ink: 0xa86d06, wash: 0xf0b443, inner: 0xf6d891 },
+} as const;
+
+export type TargetPaint = (typeof zoneColors)[keyof typeof zoneColors];
+
+function paintTarget(g: Graphics, radius: number, entered: boolean, paint: TargetPaint): void {
+  const green = paint.ink;
   // A translucent watercolor ring keeps the projectile visible inside the sensor.
-  g.circle(0, 0, radius).fill({ color: 0x2fc98d, alpha: .28 });
-  g.circle(0, 0, radius * .7).fill({ color: 0x91e6a8, alpha: .2 });
+  g.circle(0, 0, radius).fill({ color: paint.wash, alpha: .28 });
+  g.circle(0, 0, radius * .7).fill({ color: paint.inner, alpha: .2 });
   pencilEllipse(g, 0, 0, radius, radius, green, 1.6);
   g.circle(0, 0, radius * .46).stroke({ color: green, width: 1, alpha: .8 });
   for (let index = 0; index < 4; index++) {
@@ -222,12 +232,12 @@ function paintSurface(g: Graphics, width: number, height: number, ramp: boolean,
   }
 }
 
-export function paintEntity(g: Graphics, entity: Body | TargetTrigger, pixelsPerMeter: number, targetEntered: boolean, visible?: PaintBounds): void {
+export function paintEntity(g: Graphics, entity: Body | TargetTrigger, pixelsPerMeter: number, targetEntered: boolean, visible?: PaintBounds, targetPaint: TargetPaint = zoneColors.reached): void {
   g.clear();
   const shape = entity.shape;
   if (shape.kind === "circle") {
     const radius = shape.radiusMeters * pixelsPerMeter;
-    if (entity.kind === "target") paintTarget(g, radius, targetEntered);
+    if (entity.kind === "target") paintTarget(g, radius, targetEntered, targetPaint);
     else paintBall(g, radius);
     return;
   }

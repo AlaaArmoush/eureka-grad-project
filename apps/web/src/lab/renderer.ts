@@ -27,6 +27,9 @@ const DELETE_CURSOR = `url("data:image/svg+xml,${encodeURIComponent(
   '<path d="M3 2v16l4-4 3 7 3-1-3-7h7Z" fill="#fff"/><circle cx="18" cy="17" r="5" fill="#fff"/><path d="M15 17h6" fill="none" stroke-width="2"/></svg>',
 )}") 3 2, pointer`;
 
+// A level static box this wide is a ground plane: it gives the scene its height, never its width.
+const GROUND_PLANE_WIDTH_METERS = 100;
+
 // Keep velocity arrows readable without changing physical values.
 export const VELOCITY_ARROW_SCALE = {
   pixelsPerMeterPerSecond: 6,
@@ -149,6 +152,8 @@ export function mountLabRenderer(
   const trailGraphic = new Graphics({ label: "selected-projectile-trail", });
   const predictionGraphic = new Graphics({ label: "selected-projectile-ideal-prediction" });
   predictionGraphic.eventMode = "none";
+  const challengePathGraphic = new Graphics({ label: "challenge-paths" });
+  challengePathGraphic.eventMode = "none";
   const velocityGraphic = new Graphics({
     label: "selected-projectile-velocity",
   });
@@ -400,6 +405,37 @@ export function mountLabRenderer(
   }
 
 
+  // Draw the challenge's ghost of the previous attempt faintly and the current attempt's path solid, from the shared store.
+  function redrawChallengePaths(viewport: ViewportTransform): void {
+    challengePathGraphic.clear();
+
+    const { live, ghosts } = labStore.getState().challengeOverlay;
+
+    const strokePath = (points: readonly Vector2[], alpha: number, width: number): void => {
+      const [first, ...rest] = points;
+
+      if (first === undefined || rest.length === 0) {
+        return;
+      }
+
+      const start = worldToScreen(first, viewport);
+      challengePathGraphic.moveTo(start.x, start.y);
+
+      for (const point of rest) {
+        const screen = worldToScreen(point, viewport);
+        challengePathGraphic.lineTo(screen.x, screen.y);
+      }
+
+      challengePathGraphic.stroke({ color: sceneColors.trail, width, alpha, cap: "round", join: "round" });
+    };
+
+    for (const ghost of ghosts) {
+      strokePath(ghost, 0.3, 1.5);
+    }
+
+    strokePath(live, 0.9, 2);
+  }
+
   // Draw velocity from the selected projectile's authoritative snapshot.
   function redrawSelectedVelocity(
     viewport: ViewportTransform,
@@ -515,6 +551,7 @@ export function mountLabRenderer(
             editorState.activeTool.kind === "delete" ? DELETE_CURSOR : "default";
     background.cursor = toolCursor;
     trailGraphic.visible = editorState.overlayVisibility.trail;
+    challengePathGraphic.visible = editorState.overlayVisibility.trail;
     predictionGraphic.visible = editorState.overlayVisibility.prediction;
     velocityGraphic.visible = editorState.overlayVisibility.velocity;
     horizontalVelocityGraphic.visible = editorState.overlayVisibility.components;
@@ -528,6 +565,7 @@ export function mountLabRenderer(
     notebook.update(viewport, editorState.overlayVisibility.grid);
     const selectedProjectile = getSelectedProjectile(editorState.selectedEntityId);
     redrawSelectedTrail(viewport, selectedProjectile);
+    redrawChallengePaths(viewport);
     redrawSelectedVelocity(viewport, selectedProjectile);
     redrawSelectedPrediction(viewport, selectedProjectile);
 
@@ -536,11 +574,13 @@ export function mountLabRenderer(
       const entered = editorState.overlayVisibility.events && currentSnapshot.events.some(
         (event) => event.kind === "targetEntered" && event.targetId === item.entityId && event.tick === currentSnapshot.tick,
       );
+      // A target used as a challenge zone shows the attempt's state instead of the one-tick entry flash.
+      const zone = editorState.challengeOverlay.zones.find((view) => view.zone.targetId === item.entityId);
       item.updateAppearance(
         editorState.pixelsPerMeter,
         item.angleRadians,
         editorState.selectedEntityId === item.entityId,
-        entered,
+        zone === undefined ? entered : zone,
         editorState.overlayVisibility.labels,
         worldToScreen(item.positionMeters, viewport),
         width,
@@ -792,8 +832,9 @@ export function mountLabRenderer(
         const sine = Math.abs(Math.sin(pose.angleRadians));
         const halfWidth = (shape.widthMeters * cosine + shape.heightMeters * sine) / 2;
         const halfHeight = (shape.widthMeters * sine + shape.heightMeters * cosine) / 2;
-        // The long default ground establishes height without shrinking the experiment.
-        include(pose.positionMeters.x, pose.positionMeters.y, entity.id === "default-ground" ? 0 : halfWidth, halfHeight);
+        // A long ground establishes height without shrinking the experiment, whatever its id.
+        const groundPlane = entity.kind === "static" && entity.pose.angleRadians === 0 && shape.widthMeters >= GROUND_PLANE_WIDTH_METERS;
+        include(pose.positionMeters.x, pose.positionMeters.y, groundPlane ? 0 : halfWidth, halfHeight);
       }
       if (entity.kind === "dynamic") {
         include(entity.pose.positionMeters.x, entity.pose.positionMeters.y);
@@ -871,7 +912,7 @@ export function mountLabRenderer(
     application.stage.addChild(paper, notebook.root);
     // Keep paths behind bodies and velocity arrows.
     application.stage.addChild(
-      trailGraphic, predictionGraphic,
+      trailGraphic, challengePathGraphic, predictionGraphic,
       horizontalVelocityGraphic, verticalVelocityGraphic, velocityGraphic,
     );
     application.stage.addChildAt(background, 0);
@@ -968,7 +1009,8 @@ export function mountLabRenderer(
         state.pendingCameraView !== previousState.pendingCameraView ||
         state.selectedEntityId !== previousState.selectedEntityId ||
         state.activeTool !== previousState.activeTool ||
-        state.overlayVisibility !== previousState.overlayVisibility
+        state.overlayVisibility !== previousState.overlayVisibility ||
+        state.challengeOverlay !== previousState.challengeOverlay
       ) {
         resizeAndRender();
 
@@ -1012,6 +1054,7 @@ export function mountLabRenderer(
       horizontalVelocityGraphic.destroy();
       verticalVelocityGraphic.destroy();
       predictionGraphic.destroy();
+      challengePathGraphic.destroy();
       notebook.root.destroy({ children: true });
     }
 

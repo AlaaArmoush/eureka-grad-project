@@ -1,0 +1,463 @@
+{
+  "schemaVersion": 1,
+  "id": "rescue-the-weather-balloon",
+  "revision": 4,
+  "topic": "projectiles",
+  "level": "guided",
+  "title": "Rescue the weather balloon",
+  "briefing": "A weather balloon is drifting away. Drop the supply capsule inside its beacon before it is gone.",
+  "scene": {
+    "schemaVersion": 1,
+    "id": "rescue-the-weather-balloon",
+    "revision": 1,
+    "seed": 17,
+    "numericalProfile": {
+      "fixedTimeStepSeconds": 0.016666666666666666,
+      "substeps": 1,
+      "scales": {
+        "lengthMeters": 1,
+        "massKilograms": 1,
+        "timeSeconds": 1
+      }
+    },
+    "environment": {
+      "gravityMetersPerSecondSquared": {
+        "x": 0,
+        "y": -9.81
+      },
+      "linearDragKilogramsPerSecond": 0
+    },
+    "bodies": [
+      {
+        "id": "ground",
+        "kind": "static",
+        "shape": {
+          "kind": "box",
+          "widthMeters": 1200,
+          "heightMeters": 0.5
+        },
+        "material": {
+          "restitution": 0
+        },
+        "pose": {
+          "positionMeters": {
+            "x": 0,
+            "y": -0.75
+          },
+          "angleRadians": 0
+        }
+      },
+      {
+        "id": "capsule",
+        "kind": "dynamic",
+        "shape": {
+          "kind": "circle",
+          "radiusMeters": 0.5
+        },
+        "massKilograms": 1,
+        "material": {
+          "restitution": 0
+        },
+        "pose": {
+          "positionMeters": {
+            "x": 0,
+            "y": 0
+          },
+          "angleRadians": 0
+        },
+        "velocity": {
+          "linearMetersPerSecond": {
+            "x": 19.318516525781366,
+            "y": 5.176380902050415
+          },
+          "angularRadiansPerSecond": 0
+        }
+      }
+    ],
+    "triggers": [
+      {
+        "id": "beacon",
+        "kind": "target",
+        "shape": {
+          "kind": "circle",
+          "radiusMeters": 1
+        },
+        "pose": {
+          "positionMeters": {
+            "x": 35,
+            "y": 0.5
+          },
+          "angleRadians": 0
+        }
+      }
+    ]
+  },
+  "projectileId": "capsule",
+  "view": {
+    "centerWorldMeters": {
+      "x": 20,
+      "y": 5
+    },
+    "widthMeters": 46,
+    "heightMeters": 14.375,
+    "pixelsPerMeter": 40
+  },
+  "overlays": {
+    "trail": true,
+    "velocity": false,
+    "components": false,
+    "prediction": false,
+    "events": true,
+    "grid": true,
+    "labels": true
+  },
+  "runLimitSeconds": 8,
+  "attemptEnds": "firstContact",
+  "editable": [
+    {
+      "property": "launchAngle",
+      "bodyId": "capsule",
+      "label": "Launch angle",
+      "unit": "°",
+      "minimum": 15,
+      "maximum": 75,
+      "step": 0.1
+    }
+  ],
+  "locked": [
+    {
+      "property": "launchSpeed",
+      "bodyId": "capsule",
+      "label": "Launch speed",
+      "unit": "m/s",
+      "value": 20,
+      "reason": "Speed is fixed, so the angle alone decides the flight."
+    },
+    {
+      "property": "mass",
+      "bodyId": "capsule",
+      "label": "Capsule mass",
+      "unit": "kg",
+      "value": 1,
+      "reason": "Mass is fixed at 1 kg."
+    },
+    {
+      "property": "gravity",
+      "bodyId": null,
+      "label": "Gravity",
+      "unit": "m/s²",
+      "value": 9.81,
+      "reason": "Gravity is Earth's."
+    },
+    {
+      "property": "linearDrag",
+      "bodyId": null,
+      "label": "Air resistance b",
+      "unit": "kg/s",
+      "value": 0,
+      "reason": "There is no air resistance."
+    }
+  ],
+  "measurements": [
+    {
+      "id": "landingDistance",
+      "label": "Landing distance",
+      "unit": "m",
+      "decimals": 2,
+      "quantity": "contactDistance",
+      "onSurfaces": [
+        "ground"
+      ]
+    },
+    {
+      "id": "flightTime",
+      "label": "Time in air",
+      "unit": "s",
+      "decimals": 2,
+      "quantity": "contactTime",
+      "onSurfaces": [
+        "ground"
+      ]
+    },
+    {
+      "id": "apexHeight",
+      "label": "Peak height",
+      "unit": "m",
+      "decimals": 1,
+      "quantity": "apexHeight",
+      "onSurfaces": null
+    }
+  ],
+  "objective": {
+    "summary": "Land the capsule inside the beacon, 34 to 36 m from the launch rail, within 1.5 to 4 s.",
+    "criteria": [
+      {
+        "id": "range",
+        "measurement": "landingDistance",
+        "label": "Landing distance",
+        "minimum": 34,
+        "maximum": 36,
+        "uncertainty": 0.02
+      },
+      {
+        "id": "time",
+        "measurement": "flightTime",
+        "label": "Time in air",
+        "minimum": 1.5,
+        "maximum": 4,
+        "uncertainty": 0.01
+      }
+    ],
+    "zones": [
+      {
+        "targetId": "beacon",
+        "label": "Balloon beacon",
+        "criterionId": "range"
+      }
+    ]
+  },
+  "explanations": {
+    "success": {
+      "title": "Beacon lit",
+      "message": "The capsule landed {landingDistance} from the rail after {flightTime} in the air, inside the beacon."
+    },
+    "borderline": {
+      "title": "Too close to call",
+      "message": "The capsule landed {landingDistance} from the rail after {flightTime}, which is too close to the edge for the measurement uncertainty to decide. It waits for an authoritative check and does not count as a hit or a miss."
+    },
+    "invalid": {
+      "engineFailure": {
+        "title": "The run stopped",
+        "message": "The physics run reported a problem, so this attempt cannot be judged. Reset and launch again."
+      },
+      "nonFiniteValue": {
+        "title": "Unusable measurement",
+        "message": "A measured value was not a finite number, so this attempt cannot be judged. Reset and launch again."
+      },
+      "incompleteRun": {
+        "title": "The run did not finish",
+        "message": "The capsule never touched down before the run limit, so there is nothing to judge. Reset and launch again."
+      },
+      "forbiddenEdit": {
+        "title": "A locked value changed",
+        "message": "This challenge fixes some values. Reset restores them, and then you can launch again."
+      }
+    },
+    "misses": [
+      {
+        "id": "short-and-low",
+        "title": "Short and too flat",
+        "message": "The capsule landed {landingDistance} from the rail, {range.gap} short of the beacon. A flat arc is gone before it has travelled far: raise the angle.",
+        "when": [
+          {
+            "kind": "criterion",
+            "criterionId": "range",
+            "side": "below"
+          },
+          {
+            "kind": "measurement",
+            "measurementId": "apexHeight",
+            "side": "below",
+            "threshold": 10
+          }
+        ]
+      },
+      {
+        "id": "short-and-high",
+        "title": "Short and too steep",
+        "message": "The capsule climbed {apexHeight} but landed {range.gap} short of the beacon ({landingDistance}). A steep launch spends its speed going up instead of forward: lower the angle.",
+        "when": [
+          {
+            "kind": "criterion",
+            "criterionId": "range",
+            "side": "below"
+          },
+          {
+            "kind": "measurement",
+            "measurementId": "apexHeight",
+            "side": "above",
+            "threshold": 10
+          }
+        ]
+      },
+      {
+        "id": "long",
+        "title": "Too long",
+        "message": "The capsule landed {landingDistance} from the rail, {range.gap} past the beacon. At this speed the range is greatest at 45°, so move the angle away from 45°.",
+        "when": [
+          {
+            "kind": "criterion",
+            "criterionId": "range",
+            "side": "above"
+          }
+        ]
+      }
+    ],
+    "fallbackMiss": {
+      "title": "Missed the beacon",
+      "message": "The capsule landed {landingDistance} from the rail after {flightTime}, outside what the beacon accepts."
+    }
+  },
+  "hints": [
+    {
+      "text": "The marker shows how high your current launch climbs. A launch that reaches the beacon distance is neither very flat nor very steep.",
+      "reveal": "apexMarker"
+    },
+    {
+      "text": "At a fixed speed the range is R = v²·sin(2θ)/g. Two angles that add up to 90° land in the same place.",
+      "reveal": null
+    }
+  ],
+  "reset": {
+    "editableValues": "keepLast",
+    "previousTrail": "ghost"
+  },
+  "comparison": "none",
+  "relatedDemonstrationIds": [
+    "angle-sweep",
+    "complementary-angles",
+    "ideal-launch"
+  ],
+  "samples": [
+    {
+      "id": "balloon-success",
+      "label": "Reference launch at 30°",
+      "source": "v0 = 20, θ = 30°",
+      "expectedStatus": "success",
+      "expectedReasonId": "success",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "landingDistance": 35.311943069701876,
+          "flightTime": 2.0387359836901116,
+          "apexHeight": 5.096839959225279
+        },
+        "firstContact": "ground"
+      }
+    },
+    {
+      "id": "balloon-miss-flat",
+      "label": "Clear miss: short and flat at 15°",
+      "source": "v0 = 20, θ = 15°",
+      "expectedStatus": "miss",
+      "expectedReasonId": "short-and-low",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "landingDistance": 20.38735983690112,
+          "flightTime": 1.0553274010296463,
+          "apexHeight": 1.36569415102509
+        },
+        "firstContact": "ground"
+      }
+    },
+    {
+      "id": "balloon-miss-long",
+      "label": "Clear miss: long at 45°",
+      "source": "v0 = 20, θ = 45°",
+      "expectedStatus": "miss",
+      "expectedReasonId": "long",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "landingDistance": 40.77471967380224,
+          "flightTime": 2.8832080782326095,
+          "apexHeight": 10.19367991845056
+        },
+        "firstContact": "ground"
+      }
+    },
+    {
+      "id": "balloon-miss-steep",
+      "label": "Clear miss: short and steep at 75°",
+      "source": "v0 = 20, θ = 75°",
+      "expectedStatus": "miss",
+      "expectedReasonId": "short-and-high",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "landingDistance": 20.38735983690112,
+          "flightTime": 3.938535479262256,
+          "apexHeight": 19.02166568587603
+        },
+        "firstContact": "ground"
+      }
+    },
+    {
+      "id": "balloon-borderline-near-edge",
+      "label": "Borderline: landing exactly 34 m",
+      "source": "v0 = 20, θ = ½·asin(34·9.81/400) = 28.24814077267925°",
+      "expectedStatus": "borderline",
+      "expectedReasonId": "borderline",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "landingDistance": 34,
+          "flightTime": 1.9298311206924474,
+          "apexHeight": 4.5668592993244985
+        },
+        "firstContact": "ground"
+      }
+    },
+    {
+      "id": "balloon-borderline-far-edge",
+      "label": "Borderline: landing exactly 36 m",
+      "source": "v0 = 20, θ = ½·asin(36·9.81/400) = 30.997096086035683°",
+      "expectedStatus": "borderline",
+      "expectedReasonId": "borderline",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "landingDistance": 36,
+          "flightTime": 2.0998761694531365,
+          "apexHeight": 5.4071247605293395
+        },
+        "firstContact": "ground"
+      }
+    },
+    {
+      "id": "balloon-invalid-engine",
+      "label": "Invalid: the engine reported a failure",
+      "source": "A run that ends with an engine diagnostic cannot be judged, whatever it measured.",
+      "expectedStatus": "invalid",
+      "expectedReasonId": "engineFailure",
+      "attempt": {
+        "runStatus": "engineFailure",
+        "measurements": {
+          "landingDistance": 35.311943069701876,
+          "flightTime": 2.0387359836901116,
+          "apexHeight": 5.096839959225279
+        },
+        "firstContact": "ground"
+      }
+    },
+    {
+      "id": "balloon-invalid-incomplete",
+      "label": "Invalid: the run ended before touchdown",
+      "source": "A truncated run has no landing to judge.",
+      "expectedStatus": "invalid",
+      "expectedReasonId": "incompleteRun",
+      "attempt": {
+        "runStatus": "incomplete",
+        "measurements": {},
+        "firstContact": null
+      }
+    },
+    {
+      "id": "balloon-invalid-locked",
+      "label": "Invalid: a locked value was changed",
+      "source": "A run whose locked speed no longer matches the definition is not a run of this challenge.",
+      "expectedStatus": "invalid",
+      "expectedReasonId": "forbiddenEdit",
+      "attempt": {
+        "runStatus": "forbiddenEdit",
+        "measurements": {
+          "landingDistance": 35.311943069701876,
+          "flightTime": 2.0387359836901116,
+          "apexHeight": 5.096839959225279
+        },
+        "firstContact": "ground"
+      }
+    }
+  ]
+}

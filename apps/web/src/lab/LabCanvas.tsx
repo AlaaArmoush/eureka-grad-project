@@ -47,6 +47,7 @@ export function LabCanvas(props: {
   onMoveRequested(request: MoveEntityRequest): boolean;
   onDeleteRequested(entityId: string): boolean;
   sampleSnapshots?: readonly Snapshot[] | undefined;
+  onTick?(snapshot: Snapshot): void;
 }) {
   const toSetDisplayedSnapshot = props.setDisplayedSnapshot;
   const setActiveController = props.setActiveController;
@@ -56,6 +57,7 @@ export function LabCanvas(props: {
   const onMoveRequested = props.onMoveRequested;
   const onDeleteRequested = props.onDeleteRequested;
   const sampleSnapshots = props.sampleSnapshots;
+  const onTick = props.onTick;
   const scene = props.scene;
   const hostRef = useRef<HTMLDivElement>(null);
   // Keep the same Pixi application across accepted authoring edits.
@@ -121,6 +123,7 @@ export function LabCanvas(props: {
       // Draw every tick directly while sending React only copied, bounded readouts.
       consumeSnapshot: renderer.updateSnapshot,
       consumeReadout: toSetDisplayedSnapshot,
+      consumeTick: onTick,
       releaseView: renderer.dispose,
       playbackBrowser: createPlaybackBrowser(onOperationResult),
       onPlaybackChange,
@@ -152,6 +155,7 @@ export function LabCanvas(props: {
     onMoveRequested,
     onDeleteRequested,
     sampleSnapshots,
+    onTick,
   ]);
 
   // Release Pixi when this canvas host actually leaves the mounted lab.
