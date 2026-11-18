@@ -12,3 +12,6 @@ export type {
   EngineResult,
   EngineStatus
 } from "./diagnostics.js";
+
+// Lets editors reuse the engine's own surface-contact geometry instead of duplicating it.
+export { surfaceContactGeometry } from "./contacts.js";
