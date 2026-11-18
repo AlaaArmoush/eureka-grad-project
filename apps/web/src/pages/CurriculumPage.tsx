@@ -1,13 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, FlaskConical, Play, RotateCcw } from "lucide-react";
-import {
-  setupParameters, TOPIC_ONE_DEMONSTRATIONS, unionFrames,
-  type DemonstrationControl, type DemonstrationDefinition,
-} from "../lab/demonstrations.js";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { ArrowLeft, ArrowRight, Check, FlaskConical, Play, RefreshCw, RotateCcw } from "lucide-react";
+import type { SceneDefinition } from "@eureka/contracts";
+import { setupParameters, unionFrames, type DemonstrationControl, type DemonstrationDefinition } from "../lab/demonstrations.js";
+import type { DemonstrationCatalogue } from "../lab/demonstration-client.js";
 import type { DemonstrationSelection } from "../lab/demo-loading.js";
 import { runPreview } from "../lab/demonstration-preview.js";
 import { DemonstrationPreview } from "./DemonstrationPreview.js";
 import { initialState, type InvestigationState } from "./investigation-state.js";
+
+// How many balls a setup launches, said in words.
+function ballCount(scene: SceneDefinition): string {
+  const count = scene.bodies.filter((body) => body.kind === "dynamic").length;
+  return count === 1 ? "1 ball" : `${count} balls`;
+}
 
 function OptionSelect({ control, value, label, onChange }: {
   readonly control: DemonstrationControl;
@@ -52,12 +57,25 @@ export function InvestigationPanel({ definition, state, index, total, onChange, 
   const identical = state.reference === state.comparison;
   const answered = state.choice !== null;
   const correct = state.choice === definition.prediction.answerIndex;
-  const rows = (["A", "B"] as const).flatMap((key) => (balls?.[key] ?? []).map((ball) => ({ key, ball })));
 
   return (
     <article className="investigation" aria-labelledby={`${definition.id}-question`}>
       <header className="investigation-head">
-        <p className="investigation-step">Question {index + 1} of {total}</p>
+        <div className="investigation-topline">
+          <p className="investigation-step">Question {index + 1} of {total}</p>
+          <div className="question-nav">
+            <button
+              className="open-lab"
+              type="button"
+              title={identical ? "Opens the one setup in the lab" : "Opens setups A and B together in the lab"}
+              onClick={() => onOpen(identical ? { groupId: definition.id, parameters: parametersA } : { groupId: definition.id, parameters: parametersA, comparison: parametersB })}
+            >
+              <FlaskConical size={14} />Open in lab
+            </button>
+            <button className="tool-btn" type="button" aria-label="Previous question" disabled={onPrevious === null} onClick={() => onPrevious?.()}><ArrowLeft size={14} />Previous</button>
+            <button className="tool-btn" type="button" aria-label="Next question" disabled={onNext === null} onClick={() => onNext?.()}>Next<ArrowRight size={14} /></button>
+          </div>
+        </div>
         <h2 id={`${definition.id}-question`}>{definition.question}</h2>
         <p>{definition.summary}</p>
       </header>
@@ -73,9 +91,9 @@ export function InvestigationPanel({ definition, state, index, total, onChange, 
           runId={`${state.runCount}-${sceneA.id}-${sceneB.id}`}
         />
         <figcaption className="setup-legend">
-          {([["A", state.reference, "reference"], ["B", state.comparison, "comparison"]] as const).map(([key, value, role]) => (
+          {([["A", state.reference, "reference", sceneA], ["B", state.comparison, "comparison", sceneB]] as const).map(([key, value, role, scene]) => (
             <label key={key} className={`setup-chip series-${key.toLowerCase()}`}>
-              <span className="setup-key">{key}</span>
+              <span className={`setup-key${key === "B" ? " is-ring" : ""}`}>{key}</span>
               <span className="setup-label">{definition.primary.label}</span>
               <OptionSelect
                 control={definition.primary}
@@ -83,123 +101,89 @@ export function InvestigationPanel({ definition, state, index, total, onChange, 
                 label={`Setup ${key} ${definition.primary.label}`}
                 onChange={(next) => onChange(role === "reference" ? { reference: next } : { comparison: next })}
               />
+              <span className="setup-count">{ballCount(scene)}</span>
             </label>
           ))}
+          {definition.shared.length > 0 && (
+            <div className="shared-settings">
+              <span className="shared-title">Same for both setups</span>
+              {definition.shared.map((control) => (
+                <label key={control.key}>
+                  {control.label}
+                  <OptionSelect
+                    control={control}
+                    value={state.shared[control.key] ?? control.options[0]?.value ?? ""}
+                    label={`${control.label} (both setups)`}
+                    onChange={(next) => onChange({ shared: { ...state.shared, [control.key]: next } })}
+                  />
+                </label>
+              ))}
+            </div>
+          )}
         </figcaption>
         {identical && <p className="investigation-note">Both setups are identical. Choose a different value for B to compare.</p>}
       </figure>
 
-      {definition.shared.length > 0 && (
-        <div className="shared-settings">
-          <span className="shared-title">Same for both setups</span>
-          {definition.shared.map((control) => (
-            <label key={control.key}>
-              {control.label}
-              <OptionSelect
-                control={control}
-                value={state.shared[control.key] ?? control.options[0]?.value ?? ""}
-                label={`${control.label} (both setups)`}
-                onChange={(next) => onChange({ shared: { ...state.shared, [control.key]: next } })}
-              />
-            </label>
-          ))}
-        </div>
-      )}
-
       <fieldset className="prediction">
         <legend><span className="prediction-step">1</span>Predict. {definition.prediction.prompt}</legend>
-        <div className="prediction-choices">
-          {definition.prediction.choices.map((choice, choiceIndex) => (
-            <label key={choice} className={`prediction-choice${state.choice === choiceIndex ? " is-chosen" : ""}${hasRun && choiceIndex === definition.prediction.answerIndex ? " is-answer" : ""}`}>
-              <input
-                type="radio"
-                name={`${definition.id}-prediction`}
-                checked={state.choice === choiceIndex}
-                onChange={() => onChange({ choice: choiceIndex })}
-              />
-              {choice}
-            </label>
-          ))}
+        <div className="prediction-row">
+          <div className="prediction-choices">
+            {definition.prediction.choices.map((choice, choiceIndex) => (
+              <label key={choice} className={`prediction-choice${state.choice === choiceIndex ? " is-chosen" : ""}${hasRun && choiceIndex === definition.prediction.answerIndex ? " is-answer" : ""}`}>
+                <input
+                  type="radio"
+                  name={`${definition.id}-prediction`}
+                  checked={state.choice === choiceIndex}
+                  onChange={() => onChange({ choice: choiceIndex })}
+                />
+                {choice}
+              </label>
+            ))}
+          </div>
+          <button className="run-both" type="button" onClick={() => onChange({ runCount: state.runCount + 1 })}>
+            {hasRun ? <RotateCcw size={15} /> : <Play size={15} />}
+            <span><span className="prediction-step">2</span>{hasRun ? "Run again" : "Run both"}</span>
+          </button>
         </div>
       </fieldset>
-
-      <div className="run-row">
-        <button className="run-both" type="button" onClick={() => onChange({ runCount: state.runCount + 1 })}>
-          {hasRun ? <RotateCcw size={15} /> : <Play size={15} />}
-          <span><span className="prediction-step">2</span>{hasRun ? "Run again" : "Run both"}</span>
-        </button>
-        {!hasRun && <span className="run-hint">{answered ? "Run the simulation to check your prediction." : "Pick a prediction first, or just run it."}</span>}
-      </div>
 
       {hasRun && (
         <section className="results" aria-label="Results" aria-live="polite">
           <p className={`feedback${answered ? (correct ? " is-correct" : " is-incorrect") : ""}`}>
             {answered && <><strong>{correct ? <><Check size={14} /> Your prediction was right.</> : "Not quite."}</strong>{" "}</>}
             {definition.prediction.reason}
+            <span className="look-for"><strong>What to look for.</strong> {definition.lookFor}</span>
           </p>
-          <div className="results-scroll">
-            <table>
-              <caption>Measured from the simulated flights</caption>
-              <thead>
-                <tr><th scope="col">Ball</th><th scope="col">Range</th><th scope="col">Time in air</th><th scope="col">Peak height</th></tr>
-              </thead>
-              <tbody>
-                {rows.map(({ key, ball }) => (
-                  <tr key={`${key}-${ball.id}`} className={`series-${key.toLowerCase()}`}>
-                    <th scope="row">
-                      <span className="setup-key">{key}</span>
-                      {ball.speedMetersPerSecond.toFixed(0)} m/s at {ball.angleDegrees.toFixed(0)}° · {ball.massKilograms} kg
-                    </th>
-                    <td>{ball.rangeMeters.toFixed(1)} m</td>
-                    <td>{ball.landed ? `${ball.flightTimeSeconds.toFixed(2)} s` : "did not land"}</td>
-                    <td>{ball.peakHeightMeters.toFixed(1)} m</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="look-for"><strong>What to look for.</strong> {definition.lookFor}</p>
-          <p className="try-more">Change anything above and the flights re-run straight away. Use the lab to edit objects, launch angle or gravity freely.</p>
         </section>
       )}
-
-      <footer className="investigation-foot">
-        <div className="lab-actions">
-          <button className="open-lab" type="button" onClick={() => onOpen({ groupId: definition.id, parameters: parametersA })}>
-            <FlaskConical size={14} />Open A in lab
-          </button>
-          <button className="open-lab" type="button" disabled={identical} onClick={() => onOpen({ groupId: definition.id, parameters: parametersB })}>
-            <FlaskConical size={14} />Open B in lab
-          </button>
-        </div>
-        <div className="question-nav">
-          <button className="tool-btn" type="button" disabled={onPrevious === null} onClick={() => onPrevious?.()}><ArrowLeft size={14} />Previous</button>
-          <button className="tool-btn" type="button" disabled={onNext === null} onClick={() => onNext?.()}>Next<ArrowRight size={14} /></button>
-        </div>
-      </footer>
     </article>
   );
 }
 
-export function ProjectilesBrowser({ onOpen }: {
+export function ProjectilesBrowser({ demonstrations, heading, onOpen }: {
+  readonly demonstrations: readonly DemonstrationDefinition[];
+  // The topic's title and page actions, shown above the question list.
+  readonly heading?: ReactNode;
   onOpen(selection: DemonstrationSelection): void;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [states, setStates] = useState<Readonly<Record<string, InvestigationState>>>({});
-  const definition = TOPIC_ONE_DEMONSTRATIONS[activeIndex];
+  const definition = demonstrations[activeIndex];
 
   if (definition === undefined) {
     return null;
   }
 
   const state = states[definition.id] ?? initialState(definition);
-  const total = TOPIC_ONE_DEMONSTRATIONS.length;
+  const total = demonstrations.length;
 
   return (
     <div className="investigation-layout">
+      <div className="question-column">
+      {heading}
       <nav className="question-rail" aria-label="Projectile questions">
         <ol>
-          {TOPIC_ONE_DEMONSTRATIONS.map((item, itemIndex) => {
+          {demonstrations.map((item, itemIndex) => {
             const explored = (states[item.id]?.runCount ?? 0) > 0;
 
             return (
@@ -219,6 +203,7 @@ export function ProjectilesBrowser({ onOpen }: {
         </ol>
         <p className="rail-note">Related challenges are not available yet.</p>
       </nav>
+      </div>
       <InvestigationPanel
         key={definition.id}
         definition={definition}
@@ -234,9 +219,9 @@ export function ProjectilesBrowser({ onOpen }: {
   );
 }
 
-// The topic card shows a real flight, so the topic is recognisable before it is opened.
-function ProjectilesTopicCard({ onOpen }: { onOpen(): void }) {
-  const definition = TOPIC_ONE_DEMONSTRATIONS.find((item) => item.id === "angle-sweep");
+// The topic card shows a real flight, so the topic is recognisable before it is opened: the angle question when it is published, else the first.
+function ProjectilesTopicCard({ demonstrations, onOpen }: { readonly demonstrations: readonly DemonstrationDefinition[]; onOpen(): void }) {
+  const definition = demonstrations.find((item) => item.id === "angle-sweep") ?? demonstrations[0];
   const preview = useMemo(() => {
     if (definition === undefined) return undefined;
     const parametersA = setupParameters(definition, definition.reference, definition.sharedDefaults);
@@ -272,16 +257,19 @@ function ProjectilesTopicCard({ onOpen }: { onOpen(): void }) {
         <span className="topic-kicker">Topic 1 · Mechanics</span>
         <strong>Projectiles</strong>
         <span>How things fly: launch angle and speed, gravity, mass and air resistance.</span>
-        <span className="topic-meta">{TOPIC_ONE_DEMONSTRATIONS.length} questions · predict, run and compare</span>
+        <span className="topic-meta">{demonstrations.length} questions · predict, run and compare</span>
         <span className="topic-start">Start exploring <ArrowRight size={14} /></span>
       </span>
     </button>
   );
 }
 
-export function CurriculumPage({ visible, topicOpen, error, onOpen, onRestoreDemonstration, onReturnToLab, onOpenProjectiles, onShowTopics }: {
+export function CurriculumPage({ visible, topicOpen, catalogue, onRetry, error, onOpen, onRestoreDemonstration, onReturnToLab, onOpenProjectiles, onShowTopics }: {
   readonly visible: boolean;
   readonly topicOpen: boolean;
+  // The questions as loaded from the server.
+  readonly catalogue: DemonstrationCatalogue;
+  onRetry(): void;
   readonly error: string | null;
   onOpen(selection: DemonstrationSelection): void;
   readonly onRestoreDemonstration: (() => void) | null;
@@ -290,6 +278,7 @@ export function CurriculumPage({ visible, topicOpen, error, onOpen, onRestoreDem
   onShowTopics(): void;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const projectiles = useMemo(() => catalogue.status === "ready" ? catalogue.demonstrations.filter((item) => item.topic === "projectiles") : [], [catalogue]);
 
   useEffect(() => {
     if (visible) {
@@ -297,28 +286,46 @@ export function CurriculumPage({ visible, topicOpen, error, onOpen, onRestoreDem
     }
   }, [visible, topicOpen]);
 
+  const heading = (
+    <header className="curriculum-heading">
+      <div>
+        {topicOpen && <button className="crumb-back" type="button" onClick={onShowTopics}><ArrowLeft size={13} />All topics</button>}
+        <h1 id="curriculum-title" ref={headingRef} tabIndex={-1}>
+          {topicOpen ? "Projectiles" : "Curriculum"}
+        </h1>
+        <p>{topicOpen ? "Make a prediction, run the experiment, then change something and see what happens." : "Pick a topic. Each one is a handful of questions you answer by predicting, then testing."}</p>
+      </div>
+      <div className="curriculum-actions">
+        {onRestoreDemonstration !== null && (
+          <button className="tool-btn" type="button" onClick={onRestoreDemonstration}>
+            Restore last opened scene
+          </button>
+        )}
+        <button className="tool-btn" type="button" onClick={onReturnToLab}>Return to lab</button>
+      </div>
+    </header>
+  );
+  // An open topic puts its heading above the question list, so the question itself starts at the top of the page.
+  const headingInColumn = topicOpen && projectiles.length > 0;
+
   return (
-    <main className="curriculum-shell" hidden={!visible} aria-labelledby="curriculum-title">
-      <header className="curriculum-heading">
-        <div>
-          {topicOpen && <button className="crumb-back" type="button" onClick={onShowTopics}><ArrowLeft size={13} />All topics</button>}
-          <h1 id="curriculum-title" ref={headingRef} tabIndex={-1}>
-            {topicOpen ? "Projectiles" : "Curriculum"}
-          </h1>
-          <p>{topicOpen ? "Make a prediction, run the experiment, then change something and see what happens." : "Pick a topic. Each one is a handful of questions you answer by predicting, then testing."}</p>
-        </div>
-        <div className="curriculum-actions">
-          {onRestoreDemonstration !== null && (
-            <button className="tool-btn" type="button" onClick={onRestoreDemonstration}>
-              Restore last opened scene
-            </button>
-          )}
-          <button className="tool-btn" type="button" onClick={onReturnToLab}>Return to lab</button>
-        </div>
-      </header>
+    <main className={`curriculum-shell${headingInColumn ? " is-topic" : ""}`} hidden={!visible} aria-labelledby="curriculum-title">
+      {!headingInColumn && heading}
       {error !== null && <p className="curriculum-error" role="alert">{error}</p>}
-      <div hidden={!topicOpen}><ProjectilesBrowser onOpen={onOpen} /></div>
-      {!topicOpen && <ProjectilesTopicCard onOpen={onOpenProjectiles} />}
+      {catalogue.status === "loading" && <p role="status">Loading questions…</p>}
+      {catalogue.status === "error" && (
+        <div className="curriculum-error" role="alert">
+          <p>{catalogue.message}</p>
+          <button className="tool-btn" type="button" onClick={onRetry}><RefreshCw size={13} />Try again</button>
+        </div>
+      )}
+      {catalogue.status === "ready" && projectiles.length === 0 && <p role="status">No questions are published yet.</p>}
+      {projectiles.length > 0 && (
+        <>
+          <div hidden={!topicOpen}><ProjectilesBrowser demonstrations={projectiles} heading={headingInColumn ? heading : undefined} onOpen={onOpen} /></div>
+          {!topicOpen && <ProjectilesTopicCard demonstrations={projectiles} onOpen={onOpenProjectiles} />}
+        </>
+      )}
     </main>
   );
 }

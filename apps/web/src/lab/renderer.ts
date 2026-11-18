@@ -895,6 +895,9 @@ export function mountLabRenderer(
       autoDensity: true,
       autoStart: false,
       backgroundColor: sceneColors.paper,
+      // Pixi frees GPU resources not drawn for 60 s. The lab draws only on change, so a minute on another page freed the paper
+      // texture and the page came back blue. The lab's few textures live until dispose() destroys them, so collection is off.
+      gcActive: false,
       height: Math.max(1, host.clientHeight),
       resolution: window.devicePixelRatio,
       width: Math.max(1, host.clientWidth),

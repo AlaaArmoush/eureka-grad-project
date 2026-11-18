@@ -381,5 +381,106 @@ export interface ChallengeDefinition {
 }
 
 
+// ---------- Demonstrations: the Curriculum's predict-run-compare questions ----------
+
+// A number in a demonstration's scene or frame: fixed, or taken from one chosen setting as offset + scale × value.
+export type DemonstrationNumber = number | { readonly parameter: string; readonly scale: number; readonly offset: number };
+
+export interface DemonstrationVector {
+  readonly x: DemonstrationNumber;
+  readonly y: DemonstrationNumber;
+}
+
+// One body of the scene template. A dynamic body is launched with a speed and an angle in degrees.
+export type DemonstrationBody =
+  | {
+    readonly kind: "static";
+    readonly id: string;
+    readonly widthMeters: DemonstrationNumber;
+    readonly heightMeters: DemonstrationNumber;
+    readonly restitution: number;
+    readonly positionMeters: DemonstrationVector;
+    readonly angleDegrees: DemonstrationNumber;
+  }
+  | {
+    readonly kind: "dynamic";
+    readonly id: string;
+    readonly radiusMeters: DemonstrationNumber;
+    readonly massKilograms: DemonstrationNumber;
+    readonly restitution: number;
+    readonly positionMeters: DemonstrationVector;
+    readonly launchSpeedMetersPerSecond: DemonstrationNumber;
+    readonly launchAngleDegrees: DemonstrationNumber;
+  };
+
+// The scene a demonstration builds for one choice of settings. No scene list is stored; each setup is built when asked for.
+export interface DemonstrationSceneTemplate {
+  // The built scene's id. Each {key} is replaced by the chosen value of that setting.
+  readonly id: string;
+  readonly seed: number;
+  readonly numericalProfile: NumericalProfile;
+  // Gravity points straight down with this strength.
+  readonly gravityStrengthMetersPerSecondSquared: DemonstrationNumber;
+  readonly linearDragKilogramsPerSecond: DemonstrationNumber;
+  readonly bodies: readonly DemonstrationBody[];
+}
+
+// The ideal flight a frame is sized around, from the origin down to height zero.
+// level: R = v²·sin(2θ)/g and peak = (v·sinθ)²/(2g). fall: launched horizontally from heightMeters, R = v·√(2h/g) and peak = h.
+export type DemonstrationFlight =
+  | { readonly kind: "level"; readonly speedMetersPerSecond: DemonstrationNumber; readonly angleDegrees: DemonstrationNumber; readonly gravityMetersPerSecondSquared: DemonstrationNumber }
+  | { readonly kind: "fall"; readonly speedMetersPerSecond: DemonstrationNumber; readonly heightMeters: DemonstrationNumber; readonly gravityMetersPerSecondSquared: DemonstrationNumber };
+
+// The view that shows a whole flight: from x = −left to range + right and from y = −bottom to peak + top.
+export interface DemonstrationFrame {
+  readonly flight: DemonstrationFlight;
+  readonly marginsMeters: { readonly left: number; readonly right: number; readonly bottom: number; readonly top: number };
+  readonly pixelsPerMeter: number;
+}
+
+export interface DemonstrationOption {
+  readonly value: string;
+  readonly label: string;
+}
+
+export interface DemonstrationControl {
+  readonly key: string;
+  readonly label: string;
+  readonly options: readonly DemonstrationOption[];
+}
+
+// One stored Curriculum question: two setups that differ in the primary setting, and shared settings for both. Plain data only.
+export interface SavedDemonstration {
+  readonly schemaVersion: 1;
+  readonly id: string;
+  // A published id and revision is immutable; a change is a new revision.
+  readonly revision: number;
+  readonly topic: ChallengeTopic;
+  // Position in its topic's question list, from 1.
+  readonly order: number;
+  readonly title: string;
+  readonly question: string;
+  readonly summary: string;
+  readonly prediction: {
+    readonly prompt: string;
+    readonly choices: readonly string[];
+    readonly answerIndex: number;
+    readonly reason: string;
+  };
+  readonly lookFor: string;
+  readonly scenarioReference: string;
+  readonly primary: DemonstrationControl;
+  readonly reference: string;
+  readonly comparison: string;
+  readonly shared: readonly DemonstrationControl[];
+  readonly sharedDefaults: Readonly<Record<string, string>>;
+  readonly overlays: ChallengeOverlays;
+  readonly scene: DemonstrationSceneTemplate;
+  // How the view around one setup's flight is sized.
+  readonly framing: DemonstrationFrame;
+}
+
+export { buildDemonstrationScene, demonstrationFrame, frameAround } from "./demonstration-builder.js";
+export { findDemonstrationProblems } from "./demonstration-checks.js";
 export { findChallengeDefinitionProblems } from "./challenge-checks.js";
 export { CHALLENGE_MESSAGE_TOKEN, evaluateAttempt, judgeCriterion, type ChallengeResult, type CriterionResult, type CriterionStatus } from "./challenge-evaluator.js";
