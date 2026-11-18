@@ -1,0 +1,461 @@
+{
+  "schemaVersion": 1,
+  "id": "beat-the-headwind",
+  "revision": 4,
+  "topic": "projectiles",
+  "level": "application",
+  "title": "Beat the headwind",
+  "briefing": "A headwind pushes against the capsule. The delivery hatch opens only for the shot that really flies against that drag.",
+  "scene": {
+    "schemaVersion": 1,
+    "id": "beat-the-headwind",
+    "revision": 1,
+    "seed": 17,
+    "numericalProfile": {
+      "fixedTimeStepSeconds": 0.016666666666666666,
+      "substeps": 1,
+      "scales": {
+        "lengthMeters": 1,
+        "massKilograms": 1,
+        "timeSeconds": 1
+      }
+    },
+    "environment": {
+      "gravityMetersPerSecondSquared": {
+        "x": 0,
+        "y": -9.81
+      },
+      "linearDragKilogramsPerSecond": 0.2
+    },
+    "bodies": [
+      {
+        "id": "ground",
+        "kind": "static",
+        "shape": {
+          "kind": "box",
+          "widthMeters": 1200,
+          "heightMeters": 0.5
+        },
+        "material": {
+          "restitution": 0
+        },
+        "pose": {
+          "positionMeters": {
+            "x": 0,
+            "y": -0.75
+          },
+          "angleRadians": 0
+        }
+      },
+      {
+        "id": "capsule",
+        "kind": "dynamic",
+        "shape": {
+          "kind": "circle",
+          "radiusMeters": 0.5
+        },
+        "massKilograms": 1,
+        "material": {
+          "restitution": 0
+        },
+        "pose": {
+          "positionMeters": {
+            "x": 0,
+            "y": 0
+          },
+          "angleRadians": 0
+        },
+        "velocity": {
+          "linearMetersPerSecond": {
+            "x": 13.59461680554975,
+            "y": 6.339273926110492
+          },
+          "angularRadiansPerSecond": 0
+        }
+      }
+    ],
+    "triggers": [
+      {
+        "id": "hatch",
+        "kind": "target",
+        "shape": {
+          "kind": "circle",
+          "radiusMeters": 0.5
+        },
+        "pose": {
+          "positionMeters": {
+            "x": 29.444926186472106,
+            "y": 0
+          },
+          "angleRadians": 0
+        }
+      }
+    ]
+  },
+  "projectileId": "capsule",
+  "view": {
+    "centerWorldMeters": {
+      "x": 21.5,
+      "y": 6
+    },
+    "widthMeters": 49,
+    "heightMeters": 16,
+    "pixelsPerMeter": 40
+  },
+  "overlays": {
+    "trail": true,
+    "velocity": false,
+    "components": false,
+    "prediction": true,
+    "events": true,
+    "grid": true,
+    "labels": true
+  },
+  "runLimitSeconds": 8,
+  "attemptEnds": "firstContact",
+  "editable": [
+    {
+      "property": "launchSpeed",
+      "bodyId": "capsule",
+      "label": "Launch speed",
+      "unit": "m/s",
+      "minimum": 15,
+      "maximum": 25,
+      "step": 0.1
+    },
+    {
+      "property": "launchAngle",
+      "bodyId": "capsule",
+      "label": "Launch angle",
+      "unit": "°",
+      "minimum": 25,
+      "maximum": 55,
+      "step": 0.1
+    }
+  ],
+  "locked": [
+    {
+      "property": "mass",
+      "bodyId": "capsule",
+      "label": "Capsule mass",
+      "unit": "kg",
+      "value": 1,
+      "reason": "Mass is fixed at 1 kg."
+    },
+    {
+      "property": "gravity",
+      "bodyId": null,
+      "label": "Gravity",
+      "unit": "m/s²",
+      "value": 9.81,
+      "reason": "Gravity is Earth's."
+    },
+    {
+      "property": "linearDrag",
+      "bodyId": null,
+      "label": "Air resistance b",
+      "unit": "kg/s",
+      "value": 0.2,
+      "reason": "The headwind is fixed: linear drag F = −b·v."
+    }
+  ],
+  "measurements": [
+    {
+      "id": "landingDistance",
+      "label": "Landing distance",
+      "unit": "m",
+      "decimals": 2,
+      "quantity": "contactDistance",
+      "onSurfaces": [
+        "ground"
+      ]
+    },
+    {
+      "id": "flightTime",
+      "label": "Time in air",
+      "unit": "s",
+      "decimals": 2,
+      "quantity": "contactTime",
+      "onSurfaces": [
+        "ground"
+      ]
+    },
+    {
+      "id": "dragFreeDistance",
+      "label": "Range without drag",
+      "unit": "m",
+      "decimals": 2,
+      "quantity": "dragFreeContactDistance",
+      "onSurfaces": null
+    },
+    {
+      "id": "dragFreeTime",
+      "label": "Time without drag",
+      "unit": "s",
+      "decimals": 2,
+      "quantity": "dragFreeContactTime",
+      "onSurfaces": null
+    }
+  ],
+  "objective": {
+    "summary": "Land the capsule in the delivery hatch, 0.5 m either side of the dragged landing of a 20 m/s, 40° shot, in the same time window.",
+    "criteria": [
+      {
+        "id": "range",
+        "measurement": "landingDistance",
+        "label": "Landing distance",
+        "minimum": 28.944926186472106,
+        "maximum": 29.944926186472106,
+        "uncertainty": 0.03
+      },
+      {
+        "id": "time",
+        "measurement": "flightTime",
+        "label": "Time in air",
+        "minimum": 2.275596185251795,
+        "maximum": 2.575596185251795,
+        "uncertainty": 0.01
+      }
+    ],
+    "zones": [
+      {
+        "targetId": "hatch",
+        "label": "Delivery hatch",
+        "criterionId": "range"
+      }
+    ]
+  },
+  "explanations": {
+    "success": {
+      "title": "Hatch open",
+      "message": "Against the headwind the capsule landed {landingDistance} from the rail after {flightTime}. Without drag the same launch would have gone {dragFreeDistance}."
+    },
+    "borderline": {
+      "title": "Too close to call",
+      "message": "The capsule landed {landingDistance} from the rail after {flightTime}, which is too close to the edge for the measurement uncertainty to decide. It waits for an authoritative check and does not count as a hit or a miss."
+    },
+    "invalid": {
+      "engineFailure": {
+        "title": "The run stopped",
+        "message": "The physics run reported a problem, so this attempt cannot be judged. Reset and launch again."
+      },
+      "nonFiniteValue": {
+        "title": "Unusable measurement",
+        "message": "A measured value was not a finite number, so this attempt cannot be judged. Reset and launch again."
+      },
+      "incompleteRun": {
+        "title": "The run did not finish",
+        "message": "The capsule never touched down before the run limit, so there is nothing to judge. Reset and launch again."
+      },
+      "forbiddenEdit": {
+        "title": "A locked value changed",
+        "message": "This challenge fixes some values. Reset restores them, and then you can launch again."
+      }
+    },
+    "misses": [
+      {
+        "id": "range-lost-to-drag",
+        "title": "Drag took too much range",
+        "message": "The capsule landed {landingDistance} from the rail, {range.gap} short of the hatch. With no drag this launch would have gone {dragFreeDistance}, so drag removed the difference. Launch it so the drag-free path overshoots.",
+        "when": [
+          {
+            "kind": "criterion",
+            "criterionId": "range",
+            "side": "below"
+          }
+        ]
+      },
+      {
+        "id": "overshot-the-hatch",
+        "title": "Overshot the hatch",
+        "message": "The capsule landed {landingDistance} from the rail, {range.gap} beyond the hatch. Drag took less than this launch needed it to take (drag-free range {dragFreeDistance}).",
+        "when": [
+          {
+            "kind": "criterion",
+            "criterionId": "range",
+            "side": "above"
+          }
+        ]
+      },
+      {
+        "id": "time-too-short",
+        "title": "Right range, but too quick",
+        "message": "The capsule reached the hatch distance, but after {flightTime}. That is {time.gap} less than the hatch needs (drag-free time {dragFreeTime}). A flatter launch is in the air for less time.",
+        "when": [
+          {
+            "kind": "criterion",
+            "criterionId": "time",
+            "side": "below"
+          }
+        ]
+      },
+      {
+        "id": "time-too-long",
+        "title": "Right range, but too slow",
+        "message": "The capsule reached the hatch distance, but after {flightTime}. That is {time.gap} more than the hatch needs (drag-free time {dragFreeTime}). A steeper launch stays in the air longer.",
+        "when": [
+          {
+            "kind": "criterion",
+            "criterionId": "time",
+            "side": "above"
+          }
+        ]
+      }
+    ],
+    "fallbackMiss": {
+      "title": "Missed the hatch",
+      "message": "The capsule landed {landingDistance} from the rail after {flightTime}, outside what the hatch accepts."
+    }
+  },
+  "hints": [
+    {
+      "text": "Drag pushes against the velocity the whole time, so the dragged path is shorter and steeper than the drag-free one. Compare the two paths.",
+      "reveal": null
+    },
+    {
+      "text": "Drag takes more range from a faster launch. Choose a launch whose drag-free path would overshoot the hatch, and let the headwind pull it back.",
+      "reveal": null
+    }
+  ],
+  "reset": {
+    "editableValues": "keepLast",
+    "previousTrail": "ghost"
+  },
+  "comparison": "dragFreePath",
+  "relatedDemonstrationIds": [
+    "linear-drag"
+  ],
+  "samples": [
+    {
+      "id": "headwind-success",
+      "label": "Reference launch at 20 m/s, 40°",
+      "source": "b = 0.2: R* = 29.444926186472106 m, t* = 2.425596185251795 s; drag-free R = 40.15526006165986, t = 2.620948459476205",
+      "expectedStatus": "success",
+      "expectedReasonId": "success",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "landingDistance": 29.444926186472106,
+          "flightTime": 2.425596185251795,
+          "dragFreeDistance": 40.15526006165986,
+          "dragFreeTime": 2.620948459476205
+        },
+        "firstContact": "ground"
+      }
+    },
+    {
+      "id": "headwind-miss-short",
+      "label": "Clear miss: drag shortens a slow low launch",
+      "source": "v0 = 15, θ = 25° with b = 0.2",
+      "expectedStatus": "miss",
+      "expectedReasonId": "range-lost-to-drag",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "landingDistance": 14.941465745360102,
+          "flightTime": 1.2411174832806289,
+          "dragFreeDistance": 17.56982667704078,
+          "dragFreeTime": 1.292410586362995
+        },
+        "firstContact": "ground"
+      }
+    },
+    {
+      "id": "headwind-miss-long",
+      "label": "Clear miss: a fast launch overshoots the hatch",
+      "source": "v0 = 25, θ = 40° with b = 0.2",
+      "expectedStatus": "miss",
+      "expectedReasonId": "overshot-the-hatch",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "landingDistance": 43.010008534135174,
+          "flightTime": 2.98159648559537,
+          "dragFreeDistance": 62.742593846343524,
+          "dragFreeTime": 3.276185574345256
+        },
+        "firstContact": "ground"
+      }
+    },
+    {
+      "id": "headwind-miss-quick",
+      "label": "Clear miss: right range, flown too quickly",
+      "source": "θ = 25°, v0 solved so the dragged landing is R* = 29.444926186472106: v0 = 21.776511693186315",
+      "expectedStatus": "miss",
+      "expectedReasonId": "time-too-short",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "landingDistance": 29.444926186472106,
+          "flightTime": 1.771849620019851,
+          "dragFreeDistance": 37.03067127274279,
+          "dragFreeTime": 1.876279616422103
+        },
+        "firstContact": "ground"
+      }
+    },
+    {
+      "id": "headwind-miss-slow",
+      "label": "Clear miss: right range, flown too slowly",
+      "source": "θ = 55°, v0 solved so the dragged landing is R* = 29.444926186472106: v0 = 21.510014610181543",
+      "expectedStatus": "miss",
+      "expectedReasonId": "time-too-long",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "landingDistance": 29.444926186472145,
+          "flightTime": 3.2439169510160077,
+          "dragFreeDistance": 44.319843667655356,
+          "dragFreeTime": 3.5922471846312516
+        },
+        "firstContact": "ground"
+      }
+    },
+    {
+      "id": "headwind-borderline-near-edge",
+      "label": "Borderline: dragged landing exactly 0.5 m short of R*",
+      "source": "θ = 40°, v0 solved for R = R* − 0.5: v0 = 19.802361449365364",
+      "expectedStatus": "borderline",
+      "expectedReasonId": "borderline",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "landingDistance": 28.944926186472088,
+          "flightTime": 2.4032632117267374,
+          "dragFreeDistance": 39.36555858296711,
+          "dragFreeTime": 2.595048436735257
+        },
+        "firstContact": "ground"
+      }
+    },
+    {
+      "id": "headwind-borderline-far-edge",
+      "label": "Borderline: dragged landing exactly 0.5 m beyond R*",
+      "source": "θ = 40°, v0 solved for R = R* + 0.5: v0 = 20.196479879187898",
+      "expectedStatus": "borderline",
+      "expectedReasonId": "borderline",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "landingDistance": 29.94492618647213,
+          "flightTime": 2.447770521696097,
+          "dragFreeDistance": 40.948105544801436,
+          "dragFreeTime": 2.646696641309984
+        },
+        "firstContact": "ground"
+      }
+    },
+    {
+      "id": "headwind-invalid-incomplete",
+      "label": "Invalid: the run ended before touchdown",
+      "source": "A truncated run has no landing to judge.",
+      "expectedStatus": "invalid",
+      "expectedReasonId": "incompleteRun",
+      "attempt": {
+        "runStatus": "incomplete",
+        "measurements": {},
+        "firstContact": null
+      }
+    }
+  ]
+}
