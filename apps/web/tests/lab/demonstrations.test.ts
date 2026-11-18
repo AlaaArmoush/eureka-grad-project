@@ -2,10 +2,15 @@
 import { expect, it, vi } from "vitest";
 import { createEngine } from "@eureka/engine";
 import { createLabController } from "../../src/lab/controller.js";
-import { setupParameters, TOPIC_ONE_DEMONSTRATIONS, unionFrames, type DemonstrationDefinition } from "../../src/lab/demonstrations.js";
+import { readDemonstrations, setupParameters, unionFrames, type DemonstrationDefinition } from "../../src/lab/demonstrations.js";
 import { prepareDemonstrationLoad } from "../../src/lab/demo-loading.js";
 import { runPreview } from "../../src/lab/demonstration-preview.js";
 import { fitCameraView, worldToScreen } from "../../src/lab/coordinates.js";
+
+// The Topic 1 questions as stored in the seed files, read through the same check the browser uses on the server's answer.
+const TOPIC_ONE_DEMONSTRATIONS = readDemonstrations(Object.values(import.meta.glob("../../../server/prisma/demonstrations/*.json", { eager: true, import: "default" })), (message) => {
+  throw new Error(message);
+});
 
 const STEP_SECONDS = 1 / 60;
 
@@ -82,7 +87,7 @@ it.each(TOPIC_ONE_DEMONSTRATIONS)("frames both setups of $id readably", (definit
 
 // Each cliff speed must start supported at the ledge, without a gap or penetration.
 it.each(["5", "10", "20"])("places the cliff launch at %s m/s tangent to the solid ledge", (speed) => {
-  const result = prepareDemonstrationLoad({ groupId: "cliff-launch", parameters: { speed } });
+  const result = prepareDemonstrationLoad({ groupId: "cliff-launch", parameters: { speed } }, TOPIC_ONE_DEMONSTRATIONS);
   if (!result.ok) throw new Error("The cliff setup must initialize successfully.");
   const projectile = result.value.scene.bodies.find((body) => body.kind === "dynamic");
   const cliff = result.value.scene.bodies.find((body) => body.id === "platform-1");
@@ -100,7 +105,7 @@ it.each(TOPIC_ONE_DEMONSTRATIONS.flatMap((definition) => [definition.reference, 
   title: `${definition.title} / ${definition.primary.label} ${value}`,
   selection: { groupId: definition.id, parameters: setupParameters(definition, value, definition.sharedDefaults) },
 }))))("opens $title in the normal controller at tick zero", ({ selection }) => {
-  const prepared = prepareDemonstrationLoad(selection);
+  const prepared = prepareDemonstrationLoad(selection, TOPIC_ONE_DEMONSTRATIONS);
   if (!prepared.ok) throw new Error(prepared.diagnostics.map((diagnostic) => diagnostic.message).join(" "));
 
   const scene = structuredClone(prepared.value.scene);

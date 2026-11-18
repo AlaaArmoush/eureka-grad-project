@@ -3,9 +3,15 @@ import { expect, it } from "vitest";
 import { validateScene } from "@eureka/engine";
 import { addPlatformToScene, addProjectileToScene, DEFAULT_PROJECTILE_PROPERTIES, updateProjectileInScene } from "../../src/lab/authoring.js";
 import { prepareDemonstrationLoad } from "../../src/lab/demo-loading.js";
+import { readDemonstrations } from "../../src/lab/demonstrations.js";
+
+// The Topic 1 questions as stored in the seed files, read through the same check the browser uses on the server's answer.
+const TOPIC_ONE_DEMONSTRATIONS = readDemonstrations(Object.values(import.meta.glob("../../../server/prisma/demonstrations/*.json", { eager: true, import: "default" })), (message) => {
+  throw new Error(message);
+});
 
 function sceneWithBallOnPlatform(ballY: number) {
-  const loaded = prepareDemonstrationLoad({ groupId: "angle-sweep", parameters: { angle: "45", speed: "20" } });
+  const loaded = prepareDemonstrationLoad({ groupId: "angle-sweep", parameters: { angle: "45", speed: "20" } }, TOPIC_ONE_DEMONSTRATIONS);
   if (!loaded.ok) throw new Error("The reference scene must load.");
   // Remove the demonstration ground so the platform is the only surface under the ball.
   const bare = { ...loaded.value.scene, bodies: [] };
@@ -34,7 +40,7 @@ it("leaves a ball that is not touching any surface where it was", () => {
 
 // A ball at the edge of the cliff demonstration must also stay on the ledge when enlarged.
 it("keeps the cliff-launch ball on the ledge when enlarged", () => {
-  const loaded = prepareDemonstrationLoad({ groupId: "cliff-launch", parameters: { speed: "10" } });
+  const loaded = prepareDemonstrationLoad({ groupId: "cliff-launch", parameters: { speed: "10" } }, TOPIC_ONE_DEMONSTRATIONS);
   if (!loaded.ok) throw new Error("The cliff scene must load.");
   const resized = updateProjectileInScene(loaded.value.scene, "projectile-1", { ...DEFAULT_PROJECTILE_PROPERTIES, radiusMeters: 1 }).scene;
 
