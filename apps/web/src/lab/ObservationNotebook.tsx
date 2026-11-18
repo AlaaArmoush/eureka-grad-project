@@ -57,7 +57,8 @@ export function ObservationNotebook({ snapshot, selectedEntityId }: {
           </p>
         )}
       </section>
-      <details className="event-notebook" open={events.length > 0}>
+      {/* Opens only when the learner opens it; new events update the count without expanding the list. */}
+      <details className="event-notebook">
         <summary>Recorded events <span className="count-badge">{events.length}</span></summary>
         {events.length === 0 ? <p className="panel-empty">No events reported for this selection.</p> : (
           <ul className="event-list">

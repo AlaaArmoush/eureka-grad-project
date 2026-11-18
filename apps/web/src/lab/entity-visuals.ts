@@ -2,7 +2,8 @@
 import type { Body, TargetTrigger, Vector2 } from "@eureka/contracts";
 import { Circle, Container, Graphics, Polygon } from "pixi.js";
 import { notebookLabel } from "./sketchbook.js";
-import { paintEntity, pencilEllipse, sceneColors, type PaintBounds } from "./materials.js";
+import { paintEntity, pencilEllipse, sceneColors, zoneColors, type PaintBounds } from "./materials.js";
+import type { ChallengeZoneView } from "./store.js";
 
 export function createEntityVisual(entity: Body | TargetTrigger) {
   const graphic = new Container({ eventMode: "static", cursor: "pointer" });
@@ -15,8 +16,10 @@ export function createEntityVisual(entity: Body | TargetTrigger) {
   const caption = notebookLabel(name, color);
   graphic.addChild(selection, geometry, caption);
   let paintKey = "";
+  let lastCaptionColor: number = color;
 
-  function update(scale: number, angle: number, selected: boolean, entered: boolean, labels: boolean, position: Vector2, viewportWidth: number, viewportHeight: number, moveMode: boolean): void {
+  // For a target used as a challenge zone, `entry` is the zone and its state; otherwise it is the one-tick entry flash.
+  function update(scale: number, angle: number, selected: boolean, entry: boolean | ChallengeZoneView, labels: boolean, position: Vector2, viewportWidth: number, viewportHeight: number, moveMode: boolean): void {
     const shape = entity.shape;
     let visible: PaintBounds | undefined;
     if (shape.kind === "box") {
@@ -36,12 +39,15 @@ export function createEntityVisual(entity: Body | TargetTrigger) {
         bottom: Math.min(shape.heightMeters * scale / 2, centerY + halfHeight),
       };
     }
-    const key = [scale, selected, entered, moveMode, visible?.left, visible?.right, visible?.top, visible?.bottom].join(":");
+    const zone = typeof entry === "boolean" ? undefined : entry;
+    const entered = zone === undefined ? entry === true : zone.state === "reached";
+    const targetPaint = zoneColors[zone?.state ?? "reached"];
+    const key = [scale, selected, entered, zone?.state, moveMode, visible?.left, visible?.right, visible?.top, visible?.bottom].join(":");
     const selectionColor = moveMode ? sceneColors.velocity : color;
     const selectionWash = selectionColor;
     if (key !== paintKey) {
       paintKey = key;
-      paintEntity(geometry, entity, scale, entered, visible);
+      paintEntity(geometry, entity, scale, entered, visible, targetPaint);
       selection.clear();
       if (selected && shape.kind === "circle") {
         const radius = shape.radiusMeters * scale + 8;
@@ -71,7 +77,14 @@ export function createEntityVisual(entity: Body | TargetTrigger) {
         -x * cosine + y * sine, x * sine + y * cosine,
       ]);
     }
-    caption.text = entered && entity.kind === "target" ? "Target entered ✓" : name;
+    caption.text = zone !== undefined ? zone.zone.label + (entered ? " ✓" : "") : entered && entity.kind === "target" ? "Target entered ✓" : name;
+    const captionColor = entity.kind === "target" ? targetPaint.ink : color;
+
+    // Restyle only on a change, so the caption is not re-rendered every frame.
+    if (captionColor !== lastCaptionColor) {
+      lastCaptionColor = captionColor;
+      caption.style.fill = captionColor;
+    }
     const compact = viewportWidth < 520;
     caption.style.fontSize = compact ? 15 : 17;
     caption.visible = labels && (!compact || selected || entity.kind === "target");

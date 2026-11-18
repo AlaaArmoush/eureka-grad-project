@@ -1,5 +1,5 @@
 // Supplies the portable camera-center coordinate.
-import type { Vector2 } from "@eureka/contracts";
+import type { ChallengeZone, Vector2 } from "@eureka/contracts";
 import type { CameraView } from "./coordinates.js";
 
 // Supplies a framework-independent editor store.
@@ -30,6 +30,19 @@ export interface OverlayVisibility {
   readonly labels: boolean;
 }
 
+// A target object used as a challenge zone, and where the current attempt stands with it: red until reached, green once reached, amber when too close to call.
+export interface ChallengeZoneView {
+  readonly zone: ChallengeZone;
+  readonly state: "waiting" | "reached" | "borderline" | "missed";
+}
+
+// What the open challenge draws over the scene, in world metres: its target zones, the live path and the ghost of the previous attempt.
+export interface ChallengeOverlay {
+  readonly zones: readonly ChallengeZoneView[];
+  readonly live: readonly Vector2[];
+  readonly ghosts: readonly (readonly Vector2[])[];
+}
+
 export interface LabEditorState {
   readonly cameraCenterWorldMeters: Vector2;
   readonly pixelsPerMeter: number;
@@ -41,6 +54,8 @@ export interface LabEditorState {
   readonly selectionNotice: string | null;
   selectEntity(entityId: string | null, notice?: string): void;
   readonly overlayVisibility: OverlayVisibility;
+  readonly challengeOverlay: ChallengeOverlay;
+  setChallengeOverlay(overlay: ChallengeOverlay): void;
 
   setCamera(centerWorldMeters: Vector2, pixelsPerMeter: number): void;
   setOverlayVisible(overlay: keyof OverlayVisibility, visible: boolean): void;
@@ -85,6 +100,11 @@ export const labStore = createStore<LabEditorState>()((set) => ({
     events: true,
     grid: true,
     labels: true,
+  },
+
+  challengeOverlay: { zones: [], live: [], ghosts: [] },
+  setChallengeOverlay: (challengeOverlay) => {
+    set({ challengeOverlay });
   },
 
   // Keep display choices across authored edits and canvas remounts.
