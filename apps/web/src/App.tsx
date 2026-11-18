@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 // Supply the reviewed static observation and its consecutive playback frames.
 import { PROJECTILE_LAB_MOCK, PROJECTILE_PLAYBACK_SNAPSHOTS } from "./lab/mocks.js";
 import type { MoveEntityRequest, PlacementRequest } from "./lab/authoring";
@@ -42,21 +42,31 @@ import { CanvasTools } from "./lab/CanvasTools.js";
 import { SceneInspector } from "./lab/SceneInspector.js";
 import { SceneOutline } from "./lab/SceneOutline.js";
 import { ObservationNotebook } from "./lab/ObservationNotebook.js";
+import { prepareDemonstrationLoad, type DemonstrationLoad, type DemonstrationSelection } from "./lab/demo-loading.js";
+import { ReplaceSceneDialog } from "./lab/ReplaceSceneDialog.js";
+import { CurriculumPage } from "./pages/CurriculumPage.js";
+import { createWorkspaceNavigation, type WorkspacePage } from "./navigation.js";
 
 const WORKSPACE_NAVIGATION = [
-  { label: "Workspace", items: [
-    { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
-    { id: "laboratory", label: "Physics lab", Icon: Atom },
-    { id: "experiments", label: "My experiments", Icon: FolderOpen },
-  ] },
-  { label: "Learn & teach", items: [
-    { id: "curriculum", label: "Curriculum", Icon: BookOpen },
-    { id: "challenges", label: "Challenges", Icon: Trophy },
-    { id: "classes", label: "Classes", Icon: GraduationCap },
-  ] },
-  { label: "Discover", items: [
-    { id: "gallery", label: "Community gallery", Icon: Images },
-  ] },
+  {
+    label: "Workspace", items: [
+      { id: "dashboard", label: "Dashboard", Icon: LayoutDashboard },
+      { id: "laboratory", label: "Physics lab", Icon: Atom },
+      { id: "experiments", label: "My experiments", Icon: FolderOpen },
+    ]
+  },
+  {
+    label: "Learn & teach", items: [
+      { id: "curriculum", label: "Curriculum", Icon: BookOpen },
+      { id: "challenges", label: "Challenges", Icon: Trophy },
+      { id: "classes", label: "Classes", Icon: GraduationCap },
+    ]
+  },
+  {
+    label: "Discover", items: [
+      { id: "gallery", label: "Community gallery", Icon: Images },
+    ]
+  },
 ] as const;
 
 export function App() {
@@ -67,6 +77,19 @@ export function App() {
     structuredClone(PROJECTILE_LAB_MOCK.scene),
   );
   const [labVisible, setLabVisible] = useState(true);
+  const [navigation] = useState(() => createWorkspaceNavigation(window));
+  const activePage = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot);
+  // The sidebar's Curriculum link returns to where the student left off, not to the topic list.
+  const lastCurriculumPageRef = useRef<"curriculum" | "projectiles">("curriculum");
+
+  if (activePage === "curriculum" || activePage === "projectiles") {
+    lastCurriculumPageRef.current = activePage;
+  }
+  const [activeDemonstration, setActiveDemonstration] = useState<DemonstrationSelection | null>(null);
+  const [pendingDemonstration, setPendingDemonstration] = useState<DemonstrationLoad | null>(null);
+  // The scene as last loaded; any edit replaces editableScene with a new object, so a match means untouched.
+  const pristineSceneRef = useRef(editableScene);
+  const [sceneGeneration, setSceneGeneration] = useState(0);
   const [sceneOutlineOpen, setSceneOutlineOpen] = useState(() => window.matchMedia("(min-width: 1101px)").matches);
   const [inspectorOpen, setInspectorOpen] = useState(() => window.matchMedia("(min-width: 901px)").matches);
   const [measurementsOpen, setMeasurementsOpen] = useState(true);
@@ -75,6 +98,8 @@ export function App() {
   const outlineToggleRef = useRef<HTMLButtonElement>(null);
   const inspectorToggleRef = useRef<HTMLButtonElement>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
+  const labHeadingRef = useRef<HTMLHeadingElement>(null);
+  const previousPageRef = useRef<WorkspacePage>(activePage);
   const [viewportExpanded, setViewportExpanded] = useState(false);
   const [viewportError, setViewportError] = useState<string | null>(null);
 
@@ -141,7 +166,7 @@ export function App() {
   useLayoutEffect(() => {
     const layout = viewportRef.current;
 
-    if (layout === null) {
+    if (layout === null || activePage !== "laboratory") {
       return;
     }
 
@@ -210,7 +235,7 @@ export function App() {
       layout.style.removeProperty("--canvas-height");
       layout.style.removeProperty("--scene-dock-height");
     };
-  }, []);
+  }, [activePage]);
 
   const selectedEntityId = useStore(
     labStore,
@@ -262,6 +287,79 @@ export function App() {
     setLabError(`${context}: ${details || "No diagnostic details were supplied."}`);
   }, []);
 
+  function handleDemonstrationOpen(selection: DemonstrationSelection): void {
+    const result = prepareDemonstrationLoad(selection);
+
+    if (!result.ok) {
+      reportLabResult("Demonstration unavailable", result);
+      return;
+    }
+
+    // Nothing to lose when the lab still holds the scene it loaded; otherwise ask inside the site.
+    if (editableScene === pristineSceneRef.current) {
+      applyDemonstration(result.value);
+      return;
+    }
+
+    setPendingDemonstration(result.value);
+  }
+
+  function applyDemonstration(loaded: DemonstrationLoad): void {
+    setPendingDemonstration(null);
+    controllerRef.current?.pause();
+    controllerRef.current = null;
+    setPlaybackState(null);
+
+    setDisplayedSnapshot(loaded.initialSnapshot);
+    labStore.setState({
+      selectedEntityId: loaded.selectedEntityId,
+      selectionNotice: null,
+      activeTool: { kind: "select" },
+      cameraCenterWorldMeters: { ...loaded.camera.centerWorldMeters },
+      pixelsPerMeter: loaded.camera.pixelsPerMeter,
+      cameraInitialized: true,
+      pendingCameraView: loaded.camera,
+      overlayVisibility: { ...loaded.overlays },
+    });
+
+    setActiveDemonstration(loaded.selection);
+    setSceneGeneration((generation) => generation + 1);
+    setDockTab("scene");
+    setLabVisible(true);
+    setLabError(null);
+    pristineSceneRef.current = loaded.scene;
+    setEditableScene(loaded.scene);
+    navigateTo("laboratory");
+  }
+
+
+  // Change page visibility without replacing authored data or mounted editor components.
+  function navigateTo(page: WorkspacePage): void {
+    controllerRef.current?.pause();
+
+    const editor = labStore.getState();
+    editor.setActiveTool({ ...editor.activeTool });
+
+    navigation.navigate(page);
+
+    if (window.matchMedia("(max-width: 1279px)").matches) {
+      setNavigationOpen(false);
+    }
+  }
+
+  useEffect(() => {
+    // Browser Back/Forward must pause and cancel pointer previews just like sidebar navigation.
+    controllerRef.current?.pause();
+    const editor = labStore.getState();
+    editor.setActiveTool({ ...editor.activeTool });
+    // Move focus to the heading only when arriving from another page, never on the first load.
+    if (activePage === "laboratory" && previousPageRef.current !== "laboratory") {
+      labHeadingRef.current?.focus();
+    }
+
+    previousPageRef.current = activePage;
+  }, [activePage]);
+
   // Run the requested operation through the mounted controller.
   function handlePlaybackAction(action: "play" | "pause" | "stepOnce" | "reset"): void {
     const controller = controllerRef.current;
@@ -292,7 +390,7 @@ export function App() {
   }
 
   useEffect(() => {
-    if (!labVisible) {
+    if (!labVisible || activePage !== "laboratory") {
       return;
     }
     function handleEscKey(event: KeyboardEvent) {
@@ -315,7 +413,7 @@ export function App() {
     return () => {
       window.removeEventListener("keydown", handleEscKey);
     };
-  }, [labVisible]);
+  }, [labVisible, activePage]);
   useEffect(() => {
     if (selectedEntityId === null) {
       return;
@@ -421,14 +519,25 @@ export function App() {
   return (
     <div className={`eureka-app${navigationOpen ? " navigation-open" : ""}`}>
       <aside id="eureka-navigation" className="site-rail" aria-label="Eureka">
-        <a className="brand" href="#laboratory" aria-label="Eureka laboratory" title="Eureka laboratory"><Atom size={25} /><span>Eureka<small>The physics workspace</small></span></a>
+        <a className="brand" href="#/lab" aria-label="Eureka laboratory" title="Eureka laboratory" onClick={(event) => {
+          event.preventDefault();
+          navigateTo("laboratory");
+        }}><Atom size={25} /><span>Eureka<small>The physics workspace</small></span></a>
         <button className="rail-close" type="button" aria-label="Close main navigation" onClick={() => setNavigationOpen(false)}><X size={17} /></button>
         <nav aria-label="Main navigation">
           {WORKSPACE_NAVIGATION.map((section) => (
             <div className="navigation-group" key={section.label}>
               <span className="rail-label">{section.label}</span>
-              {section.items.map(({ id, label, Icon }) => id === "laboratory" ? (
-                <a key={id} className="rail-link is-current" href="#laboratory" aria-current="page" aria-label={label} title={label}><Icon size={18} /><span>{label}</span></a>
+              {section.items.map(({ id, label, Icon }) => id === "laboratory" || id === "curriculum" ? (
+                <button
+                  key={id}
+                  className={`rail-link${activePage === id || (id === "curriculum" && activePage === "projectiles") ? " is-current" : ""}`}
+                  type="button"
+                  aria-current={activePage === id || (id === "curriculum" && activePage === "projectiles") ? "page" : undefined}
+                  aria-label={label}
+                  title={label}
+                  onClick={() => navigateTo(id === "curriculum" ? lastCurriculumPageRef.current : id)}
+                ><Icon size={18} /><span>{label}</span></button>
               ) : (
                 <button key={id} className="rail-link" type="button" aria-label={label} title={label} disabled><Icon size={18} /><span>{label}</span></button>
               ))}
@@ -445,16 +554,33 @@ export function App() {
       <div className="workspace">
         <div className="workspace-topbar">
           <button className="tool-btn navigation-toggle" type="button" aria-label="Toggle main navigation" title="Toggle main navigation" aria-expanded={navigationOpen} aria-controls="eureka-navigation" onClick={() => setNavigationOpen((open) => !open)}><PanelLeft size={18} /></button>
-          <div className="workspace-breadcrumb"><span>Workspace</span><ChevronRight size={12} /><span>Physics lab</span><ChevronRight size={12} /><strong>Projectiles</strong></div>
+          <div className="workspace-breadcrumb">
+            <span>Workspace</span><ChevronRight size={12} />
+            {activePage === "laboratory" ? (
+              <><span>Physics lab</span><ChevronRight size={12} /><strong>Projectiles</strong></>
+            ) : (
+              <><span>Curriculum</span>{activePage === "projectiles" && <><ChevronRight size={12} /><strong>Projectiles</strong></>}</>
+            )}
+          </div>
           <span className="local-status"><span className="status-dot" />Local workspace</span>
         </div>
-        <main id="laboratory" className="lab-shell">
+        <CurriculumPage
+          visible={activePage !== "laboratory"}
+          topicOpen={activePage === "projectiles"}
+          onOpenProjectiles={() => navigateTo("projectiles")}
+          onShowTopics={() => navigateTo("curriculum")}
+          error={labError}
+          onOpen={handleDemonstrationOpen}
+          onRestoreDemonstration={activeDemonstration === null ? null : () => handleDemonstrationOpen(activeDemonstration)}
+          onReturnToLab={() => navigateTo("laboratory")}
+        />
+        <main id="laboratory" className="lab-shell" hidden={activePage !== "laboratory"}>
           <header className="lab-header">
-            <div className="experiment-heading"><span className="experiment-mark"><Atom size={21} /></span><div><h1>Projectile laboratory</h1><p>Build a scene. Follow the physics.</p></div><span className="scene-badge">{activeSampleSnapshots === undefined ? "Authored scene" : "Sample scene"}</span></div>
-            <div className="header-actions">
-              <button className="tool-btn lab-power" onClick={() => setLabVisible((visible) => !visible)} type="button"><Power size={14} />{labVisible ? "Leave lab" : "Enter lab"}</button>
-            </div>
-          </header>
+          <div className="experiment-heading"><span className="experiment-mark"><Atom size={21} /></span><div><h1 ref={labHeadingRef} tabIndex={-1}>Projectile laboratory</h1><p>Build a scene. Follow the physics.</p></div><span className="scene-badge">{activeSampleSnapshots === undefined ? "Authored scene" : "Sample scene"}</span></div>
+          <div className="header-actions">
+            <button className="tool-btn lab-power" onClick={() => setLabVisible((visible) => !visible)} type="button"><Power size={14} />{labVisible ? "Leave lab" : "Enter lab"}</button>
+          </div>
+        </header>
           <div ref={viewportRef} className={`lab-layout${sceneOutlineOpen ? " scene-open" : ""}${inspectorOpen ? "" : " inspector-closed"}`}>
             <aside id="editor-panels" className="scene-dock" aria-label="Scene and object library" hidden={!sceneOutlineOpen}>
               <div className="scene-dock-tabs" aria-label="Editor panels">
@@ -463,55 +589,55 @@ export function App() {
                 <button className="dock-close" type="button" aria-label="Close editor panels" onClick={closeSceneOutline}><X size={13} /></button>
               </div>
               <div className="scene-content" hidden={dockTab !== "scene"}>
-                {sceneOutlineOpen && <SceneOutline scene={editableScene} selectedEntityId={selectedEntityId} onClose={closeSceneOutline} />}
+                {sceneOutlineOpen && <SceneOutline key={sceneGeneration} scene={editableScene} selectedEntityId={selectedEntityId} onClose={closeSceneOutline} />}
                 <button className="add-object-button" type="button" onClick={openObjectLibrary}><Plus size={14} />Add an object</button>
               </div>
-              <div className="object-library" aria-label="Object library" hidden={dockTab !== "objects"}><ObjectLibrary /></div>
+              <div className="object-library" aria-label="Object library" hidden={dockTab !== "objects"}><ObjectLibrary key={sceneGeneration} /></div>
             </aside>
             <div className="workbench-column">
               <div className="playback-bar">
                 <div className="transport-controls">
-                  <span className="playback-action" title={playbackState?.playing ? "Pause" : "Play"}>
-                    <button
-                      className="run-button"
-                      aria-label={playbackState?.playing ? "Pause" : "Play"} type="button"
-                      disabled={playbackState?.playing !== true && (!playbackReady || sampleFinished)}
-                      onClick={() => handlePlaybackAction(playbackState?.playing ? "pause" : "play")}
-                    >
-                      {playbackState?.playing ? <Pause size={14} /> : <Play size={14} />}<span>{playbackState?.playing ? "Pause" : "Run"}</span>
-                    </button>
-                  </span>
-                  <span className="playback-action" title="Step">
-                    <button
-                      aria-label="Step" type="button"
-                      disabled={!playbackReady || playbackState?.playing === true || sampleFinished}
-                      onClick={() => handlePlaybackAction("stepOnce")}
-                    >
-                      <StepForward size={14} />
-                    </button>
-                  </span>
-                  <span className="playback-action" title="Reset">
-                    <button
-                      aria-label="Reset" type="button"
-                      disabled={playbackState === null}
-                      onClick={() => handlePlaybackAction("reset")}
-                    >
-                      <RotateCcw size={14} />
-                    </button>
-                  </span>
-                  <span className="transport-divider" />
-                  <label className="visually-hidden" htmlFor="simulation-speed">Playback speed</label>
-                  <select
-                    id="simulation-speed" name="speed"
-                    value={playbackState?.speed ?? 1}
-                    disabled={playbackState === null}
-                    onChange={(event) => handleSpeedChange(event.currentTarget.value)}
+                <span className="playback-action" title={playbackState?.playing ? "Pause" : "Play"}>
+                  <button
+                    className="run-button"
+                    aria-label={playbackState?.playing ? "Pause" : "Play"} type="button"
+                    disabled={playbackState?.playing !== true && (!playbackReady || sampleFinished)}
+                    onClick={() => handlePlaybackAction(playbackState?.playing ? "pause" : "play")}
                   >
-                    {PLAYBACK_SPEEDS.map((speed) => (
-                      <option key={speed} value={speed}>{speed}×</option>
-                    ))}
-                  </select>
-                </div>
+                    {playbackState?.playing ? <Pause size={14} /> : <Play size={14} />}<span>{playbackState?.playing ? "Pause" : "Run"}</span>
+                  </button>
+                </span>
+                <span className="playback-action" title="Step">
+                  <button
+                    aria-label="Step" type="button"
+                    disabled={!playbackReady || playbackState?.playing === true || sampleFinished}
+                    onClick={() => handlePlaybackAction("stepOnce")}
+                  >
+                    <StepForward size={14} />
+                  </button>
+                </span>
+                <span className="playback-action" title="Reset">
+                  <button
+                    aria-label="Reset" type="button"
+                    disabled={playbackState === null}
+                    onClick={() => handlePlaybackAction("reset")}
+                  >
+                    <RotateCcw size={14} />
+                  </button>
+                </span>
+                <span className="transport-divider" />
+                <label className="visually-hidden" htmlFor="simulation-speed">Playback speed</label>
+                <select
+                  id="simulation-speed" name="speed"
+                  value={playbackState?.speed ?? 1}
+                  disabled={playbackState === null}
+                  onChange={(event) => handleSpeedChange(event.currentTarget.value)}
+                >
+                  {PLAYBACK_SPEEDS.map((speed) => (
+                    <option key={speed} value={speed}>{speed}×</option>
+                  ))}
+                </select>
+              </div>
                 <span className={`playback-status${playbackState?.playing ? " is-playing" : ""}`} role="status">
                   <span className="status-dot" />
                   {playbackState === null
@@ -585,13 +711,20 @@ export function App() {
               </section>
               <section className="measurement-dock" aria-label="Measurement dock">
                 <button className="measurement-toggle" type="button" aria-expanded={measurementsOpen} aria-controls="measurement-content" onClick={() => setMeasurementsOpen((open) => !open)}><Activity size={15} /><span>Measurements & events</span><span className="measurement-source">Snapshot readouts</span><ChevronDown size={14} /></button>
-                <div id="measurement-content" className="measurement-content" hidden={!measurementsOpen}><ObservationNotebook snapshot={displayedSnapshot} selectedEntityId={selectedEntityId} /></div>
+                <div id="measurement-content" className="measurement-content" hidden={!measurementsOpen}><ObservationNotebook key={sceneGeneration} snapshot={displayedSnapshot} selectedEntityId={selectedEntityId} /></div>
               </section>
             </div>
-            <div id="inspector-dock" className="inspector-dock" hidden={!inspectorOpen}><SceneInspector onClose={closeInspector} controllerRef={controllerRef} displayedSnapshot={displayedSnapshot} editableScene={editableScene} selectedEntityId={selectedEntityId} setEditableScene={setEditableScene} playing={playbackState?.playing ?? false} /></div>
+            <div id="inspector-dock" className="inspector-dock" hidden={!inspectorOpen}><SceneInspector key={sceneGeneration} onClose={closeInspector} controllerRef={controllerRef} displayedSnapshot={displayedSnapshot} editableScene={editableScene} selectedEntityId={selectedEntityId} setEditableScene={setEditableScene} playing={playbackState?.playing ?? false} /></div>
           </div>
         </main>
       </div>
+      {pendingDemonstration !== null && (
+        <ReplaceSceneDialog
+          title={pendingDemonstration.title}
+          onConfirm={() => applyDemonstration(pendingDemonstration)}
+          onCancel={() => setPendingDemonstration(null)}
+        />
+      )}
     </div>
   );
 }

@@ -7,6 +7,12 @@ import type {
   Vector2,
 } from "@eureka/contracts";
 
+// Supplies the engine's own surface geometry, so editing uses the same contact definition as validation.
+import { surfaceContactGeometry } from "@eureka/engine";
+
+// A gap this small (1 micrometre) still counts as resting on a surface when resizing.
+const SUPPORT_CONTACT_TOLERANCE_METERS = 1e-6;
+
 // Build starting conditions without changing any scene object's identity.
 export function updateEnvironmentInScene(scene: SceneDefinition, environment: SceneDefinition["environment"]): SceneDefinition {
   return {
@@ -231,6 +237,8 @@ export function updateProjectileInScene(
   const velocityY =
     properties.launchSpeedMetersPerSecond * Math.sin(angleRadians);
 
+  const staticSurfaces = scene.bodies.filter((body): body is StaticBody => body.kind === "static");
+
   const updatedBodies = scene.bodies.map((body) => {
     const isSelectedProjectile =
       body.id === projectileId && body.kind === "dynamic";
@@ -239,8 +247,27 @@ export function updateProjectileInScene(
       return body;
     }
 
+    // A ball resting on a surface grows or shrinks away from that surface, so it stays supported.
+    const radiusChange = properties.radiusMeters - body.shape.radiusMeters;
+    let positionMeters = body.pose.positionMeters;
+
+    for (const surface of staticSurfaces) {
+      const contact = surfaceContactGeometry(
+        { id: body.id, radiusMeters: body.shape.radiusMeters, positionMeters: body.pose.positionMeters },
+        surface,
+      );
+
+      if (Math.abs(contact.clearanceMeters) <= SUPPORT_CONTACT_TOLERANCE_METERS) {
+        positionMeters = {
+          x: positionMeters.x + contact.normal.x * radiusChange,
+          y: positionMeters.y + contact.normal.y * radiusChange,
+        };
+      }
+    }
+
     return {
       ...body,
+      pose: { ...body.pose, positionMeters },
       shape: {
         ...body.shape,
         radiusMeters: properties.radiusMeters,

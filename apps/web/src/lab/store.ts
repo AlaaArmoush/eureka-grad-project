@@ -1,5 +1,6 @@
 // Supplies the portable camera-center coordinate.
 import type { Vector2 } from "@eureka/contracts";
+import type { CameraView } from "./coordinates.js";
 
 // Supplies a framework-independent editor store.
 import { createStore } from "zustand/vanilla";
@@ -34,6 +35,7 @@ export interface LabEditorState {
   readonly pixelsPerMeter: number;
   readonly cameraInitialized: boolean;
   readonly cameraFitRequest: number;
+  readonly pendingCameraView: CameraView | null;
   fitCamera(): void;
   readonly selectedEntityId: string | null;
   readonly selectionNotice: string | null;
@@ -71,7 +73,8 @@ export const labStore = createStore<LabEditorState>()((set) => ({
   pixelsPerMeter: CAMERA_ZOOM.basePixelsPerMeter,
   cameraInitialized: false,
   cameraFitRequest: 0,
-  fitCamera: () => set((state) => ({ cameraFitRequest: state.cameraFitRequest + 1 })),
+  pendingCameraView: null,
+  fitCamera: () => set((state) => ({ cameraFitRequest: state.cameraFitRequest + 1, pendingCameraView: null })),
   selectedEntityId: "projectile",
   selectionNotice: null,
   overlayVisibility: {
@@ -110,6 +113,7 @@ export const labStore = createStore<LabEditorState>()((set) => ({
       },
       pixelsPerMeter,
       cameraInitialized: true,
+      pendingCameraView: null,
     });
   },
 

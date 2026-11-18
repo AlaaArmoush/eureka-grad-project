@@ -10,6 +10,7 @@ import {
   type FederatedPointerEvent,
 } from "pixi.js";
 import {
+  fitCameraView,
   screenToWorld,
   worldToScreen,
   type ViewportTransform,
@@ -473,8 +474,13 @@ export function mountLabRenderer(
   }
 
   const resizeAndRender = (): void => {
-    const width = Math.max(1, host.clientWidth);
-    const height = Math.max(1, host.clientHeight);
+    // Hidden pages retain their view instead of resizing it to a one-pixel canvas.
+    if (!initialized || disposed || host.clientWidth === 0 || host.clientHeight === 0) {
+      return;
+    }
+
+    const width = host.clientWidth;
+    const height = host.clientHeight;
 
     // Resize the canvas only when its actual display dimensions change.
     if (application.screen.width !== width || application.screen.height !== height) {
@@ -487,6 +493,19 @@ export function mountLabRenderer(
     }
 
     const editorState = labStore.getState();
+
+    // A loaded demonstration waits for the actual visible canvas dimensions.
+    if (editorState.pendingCameraView !== null) {
+      const camera = fitCameraView(editorState.pendingCameraView, width, height);
+      editorState.setCamera(camera.centerWorldMeters, camera.pixelsPerMeter);
+      return;
+    }
+
+    // First fitting waits until real visible dimensions are available.
+    if (!editorState.cameraInitialized) {
+      fitScene();
+      return;
+    }
 
     // Apply editor choices without changing the physical snapshot.
     const toolCursor = panState !== null || dragState !== null ? "grabbing" :
@@ -525,6 +544,7 @@ export function mountLabRenderer(
         editorState.overlayVisibility.labels,
         worldToScreen(item.positionMeters, viewport),
         width,
+        height,
         editorState.activeTool.kind === "move",
       );
     }
@@ -945,6 +965,7 @@ export function mountLabRenderer(
         state.cameraCenterWorldMeters !==
         previousState.cameraCenterWorldMeters ||
         state.pixelsPerMeter !== previousState.pixelsPerMeter ||
+        state.pendingCameraView !== previousState.pendingCameraView ||
         state.selectedEntityId !== previousState.selectedEntityId ||
         state.activeTool !== previousState.activeTool ||
         state.overlayVisibility !== previousState.overlayVisibility
@@ -957,8 +978,6 @@ export function mountLabRenderer(
       }
     });
     updateSnapshot(currentSnapshot);
-
-    if (!labStore.getState().cameraInitialized) fitScene();
   };
 
   void initialize().catch((error: unknown) => {

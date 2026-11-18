@@ -2,7 +2,7 @@
 import type { Body, TargetTrigger, Vector2 } from "@eureka/contracts";
 import { Circle, Container, Graphics, Polygon } from "pixi.js";
 import { notebookLabel } from "./sketchbook.js";
-import { paintEntity, pencilEllipse, sceneColors } from "./materials.js";
+import { paintEntity, pencilEllipse, sceneColors, type PaintBounds } from "./materials.js";
 
 export function createEntityVisual(entity: Body | TargetTrigger) {
   const graphic = new Container({ eventMode: "static", cursor: "pointer" });
@@ -16,14 +16,32 @@ export function createEntityVisual(entity: Body | TargetTrigger) {
   graphic.addChild(selection, geometry, caption);
   let paintKey = "";
 
-  function update(scale: number, angle: number, selected: boolean, entered: boolean, labels: boolean, position: Vector2, viewportWidth: number, moveMode: boolean): void {
-    const key = [scale, selected, entered, moveMode].join(":");
+  function update(scale: number, angle: number, selected: boolean, entered: boolean, labels: boolean, position: Vector2, viewportWidth: number, viewportHeight: number, moveMode: boolean): void {
     const shape = entity.shape;
+    let visible: PaintBounds | undefined;
+    if (shape.kind === "box") {
+      // Rotate the padded viewport back into the body's local drawing coordinates.
+      const cosine = Math.cos(angle);
+      const sine = Math.sin(angle);
+      const dx = viewportWidth / 2 - position.x;
+      const dy = viewportHeight / 2 - position.y;
+      const centerX = cosine * dx - sine * dy;
+      const centerY = sine * dx + cosine * dy;
+      const halfWidth = Math.abs(cosine) * (viewportWidth / 2 + 24) + Math.abs(sine) * (viewportHeight / 2 + 24);
+      const halfHeight = Math.abs(sine) * (viewportWidth / 2 + 24) + Math.abs(cosine) * (viewportHeight / 2 + 24);
+      visible = {
+        left: Math.max(-shape.widthMeters * scale / 2, centerX - halfWidth),
+        right: Math.min(shape.widthMeters * scale / 2, centerX + halfWidth),
+        top: Math.max(-shape.heightMeters * scale / 2, centerY - halfHeight),
+        bottom: Math.min(shape.heightMeters * scale / 2, centerY + halfHeight),
+      };
+    }
+    const key = [scale, selected, entered, moveMode, visible?.left, visible?.right, visible?.top, visible?.bottom].join(":");
     const selectionColor = moveMode ? sceneColors.velocity : color;
     const selectionWash = selectionColor;
     if (key !== paintKey) {
       paintKey = key;
-      paintEntity(geometry, entity, scale, entered);
+      paintEntity(geometry, entity, scale, entered, visible);
       selection.clear();
       if (selected && shape.kind === "circle") {
         const radius = shape.radiusMeters * scale + 8;

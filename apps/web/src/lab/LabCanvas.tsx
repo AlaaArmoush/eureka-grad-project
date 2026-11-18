@@ -1,5 +1,4 @@
-// Supplies the React mount reference and lifecycle effect.
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 // Supplies the portable scene and snapshot records.
 import type { SceneDefinition, Snapshot } from "@eureka/contracts";
 // Creates the headless physical-state owner for this mounted lab.
@@ -62,7 +61,7 @@ export function LabCanvas(props: {
   // Keep the same Pixi application across accepted authoring edits.
   const rendererRef = useRef<LabRenderer | null>(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const host = hostRef.current;
 
     if (host === null) {

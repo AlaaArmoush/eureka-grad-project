@@ -1,6 +1,14 @@
 import type { Body, TargetTrigger } from "@eureka/contracts";
 import { Graphics, Texture } from "pixi.js";
 
+// Visible screen area expressed in the object's own drawing coordinates.
+export interface PaintBounds {
+  readonly left: number;
+  readonly right: number;
+  readonly top: number;
+  readonly bottom: number;
+}
+
 // Pencil and pigment belong to the renderer; collision geometry stays exact.
 export const sceneColors = {
   paper: 0xfff3d7,
@@ -99,16 +107,24 @@ export function pencilEllipse(g: Graphics, x: number, y: number, radiusX: number
   g.ellipse(x, y, radiusX, radiusY).stroke({ color, width, alpha: .78 });
 }
 
-function hatchRect(g: Graphics, width: number, height: number, color: number, spacing = 9): void {
-  const left = -width / 2 + 2;
-  const right = width / 2 - 2;
-  const top = -height / 2 + 2;
-  const bottom = height / 2 - 2;
+function hatchRect(g: Graphics, width: number, height: number, color: number, spacing = 9, visible?: PaintBounds): void {
+  const surfaceLeft = -width / 2 + 2;
+  const surfaceTop = -height / 2 + 2;
+  const left = Math.max(surfaceLeft, visible?.left ?? -Infinity);
+  const right = Math.min(width / 2 - 2, visible?.right ?? Infinity);
+  const top = Math.max(surfaceTop, visible?.top ?? -Infinity);
+  const bottom = Math.min(height / 2 - 2, visible?.bottom ?? Infinity);
   if (right <= left || bottom <= top) return;
-  for (let start = left - (bottom - top); start < right; start += spacing) {
-    const from = Math.max(left, start);
-    const to = Math.min(right, start + bottom - top);
-    g.moveTo(from, bottom - (from - start)).lineTo(to, bottom - (to - start));
+
+  // Keep the pencil pattern anchored to the body while drawing only visible lines.
+  const origin = surfaceLeft + surfaceTop;
+  const first = Math.ceil((left + top - origin) / spacing);
+  const last = Math.floor((right + bottom - origin) / spacing);
+  for (let index = first; index <= last; index++) {
+    const intercept = origin + index * spacing;
+    const from = Math.max(left, intercept - bottom);
+    const to = Math.min(right, intercept - top);
+    g.moveTo(from, intercept - from).lineTo(to, intercept - to);
   }
   g.stroke({ color, width: .75, alpha: .24, cap: "round" });
 }
@@ -155,6 +171,12 @@ function paintTarget(g: Graphics, radius: number, entered: boolean): void {
 }
 
 function paintBall(g: Graphics, radius: number): void {
+  // Fine pencil texture cannot fit inside a sub-ten-pixel ball.
+  if (radius < 5) {
+    g.circle(0, 0, radius).fill(sceneColors.projectile)
+      .stroke({ color: sceneColors.reference, width: Math.min(.8, radius * .4) });
+    return;
+  }
   g.ellipse(1, radius + 2, radius * 1.05, Math.max(1, radius * .22)).fill({ color: 0x7b6550, alpha: .06 });
   g.circle(0, 0, radius).fill(sceneColors.projectile);
   // A quiet shaded rim and upper-left wash give the pigment some depth.
@@ -171,17 +193,17 @@ function paintBall(g: Graphics, radius: number): void {
   g.arc(-radius * .03, -radius * .03, radius * .7, Math.PI * 1.04, Math.PI * 1.48).stroke({ color: 0xffdfae, width: 1.2, alpha: .7, cap: "round" });
 }
 
-function paintGround(g: Graphics, width: number, height: number): void {
+function paintGround(g: Graphics, width: number, height: number, visible?: PaintBounds): void {
   g.rect(-width / 2, -height / 2 + 3, width, height).fill({ color: 0x74654a, alpha: .04 });
   g.rect(-width / 2, -height / 2, width, height).fill({ color: 0x66bd7d, alpha: .95 });
   g.rect(-width / 2, -height / 2 + 2, width, height * .24).fill({ color: 0xc4ed86, alpha: .5 });
   paintPigmentGrain(g, width, height, sceneColors.ground);
-  hatchRect(g, width, height, sceneColors.ground, 10);
+  hatchRect(g, width, height, sceneColors.ground, 10, visible);
   g.rect(-width / 2, -height / 2, width, height).stroke({ color: sceneColors.ground, width: 1, alpha: .9 });
   g.moveTo(-width / 2, -height / 2).lineTo(width / 2, -height / 2).stroke({ color: sceneColors.ground, width: 1.6, alpha: 1 });
 }
 
-function paintSurface(g: Graphics, width: number, height: number, ramp: boolean): void {
+function paintSurface(g: Graphics, width: number, height: number, ramp: boolean, visible?: PaintBounds): void {
   const edge = ramp ? sceneColors.ramp : sceneColors.platform;
   const pigment = ramp ? 0xf5b82f : 0x32b6c7;
   g.rect(-width / 2 + 1, -height / 2 + 2, width, height).fill({ color: 0x6d6251, alpha: .05 });
@@ -190,7 +212,7 @@ function paintSurface(g: Graphics, width: number, height: number, ramp: boolean)
     g.rect(-width / 2 + 1, -height / 2 + 1, width - 2, Math.min(height - 2, Math.max(1, height * .25))).fill({ color: ramp ? 0xffe77f : 0xa2f1e3, alpha: .55 });
   }
   paintPigmentGrain(g, width, height, edge);
-  hatchRect(g, width, height, edge, 8);
+  hatchRect(g, width, height, edge, 8, visible);
   g.rect(-width / 2, -height / 2, width, height).stroke({ color: edge, width: 1.1, alpha: .85 });
   g.moveTo(-width / 2, -height / 2).lineTo(width / 2, -height / 2).stroke({ color: edge, width: 1.4, alpha: .9 });
   if (width > 38 && height > 9) {
@@ -200,7 +222,7 @@ function paintSurface(g: Graphics, width: number, height: number, ramp: boolean)
   }
 }
 
-export function paintEntity(g: Graphics, entity: Body | TargetTrigger, pixelsPerMeter: number, targetEntered: boolean): void {
+export function paintEntity(g: Graphics, entity: Body | TargetTrigger, pixelsPerMeter: number, targetEntered: boolean, visible?: PaintBounds): void {
   g.clear();
   const shape = entity.shape;
   if (shape.kind === "circle") {
@@ -211,6 +233,6 @@ export function paintEntity(g: Graphics, entity: Body | TargetTrigger, pixelsPer
   }
   const width = shape.widthMeters * pixelsPerMeter;
   const height = shape.heightMeters * pixelsPerMeter;
-  if (entity.id.toLowerCase().includes("ground")) paintGround(g, width, height);
-  else paintSurface(g, width, height, entity.id.toLowerCase().includes("ramp"));
+  if (entity.id.toLowerCase().includes("ground")) paintGround(g, width, height, visible);
+  else paintSurface(g, width, height, entity.id.toLowerCase().includes("ramp"), visible);
 }
