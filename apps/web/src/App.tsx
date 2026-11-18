@@ -366,6 +366,8 @@ export function App() {
     challenge.end();
     setActiveDemonstration(loaded.selection);
     applyLoad(loaded);
+    // The overlay's ghost paths also carry a demonstration's reference flight; a challenge or the next load replaces them.
+    labStore.getState().setChallengeOverlay({ zones: [], live: [], ghosts: loaded.referencePaths });
   }
 
   function applyChallenge(loaded: ChallengeLoad): void {

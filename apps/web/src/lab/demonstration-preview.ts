@@ -32,6 +32,9 @@ export function runPreview(scene: SceneDefinition): readonly PreviewBall[] | und
     const start = new Map(balls.map((ball) => [ball.id, ball.pose.positionMeters]));
     const trails = new Map<string, Vector2[]>(balls.map((ball) => [ball.id, [{ ...ball.pose.positionMeters }]]));
     const landedAt = new Map<string, number>();
+    // The ball's centre at the moment it touched down, from the engine's contact event rather than the end of that tick.
+    const landingPoint = new Map<string, Vector2>();
+    const radii = new Map(balls.map((ball) => [ball.id, ball.shape.radiusMeters]));
     // A ball launched from a ledge touches it for a tick; only contact after leaving it is a landing.
     const airborne = new Set<string>();
     const peaks = new Map(balls.map((ball) => [ball.id, 0]));
@@ -61,8 +64,8 @@ export function runPreview(scene: SceneDefinition): readonly PreviewBall[] | und
         peaks.set(body.id, Math.max(peaks.get(body.id) ?? 0, body.pose.positionMeters.y - origin.y));
       }
 
-      const touching = new Set(
-        snapshot.value.events.flatMap((event) => event.kind === "groundContact" && event.tick === snapshot.value.tick ? [event.bodyId] : []),
+      const contacts = new Map(
+        snapshot.value.events.flatMap((event) => event.kind === "groundContact" && event.tick === snapshot.value.tick ? [[event.bodyId, event] as const] : []),
       );
 
       for (const ball of balls) {
@@ -70,10 +73,18 @@ export function runPreview(scene: SceneDefinition): readonly PreviewBall[] | und
           continue;
         }
 
-        if (!touching.has(ball.id)) {
+        const contact = contacts.get(ball.id);
+
+        if (contact === undefined) {
           airborne.add(ball.id);
         } else if (airborne.has(ball.id)) {
-          landedAt.set(ball.id, snapshot.value.simulationTimeSeconds);
+          const radius = radii.get(ball.id) ?? 0;
+          const point = { x: contact.pointMeters.x + contact.normal.x * radius, y: contact.pointMeters.y + contact.normal.y * radius };
+          landedAt.set(ball.id, contact.timeSeconds);
+          landingPoint.set(ball.id, point);
+          // End the drawn path where the ball touched, not where the rest of the tick carried it.
+          const trail = trails.get(ball.id);
+          trail?.splice(trail.length - 1, 1, point);
         }
       }
     }
@@ -91,7 +102,7 @@ export function runPreview(scene: SceneDefinition): readonly PreviewBall[] | und
         trail,
         landed: landedAt.has(ball.id),
         flightTimeSeconds: landedAt.get(ball.id) ?? stepLimit * stepSeconds,
-        rangeMeters: last.x - ball.pose.positionMeters.x,
+        rangeMeters: (landingPoint.get(ball.id) ?? last).x - ball.pose.positionMeters.x,
         peakHeightMeters: peaks.get(ball.id) ?? 0,
       };
     });
