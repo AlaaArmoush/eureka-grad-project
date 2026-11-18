@@ -236,7 +236,6 @@ export function PropertiesPanel(props: {
               </dd>
             </Fragment>
           ))}
-          <dt>Rotation</dt><dd>{(selectedPose.angleRadians * 180 / Math.PI).toFixed(2)}°</dd>
         </dl>
       )}
       {positionEditError !== null && <p className="coordinate-error" role="alert">{positionEditError}</p>}

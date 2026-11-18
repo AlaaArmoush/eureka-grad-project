@@ -8,6 +8,25 @@ export interface ViewportTransform {
   readonly centerWorldMeters: Vector2;
 }
 
+export interface CameraView {
+  readonly centerWorldMeters: Vector2;
+  readonly widthMeters: number;
+  readonly heightMeters: number;
+  readonly pixelsPerMeter: number;
+}
+
+// Fit a saved world view into the real canvas instead of imposing desktop zoom on a narrow screen.
+export function fitCameraView(view: CameraView, widthPixels: number, heightPixels: number): Pick<ViewportTransform, "centerWorldMeters" | "pixelsPerMeter"> {
+  return {
+    centerWorldMeters: { ...view.centerWorldMeters },
+    pixelsPerMeter: Math.max(.01, Math.min(
+      view.pixelsPerMeter,
+      Math.max(1, widthPixels - 64) / view.widthMeters,
+      Math.max(1, heightPixels - 112) / view.heightMeters,
+    )),
+  };
+}
+
 export function worldToScreen(
   worldPoint: Vector2,
   viewport: ViewportTransform

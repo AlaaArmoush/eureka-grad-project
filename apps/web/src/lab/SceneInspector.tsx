@@ -1,6 +1,7 @@
 import { useState, type ComponentProps } from "react";
 import { Eye, SlidersHorizontal, X } from "lucide-react";
 import { useStore } from "zustand";
+import { NumberField } from "./NumberField.js";
 import { PropertiesPanel } from "./PropertiesPanel.js";
 import { labStore } from "./store.js";
 
@@ -16,8 +17,85 @@ const OVERLAY_OPTIONS = [
 
 // Keep selected-object properties and identity in one stable inspector.
 export function SceneInspector({ onClose, ...props }: ComponentProps<typeof PropertiesPanel> & { onClose(): void }) {
-  const [activeTab, setActiveTab] = useState<"properties" | "display">("properties");
+  const [activeTab, setActiveTab] = useState<"properties" | "environment" | "display">("properties");
   const overlayVisibility = useStore(labStore, (state) => state.overlayVisibility);
+  const environmentScope = JSON.stringify([props.editableScene.id, props.editableScene.revision]);
+  // Present gravity as strength, while retaining the scene's stored direction.
+  const gravity = props.editableScene.environment.gravityMetersPerSecondSquared;
+  const gravityStrength = Math.hypot(gravity.x, gravity.y);
+  const gravityDirectionDegrees = gravityStrength === 0
+    ? -90
+    : Math.atan2(gravity.y, gravity.x) * 180 / Math.PI;
+  const [environmentError, setEnvironmentError] = useState<{ scope: string; message: string } | null>(null);
+
+  // Commit friendly environment inputs through the existing new-run boundary.
+  function applyEnvironment(formElement: HTMLFormElement): void {
+    const form = new FormData(formElement);
+    const read = (name: string) => String(form.get(name) ?? "").trim();
+    const strengthText = read("environment-gravity");
+    const directionText = read("environment-direction");
+    const dragText = read("environment-drag");
+
+    function reject(message: string): void {
+      formElement.reset();
+      setEnvironmentError({ scope: environmentScope, message });
+    }
+
+    if ([strengthText, directionText, dragText].some((text) => text === "")) {
+      reject("Every environment field is required.");
+      return;
+    }
+
+    const strength = Number(strengthText);
+    const direction = Number(directionText);
+    const drag = Number(dragText);
+
+    if (![strength, direction, drag].every(Number.isFinite) || strength < 0 || drag < 0) {
+      reject("Enter finite values. Gravity strength and drag cannot be negative.");
+      return;
+    }
+
+    const controller = props.controllerRef.current;
+
+    if (controller === null) {
+      reject("The laboratory is not available.");
+      return;
+    }
+
+    // Keep unchanged gravity exact, including when only air resistance changes.
+    let nextGravity = gravity;
+
+    if (strength !== gravityStrength || direction !== gravityDirectionDegrees) {
+      const normalizedDirection = ((direction % 360) + 360) % 360;
+      const radians = normalizedDirection * Math.PI / 180;
+
+      nextGravity = {
+        x: normalizedDirection === 90 || normalizedDirection === 270
+          ? 0
+          : strength * Math.cos(radians),
+        y: normalizedDirection === 0 || normalizedDirection === 180
+          ? 0
+          : strength * Math.sin(radians),
+      };
+    }
+
+    const result = controller.updateEnvironment({
+      gravityMetersPerSecondSquared: nextGravity,
+      linearDragKilogramsPerSecond: drag,
+    });
+
+    if (!result.ok) {
+      const details = result.diagnostics
+        .map((diagnostic) => diagnostic.message || diagnostic.code)
+        .join(" ");
+
+      reject(`Settings rejected: ${details}`);
+      return;
+    }
+
+    setEnvironmentError(null);
+    props.setEditableScene(result.value);
+  }
 
   return (
     <aside className="scene-inspector" aria-label="Scene inspector">
@@ -29,17 +107,52 @@ export function SceneInspector({ onClose, ...props }: ComponentProps<typeof Prop
         if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
           return;
         }
+
         event.preventDefault();
-        const nextTab = event.key === "Home" ? "properties" : event.key === "End" ? "display" : activeTab === "properties" ? "display" : "properties";
-        setActiveTab(nextTab);
-        event.currentTarget.querySelector<HTMLButtonElement>(`#inspector-tab-${nextTab}`)?.focus();
+        const tabs = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]'));
+        const currentIndex = tabs.findIndex((tab) => tab.id === `inspector-tab-${activeTab}`);
+        const nextIndex = event.key === "Home" ? 0
+          : event.key === "End" ? tabs.length - 1
+            : event.key === "ArrowRight" ? (currentIndex + 1) % tabs.length
+              : (currentIndex + tabs.length - 1) % tabs.length;
+
+        tabs[nextIndex]?.click();
+        tabs[nextIndex]?.focus();
       }}>
-        <button id="inspector-tab-properties" type="button" role="tab" aria-selected={activeTab === "properties"} aria-controls="inspector-properties" tabIndex={activeTab === "properties" ? 0 : -1} onClick={() => setActiveTab("properties")}><SlidersHorizontal size={13} />Properties</button>
+        <button id="inspector-tab-properties" type="button" role="tab" aria-selected={activeTab === "properties"} aria-controls="inspector-properties" tabIndex={activeTab === "properties" ? 0 : -1} onClick={() => setActiveTab("properties")}>Object</button>
+        <button id="inspector-tab-environment" type="button" role="tab" aria-selected={activeTab === "environment"} aria-controls="inspector-environment" tabIndex={activeTab === "environment" ? 0 : -1} onClick={() => setActiveTab("environment")}>Environment</button>
         <button id="inspector-tab-display" type="button" role="tab" aria-selected={activeTab === "display"} aria-controls="inspector-display" tabIndex={activeTab === "display" ? 0 : -1} onClick={() => setActiveTab("display")}><Eye size={13} />Display</button>
       </div>
       <div id="inspector-properties" role="tabpanel" aria-labelledby="inspector-tab-properties" hidden={activeTab !== "properties"}>
         <PropertiesPanel {...props} />
         <footer className="inspector-footer"><span>Object ID</span><code>{props.selectedEntityId ?? "—"}</code></footer>
+      </div>
+      <div id="inspector-environment" role="tabpanel" aria-labelledby="inspector-tab-environment" hidden={activeTab !== "environment"}>
+        <section className="properties" aria-label="Scene environment">
+          <form
+            className="property-editor-inline environment-form"
+            key={environmentScope}
+            onSubmit={(event) => {
+              event.preventDefault();
+              applyEnvironment(event.currentTarget);
+            }}
+            onReset={() => setEnvironmentError(null)}
+          >
+            <NumberField label="Gravity (m/s²)" name="environment-gravity" defaultValue={gravityStrength} rule="nonnegative" />
+            <NumberField label="Linear drag (kg/s)" name="environment-drag" defaultValue={props.editableScene.environment.linearDragKilogramsPerSecond} rule="nonnegative" />
+            <details className="gravity-direction">
+              <summary>Gravity direction</summary>
+              <NumberField label="Gravity direction (° counterclockwise from right)" name="environment-direction" defaultValue={gravityDirectionDegrees} />
+            </details>
+            {environmentError?.scope === environmentScope && (
+              <p role="alert">{environmentError.message}</p>
+            )}
+            <div className="property-editor-inline__actions">
+              <button type="reset">Cancel</button>
+              <button type="submit" disabled={props.playing ?? false}>Apply as new run</button>
+            </div>
+          </form>
+        </section>
       </div>
       <div id="inspector-display" className="display-panel" role="tabpanel" aria-labelledby="inspector-tab-display" hidden={activeTab !== "display"}>
         <h3>Viewport overlays</h3>

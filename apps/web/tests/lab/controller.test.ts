@@ -654,6 +654,7 @@ it.each([
   { name: "target properties", edit: (c: LabController) => c.updateTargetProperties("target", DEFAULT_TARGET_PROPERTIES) },
   { name: "paused movement", edit: (c: LabController) => c.moveEntityWhilePaused("projectile", { x: 20, y: 20 }) },
   { name: "deletion", edit: (c: LabController) => c.deleteEntity("projectile") },
+  { name: "starting environment", edit: (c: LabController) => c.updateEnvironment(c.copyScene().environment) },
 ])("rejects $name while playing", ({ edit }) => {
   const h = createPlaybackHarness();
   const startingScene = h.controller.copyScene();
@@ -733,6 +734,88 @@ it("rejects coordinate editing for an object that no longer exists", () => {
   expect(h.controller.moveEntityWhilePaused("removed-projectile", { x: 2, y: 3 })).toMatchObject({
     ok: false,
     diagnostics: [{ code: "UNKNOWN_ENTITY_ID", entityId: "removed-projectile" }],
+  });
+  expect(h.controller.copyScene()).toEqual(accepted);
+});
+
+// These are authoring inputs, not predicted trajectories: zero, reversed and horizontal gravity are valid.
+it.each([
+  { gravity: { x: 0, y: 0 }, drag: 0 },
+  { gravity: { x: 0, y: 1.62 }, drag: 0.1 },
+  { gravity: { x: -1.62, y: 0 }, drag: 0.5 },
+])("accepts starting gravity $gravity and drag $drag without changing object identity", ({ gravity, drag }) => {
+  const h = createPlaybackHarness();
+  const before = h.controller.copyScene();
+  const environment = { gravityMetersPerSecondSquared: gravity, linearDragKilogramsPerSecond: drag };
+  const result = h.controller.updateEnvironment(environment);
+
+  expect(result.ok).toBe(true);
+
+  if (!result.ok) {
+    throw new Error("Valid starting environment settings should be accepted.");
+  }
+
+  expect(result.value).toEqual({ ...before, revision: before.revision + 1, environment });
+  expect(h.controller.copyScene()).toEqual(result.value);
+  expect(h.engine.enqueue).not.toHaveBeenCalled();
+  expect(h.engine.advance).not.toHaveBeenCalled();
+  expect(h.engine.reset).not.toHaveBeenCalled();
+});
+
+// Rejection must preserve a previously accepted edit, including its revision and all objects.
+it.each([
+  { name: "NaN gravity X", gravity: { x: Number.NaN, y: 0 }, drag: 0 },
+  { name: "infinite gravity Y", gravity: { x: 0, y: Number.POSITIVE_INFINITY }, drag: 0 },
+  { name: "negative drag", gravity: { x: 0, y: 0 }, drag: -0.1 },
+  { name: "infinite drag", gravity: { x: 0, y: 0 }, drag: Number.POSITIVE_INFINITY },
+])("preserves the accepted authored scene after $name", ({ gravity, drag }) => {
+  const h = createPlaybackHarness();
+  expect(h.controller.updateEnvironment({
+    gravityMetersPerSecondSquared: { x: 0, y: 1.62 },
+    linearDragKilogramsPerSecond: 0.1,
+  }).ok).toBe(true);
+  const accepted = h.controller.copyScene();
+
+  expect(h.controller.updateEnvironment({
+    gravityMetersPerSecondSquared: gravity,
+    linearDragKilogramsPerSecond: drag,
+  }).ok).toBe(false);
+  expect(h.controller.copyScene()).toEqual(accepted);
+  expect(h.engine.enqueue).not.toHaveBeenCalled();
+});
+
+// Caller-owned form data and the returned result cannot become mutable handles into controller state.
+it("owns an independent copy of accepted environment settings", () => {
+  const h = createPlaybackHarness();
+  const environment = {
+    gravityMetersPerSecondSquared: { x: 0, y: -1.62 },
+    linearDragKilogramsPerSecond: 0.1,
+  };
+  const result = h.controller.updateEnvironment(environment);
+  expect(result.ok).toBe(true);
+
+  if (!result.ok) {
+    throw new Error("Valid environment settings should be accepted.");
+  }
+
+  const accepted = h.controller.copyScene();
+  environment.gravityMetersPerSecondSquared.y = 100;
+  environment.linearDragKilogramsPerSecond = 100;
+  expect(h.controller.copyScene()).toEqual(accepted);
+  expect(result.value).toEqual(accepted);
+  expect(result.value.environment).not.toBe(environment);
+  expect(result.value.environment).not.toBe(h.controller.copyScene().environment);
+});
+
+// An obsolete inspector callback must fail after its controller's lifetime ends.
+it("rejects starting environment changes after disposal", () => {
+  const h = createPlaybackHarness();
+  const accepted = h.controller.copyScene();
+  expect(h.controller.dispose().ok).toBe(true);
+
+  expect(h.controller.updateEnvironment(accepted.environment)).toMatchObject({
+    ok: false,
+    diagnostics: [{ code: "DISPOSED_ENGINE" }],
   });
   expect(h.controller.copyScene()).toEqual(accepted);
 });
