@@ -47,6 +47,7 @@ import { ChallengePanel } from "./lab/ChallengePanel.js";
 import { useChallengeSession } from "./lab/useChallengeSession.js";
 import { ReplaceSceneDialog } from "./lab/ReplaceSceneDialog.js";
 import { CurriculumPage } from "./pages/CurriculumPage.js";
+import { useDemonstrationCatalogue } from "./lab/demonstration-client.js";
 import { ChallengesPage } from "./pages/ChallengesPage.js";
 import { createWorkspaceNavigation, type WorkspacePage } from "./navigation.js";
 
@@ -89,6 +90,8 @@ export function App() {
     lastCurriculumPageRef.current = activePage;
   }
   const [activeDemonstration, setActiveDemonstration] = useState<DemonstrationSelection | null>(null);
+  // The Curriculum questions, loaded from the server once; the lab works without them.
+  const demonstrationCatalogue = useDemonstrationCatalogue();
   const [pendingLoad, setPendingLoad] = useState<{ readonly title: string; apply(): void } | null>(null);
   const pristineSceneRef = useRef(editableScene);
   const [sceneGeneration, setSceneGeneration] = useState(0);
@@ -298,7 +301,8 @@ export function App() {
   }, [reportEngineFailure]);
 
   function handleDemonstrationOpen(selection: DemonstrationSelection): void {
-    const result = prepareDemonstrationLoad(selection);
+    const demonstrations = demonstrationCatalogue.catalogue.status === "ready" ? demonstrationCatalogue.catalogue.demonstrations : [];
+    const result = prepareDemonstrationLoad(selection, demonstrations);
 
     if (!result.ok) {
       reportLabResult("Demonstration unavailable", result);
@@ -630,6 +634,8 @@ export function App() {
         <CurriculumPage
           visible={activePage === "curriculum" || activePage === "projectiles"}
           topicOpen={activePage === "projectiles"}
+          catalogue={demonstrationCatalogue.catalogue}
+          onRetry={demonstrationCatalogue.retry}
           onOpenProjectiles={() => navigateTo("projectiles")}
           onShowTopics={() => navigateTo("curriculum")}
           error={labError}

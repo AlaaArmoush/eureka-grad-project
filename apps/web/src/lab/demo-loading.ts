@@ -2,7 +2,7 @@ import type { ChallengeDefinition, SceneDefinition, Snapshot } from "@eureka/con
 import { createEngine, type EngineResult } from "@eureka/engine";
 import type { CameraView } from "./coordinates.js";
 import { applyValues, checkValue, findLockViolations, initialValues, valueKey, type ChallengeValues } from "./challenge-player.js";
-import { resolveParameters, TOPIC_ONE_DEMONSTRATIONS, type DemonstrationDefinition, type DemonstrationParameters } from "./demonstrations.js";
+import { resolveParameters, type DemonstrationDefinition, type DemonstrationParameters } from "./demonstrations.js";
 
 // What every load into the lab supplies, whatever it was loaded from.
 export interface SceneLoad {
@@ -57,9 +57,9 @@ function prepareSceneLoad(title: string, scene: SceneDefinition, selectedEntityI
   }
 }
 
-// Prepare independent starting data without changing the mounted lab or editor store.
-export function prepareDemonstrationLoad(selection: DemonstrationSelection): EngineResult<DemonstrationLoad> {
-  const group = TOPIC_ONE_DEMONSTRATIONS.find((item) => item.id === selection.groupId);
+// Prepare independent starting data without changing the mounted lab or editor store. The questions are the catalogue loaded from the server.
+export function prepareDemonstrationLoad(selection: DemonstrationSelection, demonstrations: readonly DemonstrationDefinition[]): EngineResult<DemonstrationLoad> {
+  const group = demonstrations.find((item) => item.id === selection.groupId);
 
   if (group === undefined) {
     return unavailable("demonstration.selection", "The selected demonstration is unavailable.");

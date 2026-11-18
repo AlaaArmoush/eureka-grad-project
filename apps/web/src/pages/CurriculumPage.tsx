@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, FlaskConical, Play, RotateCcw } from "lucide-react";
-import {
-  setupParameters, TOPIC_ONE_DEMONSTRATIONS, unionFrames,
-  type DemonstrationControl, type DemonstrationDefinition,
-} from "../lab/demonstrations.js";
+import { ArrowLeft, ArrowRight, Check, FlaskConical, Play, RefreshCw, RotateCcw } from "lucide-react";
+import { setupParameters, unionFrames, type DemonstrationControl, type DemonstrationDefinition } from "../lab/demonstrations.js";
+import type { DemonstrationCatalogue } from "../lab/demonstration-client.js";
 import type { DemonstrationSelection } from "../lab/demo-loading.js";
 import { runPreview } from "../lab/demonstration-preview.js";
 import { DemonstrationPreview } from "./DemonstrationPreview.js";
@@ -181,25 +179,26 @@ export function InvestigationPanel({ definition, state, index, total, onChange, 
   );
 }
 
-export function ProjectilesBrowser({ onOpen }: {
+export function ProjectilesBrowser({ demonstrations, onOpen }: {
+  readonly demonstrations: readonly DemonstrationDefinition[];
   onOpen(selection: DemonstrationSelection): void;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [states, setStates] = useState<Readonly<Record<string, InvestigationState>>>({});
-  const definition = TOPIC_ONE_DEMONSTRATIONS[activeIndex];
+  const definition = demonstrations[activeIndex];
 
   if (definition === undefined) {
     return null;
   }
 
   const state = states[definition.id] ?? initialState(definition);
-  const total = TOPIC_ONE_DEMONSTRATIONS.length;
+  const total = demonstrations.length;
 
   return (
     <div className="investigation-layout">
       <nav className="question-rail" aria-label="Projectile questions">
         <ol>
-          {TOPIC_ONE_DEMONSTRATIONS.map((item, itemIndex) => {
+          {demonstrations.map((item, itemIndex) => {
             const explored = (states[item.id]?.runCount ?? 0) > 0;
 
             return (
@@ -234,9 +233,9 @@ export function ProjectilesBrowser({ onOpen }: {
   );
 }
 
-// The topic card shows a real flight, so the topic is recognisable before it is opened.
-function ProjectilesTopicCard({ onOpen }: { onOpen(): void }) {
-  const definition = TOPIC_ONE_DEMONSTRATIONS.find((item) => item.id === "angle-sweep");
+// The topic card shows a real flight, so the topic is recognisable before it is opened: the angle question when it is published, else the first.
+function ProjectilesTopicCard({ demonstrations, onOpen }: { readonly demonstrations: readonly DemonstrationDefinition[]; onOpen(): void }) {
+  const definition = demonstrations.find((item) => item.id === "angle-sweep") ?? demonstrations[0];
   const preview = useMemo(() => {
     if (definition === undefined) return undefined;
     const parametersA = setupParameters(definition, definition.reference, definition.sharedDefaults);
@@ -272,16 +271,19 @@ function ProjectilesTopicCard({ onOpen }: { onOpen(): void }) {
         <span className="topic-kicker">Topic 1 · Mechanics</span>
         <strong>Projectiles</strong>
         <span>How things fly: launch angle and speed, gravity, mass and air resistance.</span>
-        <span className="topic-meta">{TOPIC_ONE_DEMONSTRATIONS.length} questions · predict, run and compare</span>
+        <span className="topic-meta">{demonstrations.length} questions · predict, run and compare</span>
         <span className="topic-start">Start exploring <ArrowRight size={14} /></span>
       </span>
     </button>
   );
 }
 
-export function CurriculumPage({ visible, topicOpen, error, onOpen, onRestoreDemonstration, onReturnToLab, onOpenProjectiles, onShowTopics }: {
+export function CurriculumPage({ visible, topicOpen, catalogue, onRetry, error, onOpen, onRestoreDemonstration, onReturnToLab, onOpenProjectiles, onShowTopics }: {
   readonly visible: boolean;
   readonly topicOpen: boolean;
+  // The questions as loaded from the server.
+  readonly catalogue: DemonstrationCatalogue;
+  onRetry(): void;
   readonly error: string | null;
   onOpen(selection: DemonstrationSelection): void;
   readonly onRestoreDemonstration: (() => void) | null;
@@ -290,6 +292,7 @@ export function CurriculumPage({ visible, topicOpen, error, onOpen, onRestoreDem
   onShowTopics(): void;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const projectiles = useMemo(() => catalogue.status === "ready" ? catalogue.demonstrations.filter((item) => item.topic === "projectiles") : [], [catalogue]);
 
   useEffect(() => {
     if (visible) {
@@ -317,8 +320,20 @@ export function CurriculumPage({ visible, topicOpen, error, onOpen, onRestoreDem
         </div>
       </header>
       {error !== null && <p className="curriculum-error" role="alert">{error}</p>}
-      <div hidden={!topicOpen}><ProjectilesBrowser onOpen={onOpen} /></div>
-      {!topicOpen && <ProjectilesTopicCard onOpen={onOpenProjectiles} />}
+      {catalogue.status === "loading" && <p role="status">Loading questions…</p>}
+      {catalogue.status === "error" && (
+        <div className="curriculum-error" role="alert">
+          <p>{catalogue.message}</p>
+          <button className="tool-btn" type="button" onClick={onRetry}><RefreshCw size={13} />Try again</button>
+        </div>
+      )}
+      {catalogue.status === "ready" && projectiles.length === 0 && <p role="status">No questions are published yet.</p>}
+      {projectiles.length > 0 && (
+        <>
+          <div hidden={!topicOpen}><ProjectilesBrowser demonstrations={projectiles} onOpen={onOpen} /></div>
+          {!topicOpen && <ProjectilesTopicCard demonstrations={projectiles} onOpen={onOpenProjectiles} />}
+        </>
+      )}
     </main>
   );
 }

@@ -1,83 +1,23 @@
 import type { ChallengeDefinition, Diagnostic } from "./index.js";
 import { CHALLENGE_MESSAGE_TOKEN, evaluateAttempt } from "./challenge-evaluator.js";
+import { checkShape, exactly, listOf, mapOf, NUMBER, oneOf, orNull, OVERLAYS, record, SCENE, TEXT, TOPIC, variants, VECTOR } from "./data-shape.js";
 
-// A small description of the JSON a record must have. It exists because a challenge arrives as untrusted data (a file or a database row).
-type Shape =
-  | { readonly kind: "string" }
-  | { readonly kind: "number" }
-  | { readonly kind: "boolean" }
-  | { readonly kind: "exactly"; readonly value: string | number }
-  | { readonly kind: "oneOf"; readonly values: readonly string[] }
-  | { readonly kind: "orNull"; readonly shape: Shape }
-  | { readonly kind: "listOf"; readonly item: Shape }
-  | { readonly kind: "record"; readonly fields: Readonly<Record<string, Shape>> }
-  | { readonly kind: "mapOf"; readonly value: Shape }
-  | { readonly kind: "variants"; readonly tag: string; readonly cases: Readonly<Record<string, Shape>> };
-
-const TEXT: Shape = { kind: "string" };
-const NUMBER: Shape = { kind: "number" };
-const FLAG: Shape = { kind: "boolean" };
-const exactly = (value: string | number): Shape => ({ kind: "exactly", value });
-const oneOf = (...values: string[]): Shape => ({ kind: "oneOf", values });
-const orNull = (shape: Shape): Shape => ({ kind: "orNull", shape });
-const listOf = (item: Shape): Shape => ({ kind: "listOf", item });
-const record = (fields: Record<string, Shape>): Shape => ({ kind: "record", fields });
-// An object whose keys are free (such as measurement ids) and whose values all have one shape.
-const mapOf = (value: Shape): Shape => ({ kind: "mapOf", value });
-const variants = (tag: string, cases: Record<string, Shape>): Shape => ({ kind: "variants", tag, cases });
-
-const VECTOR = record({ x: NUMBER, y: NUMBER });
-const POSE = record({ positionMeters: VECTOR, angleRadians: NUMBER });
-const MATERIAL = record({ restitution: NUMBER });
 const EXPLANATION = record({ title: TEXT, message: TEXT });
 const PROPERTY = oneOf("launchSpeed", "launchAngle", "mass", "gravity", "linearDrag");
-
-// Keep this in step with SceneDefinition in index.ts.
-const SCENE = record({
-  schemaVersion: exactly(1),
-  id: TEXT,
-  revision: NUMBER,
-  seed: NUMBER,
-  numericalProfile: record({
-    fixedTimeStepSeconds: NUMBER,
-    substeps: NUMBER,
-    scales: record({ lengthMeters: NUMBER, massKilograms: NUMBER, timeSeconds: NUMBER }),
-  }),
-  environment: record({ gravityMetersPerSecondSquared: VECTOR, linearDragKilogramsPerSecond: NUMBER }),
-  bodies: listOf(variants("kind", {
-    dynamic: record({
-      id: TEXT,
-      kind: exactly("dynamic"),
-      shape: record({ kind: exactly("circle"), radiusMeters: NUMBER }),
-      massKilograms: NUMBER,
-      material: MATERIAL,
-      pose: POSE,
-      velocity: record({ linearMetersPerSecond: VECTOR, angularRadiansPerSecond: NUMBER }),
-    }),
-    static: record({
-      id: TEXT,
-      kind: exactly("static"),
-      shape: record({ kind: exactly("box"), widthMeters: NUMBER, heightMeters: NUMBER }),
-      material: MATERIAL,
-      pose: POSE,
-    }),
-  })),
-  triggers: listOf(record({ id: TEXT, kind: exactly("target"), shape: record({ kind: exactly("circle"), radiusMeters: NUMBER }), pose: POSE })),
-});
 
 // Keep this in step with ChallengeDefinition in index.ts.
 const CHALLENGE = record({
   schemaVersion: exactly(1),
   id: TEXT,
   revision: NUMBER,
-  topic: oneOf("projectiles", "collisions", "rotationFriction", "oscillations", "energyMeasurement", "fields", "optics"),
+  topic: TOPIC,
   level: oneOf("guided", "independent", "application"),
   title: TEXT,
   briefing: TEXT,
   scene: SCENE,
   projectileId: TEXT,
   view: record({ centerWorldMeters: VECTOR, widthMeters: NUMBER, heightMeters: NUMBER, pixelsPerMeter: NUMBER }),
-  overlays: record({ trail: FLAG, velocity: FLAG, components: FLAG, prediction: FLAG, events: FLAG, grid: FLAG, labels: FLAG }),
+  overlays: OVERLAYS,
   runLimitSeconds: NUMBER,
   attemptEnds: oneOf("firstContact", "allZonesReached"),
   editable: listOf(record({ property: PROPERTY, bodyId: orNull(TEXT), label: TEXT, unit: TEXT, minimum: NUMBER, maximum: NUMBER, step: NUMBER })),
@@ -125,106 +65,6 @@ const CHALLENGE = record({
   })),
 });
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function checkRecord(value: unknown, fields: Readonly<Record<string, Shape>>, path: string, problems: Diagnostic[]): void {
-  if (!isRecord(value)) {
-    problems.push({ code: "INVALID_SHAPE", path, message: "Expected an object." });
-    return;
-  }
-
-  for (const [name, fieldShape] of Object.entries(fields)) {
-    const fieldPath = path === "" ? name : `${path}.${name}`;
-
-    if (!Object.hasOwn(value, name)) {
-      problems.push({ code: "MISSING_FIELD", path: fieldPath, message: `"${name}" is required.` });
-    } else {
-      checkShape(value[name], fieldShape, fieldPath, problems);
-    }
-  }
-
-  for (const name of Object.keys(value)) {
-    if (!Object.hasOwn(fields, name)) {
-      problems.push({ code: "UNKNOWN_FIELD", path: path === "" ? name : `${path}.${name}`, message: `"${name}" is not a field of this record.` });
-    }
-  }
-}
-
-function checkShape(value: unknown, shape: Shape, path: string, problems: Diagnostic[]): void {
-  const report = (message: string): void => {
-    problems.push({ code: "INVALID_SHAPE", path, message });
-  };
-
-  switch (shape.kind) {
-    case "string":
-      if (typeof value !== "string") {
-        report("Expected text.");
-      }
-      return;
-    case "number":
-      if (typeof value !== "number" || !Number.isFinite(value)) {
-        report("Expected a finite number.");
-      }
-      return;
-    case "boolean":
-      if (typeof value !== "boolean") {
-        report("Expected true or false.");
-      }
-      return;
-    case "exactly":
-      if (value !== shape.value) {
-        report(`Expected ${JSON.stringify(shape.value)}.`);
-      }
-      return;
-    case "oneOf":
-      if (typeof value !== "string" || !shape.values.includes(value)) {
-        report(`Expected one of: ${shape.values.join(", ")}.`);
-      }
-      return;
-    case "orNull":
-      if (value !== null) {
-        checkShape(value, shape.shape, path, problems);
-      }
-      return;
-    case "listOf":
-      if (!Array.isArray(value)) {
-        report("Expected a list.");
-        return;
-      }
-
-      value.forEach((item: unknown, index: number) => {
-        checkShape(item, shape.item, `${path}[${index}]`, problems);
-      });
-      return;
-    case "record":
-      checkRecord(value, shape.fields, path, problems);
-      return;
-    case "mapOf":
-      if (!isRecord(value)) {
-        report("Expected an object.");
-        return;
-      }
-
-      for (const [name, item] of Object.entries(value)) {
-        checkShape(item, shape.value, `${path}.${name}`, problems);
-      }
-      return;
-    case "variants": {
-      const tag = isRecord(value) ? value[shape.tag] : undefined;
-      const chosen = typeof tag === "string" && Object.hasOwn(shape.cases, tag) ? shape.cases[tag] : undefined;
-
-      if (chosen === undefined) {
-        report(`"${shape.tag}" must be one of: ${Object.keys(shape.cases).join(", ")}.`);
-        return;
-      }
-
-      checkShape(value, chosen, path, problems);
-      return;
-    }
-  }
-}
 
 // Broken references, impossible bounds and text that names nothing; only run on a definition whose shape is already right.
 function findReferenceProblems(definition: ChallengeDefinition): readonly Diagnostic[] {
