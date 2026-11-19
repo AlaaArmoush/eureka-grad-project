@@ -1,4 +1,4 @@
-import type { SceneDefinition } from "@eureka/contracts";
+import type { Body, SceneDefinition } from "@eureka/contracts";
 import type { CameraView } from "../lab/coordinates.js";
 import type { PreviewBall } from "../lab/demonstration-preview.js";
 
@@ -46,6 +46,55 @@ function labelAnchor(x: number): { readonly x: number; readonly textAnchor: "sta
   return { x, textAnchor: "middle" };
 }
 
+// Where a ball travels during a run, in picture pixels: one point per engine tick, played over `duration` seconds.
+interface PreviewMotion {
+  readonly points: readonly { readonly x: number; readonly y: number }[];
+  readonly duration: number;
+}
+
+// The one place a scene object is drawn. It branches on the object's shape kind from the contracts, so ground, platforms,
+// walls and ramps (all boxes) share one case. A later topic adds one case for each new shape kind, never per scene or question.
+function PreviewObject({ body, setupKey, scale, toX, toY, motion }: {
+  readonly body: Body;
+  // The setup a launched ball belongs to: A is drawn filled, B as a ring.
+  readonly setupKey: "A" | "B";
+  readonly scale: number;
+  toX(x: number): number;
+  toY(y: number): number;
+  // Present after a run: the ball moves along this path, or rests where it ended when motion is reduced.
+  readonly motion?: (PreviewMotion & { readonly animate: boolean }) | undefined;
+}) {
+  const x = toX(body.pose.positionMeters.x);
+  const y = toY(body.pose.positionMeters.y);
+
+  switch (body.shape.kind) {
+    case "box":
+      return (
+        <g transform={`translate(${x} ${y}) rotate(${-body.pose.angleRadians * 180 / Math.PI})`}>
+          <rect
+            className={body.id === "default-ground" ? "preview-ground" : "preview-solid"}
+            x={-body.shape.widthMeters * scale / 2}
+            y={-body.shape.heightMeters * scale / 2}
+            width={body.shape.widthMeters * scale}
+            height={body.shape.heightMeters * scale}
+          />
+        </g>
+      );
+    case "circle": {
+      const radius = body.shape.radiusMeters * scale + (setupKey === "B" ? RING_GAP : 0);
+      const end = motion?.points[motion.points.length - 1];
+      const start = motion?.animate === false && end !== undefined ? end : { x, y };
+
+      return (
+        <circle className={ballClass(setupKey)} cx={start.x} cy={start.y} r={radius}>
+          {motion?.animate === true && <animate attributeName="cx" values={motion.points.map((point) => point.x.toFixed(1)).join(";")} dur={`${motion.duration}s`} fill="freeze" />}
+          {motion?.animate === true && <animate attributeName="cy" values={motion.points.map((point) => point.y.toFixed(1)).join(";")} dur={`${motion.duration}s`} fill="freeze" />}
+        </circle>
+      );
+    }
+  }
+}
+
 // Whether the viewer asked for less motion; false when rendered on a server.
 function prefersReducedMotion(): boolean {
   return typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -70,6 +119,12 @@ export function DemonstrationPreview({ setups, view, label, runId }: {
   const step = gridStep(shown.widthMeters);
   const firstScene = setups[0]?.scene;
   const reducedMotion = prefersReducedMotion();
+  // Each run ball's path in picture pixels. The engine records one position per tick, so evenly spaced animation values keep real time.
+  const motions = new Map(setups.flatMap((setup) => (setup.balls ?? []).filter((ball) => ball.trail.length > 1).map((ball) => [`${setup.key}-${ball.id}`, {
+    points: ball.trail.map((point) => ({ x: toX(point.x), y: toY(point.y) })),
+    duration: Math.min(Math.max(ball.flightTimeSeconds, 0.6), 8),
+    animate: !reducedMotion,
+  }] as const)));
   const verticalLines = Array.from({ length: Math.floor(shown.widthMeters / step) + 1 }, (_, index) => Math.ceil(xMin / step) * step + index * step)
     .filter((x) => x <= xMin + shown.widthMeters);
   const horizontalLines = Array.from({ length: Math.floor(shown.heightMeters / step) + 1 }, (_, index) => Math.ceil((yMax - shown.heightMeters) / step) * step + index * step)
@@ -85,55 +140,26 @@ export function DemonstrationPreview({ setups, view, label, runId }: {
       {horizontalLines.map((y) => (
         <line key={`y${y}`} className="preview-grid" x1={0} x2={CANVAS_WIDTH} y1={toY(y)} y2={toY(y)} />
       ))}
-      {firstScene?.bodies.map((body) => body.kind === "static" && body.shape.kind === "box" ? (
-        <g
-          key={body.id}
-          transform={`translate(${toX(body.pose.positionMeters.x)} ${toY(body.pose.positionMeters.y)}) rotate(${-body.pose.angleRadians * 180 / Math.PI})`}
-        >
-          <rect
-            className={body.id === "default-ground" ? "preview-ground" : "preview-solid"}
-            x={-body.shape.widthMeters * scale / 2}
-            y={-body.shape.heightMeters * scale / 2}
-            width={body.shape.widthMeters * scale}
-            height={body.shape.heightMeters * scale}
-          />
-        </g>
-      ) : null)}
+      {/* Fixed objects are shared by both setups, so they are drawn once from setup A's scene. */}
+      {firstScene?.bodies.filter((body) => body.kind === "static").map((body) => (
+        <PreviewObject key={body.id} body={body} setupKey="A" scale={scale} toX={toX} toY={toY} />
+      ))}
       {/* Distance labels sit above the ground band, so a view that ends at the ground still shows them. */}
       {verticalLines.map((x) => (
         <text key={`t${x}`} className="preview-tick" x={toX(x) + 4} y={height - 6}>{x} m</text>
       ))}
-      {/* Before a run each ball waits at its start; after a run it travels its engine-computed path instead. */}
-      {[...setups].reverse().map((setup) => setup.balls === undefined ? setup.scene.bodies.map((body) => {
-        if (body.kind !== "dynamic" || body.shape.kind !== "circle") return null;
-
-        return (
-          <circle
-            key={`${setup.key}-${body.id}`}
-            className={ballClass(setup.key)}
-            cx={toX(body.pose.positionMeters.x)}
-            cy={toY(body.pose.positionMeters.y)}
-            r={body.shape.radiusMeters * scale + (setup.key === "B" ? RING_GAP : 0)}
-          />
-        );
-      }) : null)}
       {/* B is drawn first and wider, A on top and narrower, so identical paths show both colours. */}
       {[...setups].reverse().map((setup) => setup.balls?.map((ball, ballIndex) => {
-        const setupIndex = setups.indexOf(setup);
-        const points = ball.trail.map((point) => ({ x: toX(point.x), y: toY(point.y) }));
+        const run = motions.get(`${setup.key}-${ball.id}`);
         const last = ball.trail[ball.trail.length - 1];
-        const first = points[0];
 
-        if (points.length < 2 || last === undefined || first === undefined) return null;
+        if (run === undefined || last === undefined) return null;
 
-        // The engine records one position per tick, so evenly spaced animation values keep the motion in real time.
-        const duration = Math.min(Math.max(ball.flightTimeSeconds, 0.6), 8);
-        const series = setup.key === "A" ? "series-a" : "series-b";
+        const setupIndex = setups.indexOf(setup);
+        const points = run.points;
         const labelRow = setupIndex * (setup.balls?.length ?? 1) + ballIndex;
         const apexIndex = ball.trail.reduce((best, point, index) => point.y > (ball.trail[best]?.y ?? -Infinity) ? index : best, 0);
-        const apex = points[apexIndex] ?? first;
-        const body = setup.scene.bodies.find((candidate) => candidate.id === ball.id);
-        const radius = (body?.shape.kind === "circle" ? body.shape.radiusMeters : 0.5) * scale;
+        const apex = points[apexIndex] ?? points[0] ?? { x: 0, y: 0 };
         const lengths = points.reduce<number[]>((sum, point, index) => {
           const previous = points[index - 1];
           sum.push(previous === undefined ? 0 : (sum[index - 1] ?? 0) + Math.hypot(point.x - previous.x, point.y - previous.y));
@@ -141,13 +167,12 @@ export function DemonstrationPreview({ setups, view, label, runId }: {
         }, []);
         const total = lengths[lengths.length - 1] || 1;
         const dashValues = lengths.map((length) => (1 - length / total).toFixed(4)).join(";");
-        const animate = !reducedMotion;
-        const reveal = { animationDelay: animate ? `${duration}s` : "0s" };
+        const reveal = { animationDelay: run.animate ? `${run.duration}s` : "0s" };
 
         return (
-          <g key={`${runId}-${setup.key}-${ball.id}`} className={series}>
-            <path className={`preview-trail${setup.key === "B" ? " is-wide" : ""}`} d={`M${points.map((point) => `${point.x},${point.y}`).join("L")}`} pathLength={1} strokeDasharray="1" strokeDashoffset={animate ? 1 : 0}>
-              {animate && <animate attributeName="stroke-dashoffset" values={dashValues} dur={`${duration}s`} fill="freeze" />}
+          <g key={`${runId}-${setup.key}-${ball.id}`} className={setup.key === "A" ? "series-a" : "series-b"}>
+            <path className={`preview-trail${setup.key === "B" ? " is-wide" : ""}`} d={`M${points.map((point) => `${point.x},${point.y}`).join("L")}`} pathLength={1} strokeDasharray="1" strokeDashoffset={run.animate ? 1 : 0}>
+              {run.animate && <animate attributeName="stroke-dashoffset" values={dashValues} dur={`${run.duration}s`} fill="freeze" />}
             </path>
             <g className="preview-landing" style={reveal}>
               <circle className="preview-apex" cx={apex.x} cy={apex.y} r={3.5} />
@@ -155,13 +180,13 @@ export function DemonstrationPreview({ setups, view, label, runId }: {
               <circle cx={toX(last.x)} cy={toY(last.y)} r={5} />
               <text {...labelAnchor(toX(last.x))} y={labelY(toY(last.y), 14, labelRow, 17)}>{setup.key}: {ball.rangeMeters.toFixed(1)} m {ball.landed ? `in ${ball.flightTimeSeconds.toFixed(2)} s` : "(still in flight)"}</text>
             </g>
-            <circle className={ballClass(setup.key)} cx={animate ? first.x : toX(last.x)} cy={animate ? first.y : toY(last.y)} r={radius + (setup.key === "B" ? RING_GAP : 0)}>
-              {animate && <animate attributeName="cx" values={points.map((point) => point.x.toFixed(1)).join(";")} dur={`${duration}s`} fill="freeze" />}
-              {animate && <animate attributeName="cy" values={points.map((point) => point.y.toFixed(1)).join(";")} dur={`${duration}s`} fill="freeze" />}
-            </circle>
           </g>
         );
       }))}
+      {/* Launched objects last, on top of the paths: waiting at their start before a run, travelling their engine path after it. */}
+      {[...setups].reverse().map((setup) => setup.scene.bodies.filter((body) => body.kind === "dynamic").map((body) => (
+        <PreviewObject key={`${setup.key}-${body.id}`} body={body} setupKey={setup.key} scale={scale} toX={toX} toY={toY} motion={motions.get(`${setup.key}-${body.id}`)} />
+      )))}
     </svg>
   );
 }
