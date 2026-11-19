@@ -1,5 +1,5 @@
 import type { Body, TargetTrigger } from "@eureka/contracts";
-import { Graphics, Texture } from "pixi.js";
+import { BufferImageSource, Graphics, Texture } from "pixi.js";
 
 // Visible screen area expressed in the object's own drawing coordinates.
 export interface PaintBounds {
@@ -65,7 +65,10 @@ export function createPaperTexture(): Texture {
     context.lineTo(x + 1 + random() * 5, y + random() - .5);
     context.stroke();
   }
-  return Texture.from(canvas, true);
+  // Hand Pixi the finished bytes, never the canvas: Firefox may keep a 2D canvas on the GPU in blue-first order, and
+  // uploading that canvas straight to WebGL swapped red and blue, so the paper turned blue.
+  const { data } = context.getImageData(0, 0, 512, 512);
+  return new Texture({ source: new BufferImageSource({ resource: new Uint8Array(data.buffer), width: 512, height: 512, format: "rgba8unorm" }) });
 }
 
 export function paintPaper(g: Graphics, width: number, height: number): void {
