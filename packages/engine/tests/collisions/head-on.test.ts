@@ -460,3 +460,116 @@ describe("head-on collisions across masses, speeds, and restitution", () => {
     },
   );
 });
+describe("head-on sticky collisions", () => {
+  // Catch a missing weld, a change in either body's ID, or loss counted twice.
+  it("joins both circles once and keeps them moving together", () => {
+    const scene: SceneDefinition = {
+      ...makeHeadOnScene(0, { receiverXMeters: 3.04 }),
+      id: "head-on-sticky-circles",
+      weldOnImpactPairs: [{ bodyAId: "receiver", bodyBId: "striker" }],
+    };
+
+    const expectedVelocityX = 8 / 3;
+    const expectedWeldLossJoules = 16 / 3;
+    const velocityBound = 1e-10 + 1e-8 * expectedVelocityX;
+    const lossBound = 1e-10 + 1e-8 * expectedWeldLossJoules;
+    const engine = unwrap(createEngine(unwrap(validateScene(scene))));
+    try {
+      unwrap(engine.advance(31));
+      const impactSnapshot = unwrap(engine.copySnapshot());
+      const weld = impactSnapshot.welds?.[0];
+
+      if (weld === undefined) {
+        throw new Error("Expected a head-on weld at tick 31.");
+      }
+
+      expect(impactSnapshot.welds).toHaveLength(1);
+      expect(weld.tick).toBe(31);
+      expect(weld.bodyAId).toBe("receiver");
+      expect(weld.bodyBId).toBe("striker");
+      expectNear(weld.energyLossJoules, expectedWeldLossJoules, lossBound);
+
+      // The event belongs to the impact tick. The joined group persists.
+      unwrap(engine.advance(29));
+      const laterSnapshot = unwrap(engine.getSnapshot());
+      expect(laterSnapshot.tick).toBe(60);
+      expect(laterSnapshot.welds).toEqual([]); // Check the same group just after impact and again at one second.
+      const observations = [
+        { snapshot: impactSnapshot, timeSeconds: 31 / 60 },
+        { snapshot: laterSnapshot, timeSeconds: 1 },
+      ];
+
+      for (const { snapshot, timeSeconds } of observations) {
+        expect(snapshot.weldClusters).toHaveLength(1);
+        const cluster = snapshot.weldClusters?.find(
+          (entry) => entry.id === weld.clusterId,
+        );
+        expect(cluster?.bodyIds.slice().sort()).toEqual([
+          "receiver",
+          "striker",
+        ]);
+
+        expect(snapshot.bodies).toHaveLength(2);
+        const striker = snapshot.bodies.find((body) => body.id === "striker");
+        const receiver = snapshot.bodies.find((body) => body.id === "receiver");
+        const losses = snapshot.collisionEnergyLosses;
+
+        if (
+          striker === undefined ||
+          receiver === undefined ||
+          losses === undefined
+        ) {
+          throw new Error(
+            "Expected both original circles and the collision loss record.",
+          );
+        }
+
+        const strikerPosition = striker.pose.positionMeters;
+        const receiverPosition = receiver.pose.positionMeters;
+        const strikerVelocity = striker.velocity.linearMetersPerSecond;
+        const receiverVelocity = receiver.velocity.linearMetersPerSecond;
+
+        // The circles keep their separation and relative angle.
+        expectNear(receiverPosition.x - strikerPosition.x, 1, 1e-7);
+        expectNear(receiverPosition.y - strikerPosition.y, 0, 1e-7);
+        expectNear(
+          receiver.pose.angleRadians - striker.pose.angleRadians,
+          0,
+          1e-8,
+        );
+
+        expectNear(strikerVelocity.x, expectedVelocityX, velocityBound);
+        expectNear(receiverVelocity.x, expectedVelocityX, velocityBound);
+        expectNear(strikerVelocity.y, 0, 1e-10 + 1e-8);
+        expectNear(receiverVelocity.y, 0, 1e-10 + 1e-8);
+        expectNear(striker.velocity.angularRadiansPerSecond, 0, 1e-8);
+        expectNear(receiver.velocity.angularRadiansPerSecond, 0, 1e-8);
+
+        // The pair's centre of mass follows the path calculated from the impact.
+        const totalMass = strikerMassKilograms + receiverMassKilograms;
+        const centerOfMassX =
+          (strikerMassKilograms * strikerPosition.x +
+            receiverMassKilograms * receiverPosition.x) /
+          totalMass;
+        const expectedCenterOfMassX =
+          2.04 + 1 / 3 + expectedVelocityX * (timeSeconds - 0.51);
+        expectNear(centerOfMassX, expectedCenterOfMassX, 1e-7);
+
+        const momentumX =
+          strikerMassKilograms * strikerVelocity.x +
+          receiverMassKilograms * receiverVelocity.x;
+        const momentumY =
+          strikerMassKilograms * strikerVelocity.y +
+          receiverMassKilograms * receiverVelocity.y;
+        expectNear(momentumX, 8, 1e-12 + 1e-10 * 8);
+        expectNear(momentumY, 0, 1e-12 + 1e-10);
+
+        expectNear(losses.weldLossJoules, expectedWeldLossJoules, lossBound);
+        expectNear(losses.restitutionLossJoules, 0, 1e-12);
+        expectNear(losses.frictionLossJoules, 0, 1e-12);
+      }
+    } finally {
+      expect(engine.dispose().ok).toBe(true);
+    }
+  });
+});
