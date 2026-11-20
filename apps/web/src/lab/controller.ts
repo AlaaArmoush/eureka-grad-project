@@ -119,8 +119,6 @@ export interface LabControllerOptions {
   // Receive owned snapshots for retained HTML measurements.
   readonly consumeReadout?: SnapshotConsumer | undefined;
   readonly consumeTick?: SnapshotConsumer | undefined;
-  // Pause after accepting this final tick when using a bounded playback source.
-  readonly stopAtTick?: number | undefined;
   readonly releaseView: () => void;
   readonly nowMilliseconds?: (() => number) | undefined;
   readonly playbackBrowser?: PlaybackBrowser | undefined;
@@ -131,26 +129,13 @@ export function createLabController(options: LabControllerOptions): EngineResult
   const {
     engine, initialScene, consumeSnapshot, consumeReadout, consumeTick, releaseView,
     nowMilliseconds = () => performance.now(),
-    playbackBrowser, onPlaybackChange, stopAtTick,
+    playbackBrowser, onPlaybackChange,
   } = options;
   const currentEngine = engine;
   let currentScene = structuredClone(initialScene);
   const initialSnapshot = currentEngine.getSnapshot();
   if (!initialSnapshot.ok) {
     return initialSnapshot;
-  }
-
-  // Reject a stopping boundary that cannot represent a future or current whole tick.
-  if (stopAtTick !== undefined &&
-    (!Number.isSafeInteger(stopAtTick) || stopAtTick < initialSnapshot.value.tick)) {
-    return {
-      ok: false,
-      diagnostics: [{
-        code: "OUT_OF_RANGE",
-        path: "stopAtTick",
-        message: "The stopping tick must be a whole tick at or after the current tick.",
-      }],
-    };
   }
 
   consumeSnapshot(initialSnapshot.value);
@@ -168,8 +153,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
   let droppedWallTimeSeconds = 0;
   let pendingFrameHandle: number | null = null;
   let lastReportedPlaybackState: PlaybackState | undefined;
-  // Track the accepted tick and the last retained readout's browser timestamp.
-  let currentTick = initialSnapshot.value.tick;
+  // Track the last retained readout's browser timestamp.
   let lastReadoutTimeMilliseconds = Number.NEGATIVE_INFINITY;
 
   function activeStatus(): EngineStatus {
@@ -180,28 +164,6 @@ export function createLabController(options: LabControllerOptions): EngineResult
           code: "DISPOSED_ENGINE",
           path: "controller",
           message: "This lab controller has been disposed.",
-        }],
-      };
-    }
-
-    return { ok: true };
-  }
-
-  // Prevent another advance after a bounded source reaches its final tick.
-  function advanceStatus(): EngineStatus {
-    const status = activeStatus();
-
-    if (!status.ok) {
-      return status;
-    }
-
-    if (stopAtTick !== undefined && currentTick >= stopAtTick) {
-      return {
-        ok: false,
-        diagnostics: [{
-          code: "OUT_OF_RANGE",
-          path: "playback.tick",
-          message: "The sample is finished. Reset to play it again.",
         }],
       };
     }
@@ -300,8 +262,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
   }
 
   function play(): EngineStatus {
-    // Check both lifetime and the optional final-tick boundary.
-    const status = advanceStatus();
+    const status = activeStatus();
 
     if (!status.ok || playing) {
       return status;
@@ -367,8 +328,6 @@ export function createLabController(options: LabControllerOptions): EngineResult
       return snapshotResult;
     }
 
-    // Record the accepted tick before handing its borrowed snapshot to drawing.
-    currentTick = snapshotResult.value.tick;
     consumeSnapshot(snapshotResult.value);
     consumeTick?.(snapshotResult.value);
     return { ok: true };
@@ -410,18 +369,12 @@ export function createLabController(options: LabControllerOptions): EngineResult
       return snapshotStatus;
     }
 
-    // Stop a running sample immediately after its final accepted tick.
-    if (playing && stopAtTick !== undefined && currentTick >= stopAtTick) {
-      pause();
-    }
-
     return advanceResult;
   }
 
   // Allow manual stepping only while playback is paused.
   function stepOnce(): EngineResult<AdvanceReceipt> {
-    // Check both lifetime and the optional final-tick boundary.
-    const status = advanceStatus();
+    const status = activeStatus();
 
     if (!status.ok) {
       return status;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-// Supply the reviewed static observation and its consecutive playback frames.
-import { PROJECTILE_LAB_MOCK, PROJECTILE_PLAYBACK_SNAPSHOTS } from "./lab/mocks.js";
+// Supply the lab's starting 20 m/s, 30° projectile scene.
+import { PROJECTILE_LAB_MOCK } from "./lab/mocks.js";
 import type { MoveEntityRequest, PlacementRequest } from "./lab/authoring";
 import { ObjectLibrary } from "./lab/ObjectLibrary";
 import {
@@ -42,7 +42,7 @@ import { CanvasTools } from "./lab/CanvasTools.js";
 import { SceneInspector } from "./lab/SceneInspector.js";
 import { SceneOutline } from "./lab/SceneOutline.js";
 import { ObservationNotebook } from "./lab/ObservationNotebook.js";
-import { prepareChallengeLoad, prepareDemonstrationLoad, type ChallengeLoad, type DemonstrationLoad, type DemonstrationSelection, type SceneLoad } from "./lab/demo-loading.js";
+import { copyInitialSnapshot, prepareChallengeLoad, prepareDemonstrationLoad, type ChallengeLoad, type DemonstrationLoad, type DemonstrationSelection, type SceneLoad } from "./lab/demo-loading.js";
 import { ChallengePanel } from "./lab/ChallengePanel.js";
 import { useChallengeSession } from "./lab/useChallengeSession.js";
 import { ReplaceSceneDialog } from "./lab/ReplaceSceneDialog.js";
@@ -74,9 +74,16 @@ const WORKSPACE_NAVIGATION = [
 ] as const;
 
 export function App() {
-  const [displayedSnapshot, setDisplayedSnapshot] = useState<Snapshot>(
-    PROJECTILE_PLAYBACK_SNAPSHOTS[0] ?? PROJECTILE_LAB_MOCK.snapshot,
-  );
+  // The first readout is the engine's own tick-zero state of the starting scene.
+  const [displayedSnapshot, setDisplayedSnapshot] = useState<Snapshot>(() => {
+    const result = copyInitialSnapshot(PROJECTILE_LAB_MOCK.scene);
+
+    if (!result.ok) {
+      throw new Error("The starting projectile scene must be accepted by the engine.");
+    }
+
+    return result.value;
+  });
   const [editableScene, setEditableScene] = useState<SceneDefinition>(() =>
     structuredClone(PROJECTILE_LAB_MOCK.scene),
   );
@@ -251,25 +258,13 @@ export function App() {
     (state) => state.selectedEntityId,
   );
   const selectionNotice = useStore(labStore, (state) => state.selectionNotice);
-  let activeSampleSnapshots;
-
-  if (
-    editableScene.id === PROJECTILE_LAB_MOCK.scene.id &&
-    editableScene.revision === PROJECTILE_LAB_MOCK.scene.revision
-  ) {
-    // Enable motion only for the scene covered by these reviewed frames.
-    activeSampleSnapshots = PROJECTILE_PLAYBACK_SNAPSHOTS;
-  } else {
-    activeSampleSnapshots = undefined;
-  }
 
   // Hold the last reported playback metadata for HTML rendering.
   const [playbackState, setPlaybackState] = useState<PlaybackState | null>(null);
   const [labError, setLabError] = useState<string | null>(null);
 
-  const sampleEndTick = activeSampleSnapshots?.at(-1)?.tick;
-  const playbackReady = playbackState !== null && (sampleEndTick !== undefined || challengeActive);
-  const sampleFinished = sampleEndTick !== undefined && displayedSnapshot.tick >= sampleEndTick;
+  // Any mounted controller can run its scene on the real engine.
+  const playbackReady = playbackState !== null;
 
   // Keep the imperative handle and clear toolbar availability when it is released.
   const setActiveController = useCallback((controller: LabController | null) => {
@@ -648,7 +643,7 @@ export function App() {
         <ChallengesPage visible={activePage === "challenges"} error={labError} onPlay={handleChallengeOpen} />
         <main id="laboratory" className="lab-shell" hidden={activePage !== "laboratory"}>
           <header className="lab-header">
-            <div className="experiment-heading"><span className="experiment-mark"><Atom size={21} /></span><div><h1 ref={labHeadingRef} tabIndex={-1}>Projectile laboratory</h1><p>Build a scene. Follow the physics.</p></div><span className="scene-badge">{challengeActive ? "Challenge" : activeSampleSnapshots === undefined ? "Authored scene" : "Sample scene"}</span></div>
+            <div className="experiment-heading"><span className="experiment-mark"><Atom size={21} /></span><div><h1 ref={labHeadingRef} tabIndex={-1}>Projectile laboratory</h1><p>Build a scene. Follow the physics.</p></div><span className="scene-badge">{challengeActive ? "Challenge" : "Authored scene"}</span></div>
             <div className="header-actions">
               <button className="tool-btn lab-power" onClick={() => setLabVisible((visible) => !visible)} type="button"><Power size={14} />{labVisible ? "Leave lab" : "Enter lab"}</button>
             </div>
@@ -673,7 +668,7 @@ export function App() {
                     <button
                       className="run-button"
                       aria-label={playbackState?.playing ? "Pause" : "Play"} type="button"
-                      disabled={playbackState?.playing !== true && (!playbackReady || sampleFinished)}
+                      disabled={playbackState?.playing !== true && !playbackReady}
                       onClick={() => handlePlaybackAction(playbackState?.playing ? "pause" : "play")}
                     >
                       {playbackState?.playing ? <Pause size={14} /> : <Play size={14} />}<span>{playbackState?.playing ? "Pause" : "Run"}</span>
@@ -682,7 +677,7 @@ export function App() {
                   <span className="playback-action" title="Step">
                     <button
                       aria-label="Step" type="button"
-                      disabled={!playbackReady || playbackState?.playing === true || sampleFinished}
+                      disabled={!playbackReady || playbackState?.playing === true}
                       onClick={() => handlePlaybackAction("stepOnce")}
                     >
                       <StepForward size={14} />
@@ -716,9 +711,7 @@ export function App() {
                     ? "Unavailable"
                     : playbackState.playing
                       ? "Playing"
-                      : playbackReady && sampleFinished
-                        ? "Finished · Reset to replay"
-                        : "Paused"}
+                      : "Paused"}
                 </span>
                 {playbackState?.unableToMaintainRealTimeSpeed && (
                   <span role="status">Unable to maintain real-time speed.</span>
@@ -762,7 +755,7 @@ export function App() {
                     </div>
                     {labVisible ? (
                       <LabCanvas
-                        scene={editableScene} sampleSnapshots={activeSampleSnapshots}
+                        scene={editableScene}
                         setDisplayedSnapshot={setDisplayedSnapshot} setActiveController={setActiveController}
                         onPlaybackChange={setPlaybackState}
                         onTick={challenge.onTick}
@@ -773,7 +766,7 @@ export function App() {
                     ) : <div className="closed-lab"><Atom size={32} /><p>Your laboratory is closed.</p><button type="button" className="tool-btn" onClick={() => setLabVisible(true)}>Enter lab</button></div>}
                   </div>
                 </div>
-                <div className="viewport-status"><span><span className="status-dot" />{activeSampleSnapshots === undefined ? "Authored initial state" : "Sample playback"}</span><span>Metres · Seconds · Kilograms</span></div>
+                <div className="viewport-status"><span><span className="status-dot" />Real engine</span><span>Metres · Seconds · Kilograms</span></div>
                 {selectionNotice !== null && (
                   <p className="viewport-error" role="status">{selectionNotice}</p>
                 )}
@@ -783,7 +776,7 @@ export function App() {
                 {viewportError !== null && <p className="viewport-error" role="alert">{viewportError}</p>}
               </section>
               <section className="measurement-dock" aria-label="Measurement dock">
-                <button className="measurement-toggle" type="button" aria-expanded={measurementsOpen} aria-controls="measurement-content" onClick={() => setMeasurementsOpen((open) => !open)}><Activity size={15} /><span>Measurements & events</span><span className="measurement-source">Snapshot readouts</span><ChevronDown size={14} /></button>
+                <button className="measurement-toggle" type="button" aria-expanded={measurementsOpen} aria-controls="measurement-content" onClick={() => setMeasurementsOpen((open) => !open)}><Activity size={15} /><span>Measurements & events</span><span className="measurement-source">Engine {displayedSnapshot.engineVersion} · {displayedSnapshot.engineBuild}</span><ChevronDown size={14} /></button>
                 <div id="measurement-content" className="measurement-content" hidden={!measurementsOpen}><ObservationNotebook key={sceneGeneration} snapshot={displayedSnapshot} selectedEntityId={selectedEntityId} /></div>
               </section>
             </div>

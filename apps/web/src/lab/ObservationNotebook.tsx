@@ -42,7 +42,8 @@ export function ObservationNotebook({ snapshot, selectedEntityId }: {
             return (
               <div key={value.symbol}>
                 <dt>{value.title}</dt>
-                <dd>
+                {/* Hovering shows the snapshot's full-precision value; the text stays rounded for reading. */}
+                <dd title={available ? `${value.value} ${value.unit}` : undefined}>
                   {formatMeasurement(value.value)}
                   {available && <small>{value.unit}</small>}
                 </dd>

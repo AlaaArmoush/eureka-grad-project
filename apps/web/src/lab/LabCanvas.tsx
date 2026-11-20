@@ -3,8 +3,6 @@ import { useEffect, useLayoutEffect, useRef } from "react";
 import type { SceneDefinition, Snapshot } from "@eureka/contracts";
 // Creates the headless physical-state owner for this mounted lab.
 import { createEngine, type EngineStatus } from "@eureka/engine";
-// Adapt reviewed frame sequences without running the numerical solver.
-import { createSnapshotPlaybackEngine } from "./mocks.js";
 // Supplies typed placement and movement requests from Pixi to React.
 import type { MoveEntityRequest, PlacementRequest } from "./authoring.js";
 // Creates and types the lab lifetime coordinator.
@@ -46,7 +44,6 @@ export function LabCanvas(props: {
   onPlacementRequested(request: PlacementRequest): void;
   onMoveRequested(request: MoveEntityRequest): boolean;
   onDeleteRequested(entityId: string): boolean;
-  sampleSnapshots?: readonly Snapshot[] | undefined;
   onTick?(snapshot: Snapshot): void;
 }) {
   const toSetDisplayedSnapshot = props.setDisplayedSnapshot;
@@ -56,7 +53,6 @@ export function LabCanvas(props: {
   const onPlacementRequested = props.onPlacementRequested;
   const onMoveRequested = props.onMoveRequested;
   const onDeleteRequested = props.onDeleteRequested;
-  const sampleSnapshots = props.sampleSnapshots;
   const onTick = props.onTick;
   const scene = props.scene;
   const hostRef = useRef<HTMLDivElement>(null);
@@ -77,10 +73,8 @@ export function LabCanvas(props: {
       rendererRef.current = null;
     }
 
-    // Use prepared frames for reviewed samples and the existing initial-state source for authoring.
-    const engineResult = sampleSnapshots === undefined
-      ? createEngine(scene)
-      : createSnapshotPlaybackEngine(sampleSnapshots);
+    // Every scene, including the starting projectile launch, runs on the real engine.
+    const engineResult = createEngine(scene);
 
     if (!engineResult.ok) {
       failSetup(engineResult);
@@ -96,7 +90,7 @@ export function LabCanvas(props: {
       return;
     }
 
-    // Start the viewport at the selected source's tick-zero state.
+    // Start the viewport at the engine's tick-zero state.
     const initialViewSnapshot = initialSnapshotResult.value;
 
     // Create Pixi once, then update its scene without removing the canvas.
@@ -108,13 +102,12 @@ export function LabCanvas(props: {
       onPlacementRequested,
       onMoveRequested,
       onDeleteRequested,
-      sampleSnapshots ?? [],
     );
 
     rendererRef.current = renderer;
 
     if (previousRenderer !== null) {
-      renderer.updateScene(scene, initialViewSnapshot, sampleSnapshots ?? []);
+      renderer.updateScene(scene, initialViewSnapshot);
     }
 
     const controllerResult = createLabController({
@@ -127,7 +120,6 @@ export function LabCanvas(props: {
       releaseView: renderer.dispose,
       playbackBrowser: createPlaybackBrowser(onOperationResult),
       onPlaybackChange,
-      stopAtTick: sampleSnapshots?.at(-1)?.tick,
     });
 
     if (!controllerResult.ok) {
@@ -154,7 +146,6 @@ export function LabCanvas(props: {
     onPlacementRequested,
     onMoveRequested,
     onDeleteRequested,
-    sampleSnapshots,
     onTick,
   ]);
 

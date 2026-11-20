@@ -64,8 +64,14 @@ interface PanState {
 export interface LabRenderer {
   updateSnapshot(snapshot: Snapshot): void;
   // Replace an authored scene without replacing the mounted canvas.
-  updateScene(scene: SceneDefinition, snapshot: Snapshot, trailSnapshots?: readonly Snapshot[]): void;
+  updateScene(scene: SceneDefinition, snapshot: Snapshot): void;
   dispose(): void;
+}
+
+// One drawn tick of the simulated trail: where each projectile was at that tick.
+interface TrailSample {
+  readonly tick: number;
+  readonly positionsMeters: ReadonlyMap<string, Vector2>;
 }
 function createRenderItems(
   scene: SceneDefinition,
@@ -134,7 +140,6 @@ export function mountLabRenderer(
   onPlacementRequested: (request: PlacementRequest) => void,
   onMoveRequested: (request: MoveEntityRequest) => boolean,
   onDeleteRequested: (entityId: string) => boolean,
-  initialTrailSnapshots: readonly Snapshot[] = [],
 ): LabRenderer {
   // Keep an owned snapshot for later camera and selection redraws.
   // Keep the accepted scene available to drawing and selection.
@@ -146,8 +151,8 @@ export function mountLabRenderer(
   //                          id(for renderer), item
   const renderItems = new Map<string, RenderItem>();
   let unsubscribeFromStore: (() => void) | undefined;
-  // Replace history when an authored revision changes the displayed scene.
-  let trailSnapshots = structuredClone(initialTrailSnapshots);
+  // The simulated trail, recorded from the ticks this renderer is given to draw.
+  let trailSamples: TrailSample[] = [];
 
   const trailGraphic = new Graphics({ label: "selected-projectile-trail", });
   const predictionGraphic = new Graphics({ label: "selected-projectile-ideal-prediction" });
@@ -365,18 +370,11 @@ export function mountLabRenderer(
 
     const trailPoints: Vector2[] = [];
 
-    for (const trailSnapshot of trailSnapshots) {
-      // A recorded trail ends at the current tick, even when future sample frames are prepared.
-      if (trailSnapshot.tick > currentSnapshot.tick) {
-        continue;
-      }
+    for (const sample of trailSamples) {
+      const positionMeters = sample.positionsMeters.get(selectedProjectile.id);
 
-      const snapshotBody = trailSnapshot.bodies.find(
-        (body) => body.id === selectedProjectile.id,
-      );
-
-      if (snapshotBody !== undefined) {
-        trailPoints.push(snapshotBody.pose.positionMeters);
+      if (positionMeters !== undefined) {
+        trailPoints.push(positionMeters);
       }
     }
 
@@ -592,19 +590,36 @@ export function mountLabRenderer(
     application.render();
   };
 
+  // Record one drawn tick; a tick that does not move forward is a Reset or a new run, so the old path is cleared.
+  function recordTrailSample(snapshot: Snapshot): void {
+    const previous = trailSamples.at(-1);
+
+    if (previous !== undefined && snapshot.tick <= previous.tick) {
+      trailSamples = [];
+    }
+
+    const positionsMeters = new Map<string, Vector2>();
+
+    for (const body of snapshot.bodies) {
+      if (currentScene.bodies.some((entity) => entity.id === body.id && entity.kind === "dynamic")) {
+        positionsMeters.set(body.id, { ...body.pose.positionMeters });
+      }
+    }
+
+    trailSamples.push({ tick: snapshot.tick, positionsMeters });
+  }
+
   // Apply an authored revision without another asynchronous Pixi initialization.
-  function updateScene(
-    nextScene: SceneDefinition,
-    nextSnapshot: Snapshot,
-    nextTrailSnapshots: readonly Snapshot[] = [],
-  ): void {
+  function updateScene(nextScene: SceneDefinition, nextSnapshot: Snapshot): void {
     if (disposed) {
       return;
     }
 
     currentScene = structuredClone(nextScene);
     currentSnapshot = structuredClone(nextSnapshot);
-    trailSnapshots = structuredClone(nextTrailSnapshots);
+    // A new starting scene begins a new path at its own tick zero.
+    trailSamples = [];
+    recordTrailSample(currentSnapshot);
 
     // Discard pointer previews belonging to the previous revision.
     dragState = null;
@@ -624,6 +639,7 @@ export function mountLabRenderer(
     }
 
     currentSnapshot = structuredClone(nextSnapshot);
+    recordTrailSample(currentSnapshot);
 
     if (!initialized) {
       return;
@@ -840,11 +856,9 @@ export function mountLabRenderer(
         include(entity.pose.positionMeters.x, entity.pose.positionMeters.y);
       }
     }
-    for (const snapshot of trailSnapshots) {
-      for (const body of snapshot.bodies) {
-        if (currentScene.bodies.some((entity) => entity.id === body.id && entity.kind === "dynamic")) {
-          include(body.pose.positionMeters.x, body.pose.positionMeters.y);
-        }
+    for (const sample of trailSamples) {
+      for (const positionMeters of sample.positionsMeters.values()) {
+        include(positionMeters.x, positionMeters.y);
       }
     }
     // The ideal path may extend beyond the experiment; it must not shrink the authored objects.
