@@ -153,6 +153,19 @@ function idealLandingTimeSeconds(scene: SceneDefinition, projectile: DynamicBody
   return (vy + Math.sqrt(vy * vy + 2 * g * (startY - landingY))) / g;
 }
 
+// Ideal position at time t from the starting conditions: x = x0 + vx·t + gx·t²/2, and the same for y.
+function idealPositionMeters(scene: SceneDefinition, projectile: DynamicBody, timeSeconds: number): Vector2 {
+  const position = projectile.pose.positionMeters;
+  const velocity = projectile.velocity.linearMetersPerSecond;
+  const gravity = scene.environment.gravityMetersPerSecondSquared;
+  const halfTimeSquared = 0.5 * timeSeconds * timeSeconds;
+
+  return {
+    x: position.x + velocity.x * timeSeconds + gravity.x * halfTimeSquared,
+    y: position.y + velocity.y * timeSeconds + gravity.y * halfTimeSquared,
+  };
+}
+
 // Draw an open-headed arrow between two screen positions.
 function drawVelocityArrow(graphic: Graphics, start: Vector2, tip: Vector2, widthPixels: number): void {
   const lengthPixels = Math.hypot(tip.x - start.x, tip.y - start.y);
@@ -236,6 +249,10 @@ export function mountLabRenderer(
   let panState: PanState | null = null;
   let dragState: DragState | null = null;
   let pullState: PullState | null = null;
+  // A newly loaded scene is fitted on the next draw.
+  let fitPending = false;
+  // The camera the last fit chose; while it is unchanged, the view refits when the canvas changes size.
+  let fittedCamera: { readonly center: Vector2; readonly pixelsPerMeter: number } | null = null;
   // This run's events, so a target stays coloured after the tick it was entered.
   let runEvents: readonly SnapshotEvent[] = [];
   const background = new Graphics();
@@ -368,9 +385,6 @@ export function mountLabRenderer(
       return;
     }
 
-    const position = selectedProjectile.pose.positionMeters;
-    const velocity = selectedProjectile.velocity.linearMetersPerSecond;
-    const gravity = currentScene.environment.gravityMetersPerSecondSquared;
     const screenPoints: Vector2[] = [];
     const intervalCount = 100;
     const flightTimeSeconds = idealLandingTimeSeconds(currentScene, selectedProjectile);
@@ -378,12 +392,7 @@ export function mountLabRenderer(
     // Calculate 101 independent positions, including both endpoints.
     for (let index = 0; index <= intervalCount; index += 1) {
       const timeSeconds = flightTimeSeconds * index / intervalCount;
-      const halfTimeSquared = 0.5 * timeSeconds * timeSeconds;
-      const pointMeters = {
-        x: position.x + velocity.x * timeSeconds + gravity.x * halfTimeSquared,
-        y: position.y + velocity.y * timeSeconds + gravity.y * halfTimeSquared,
-      };
-      const point = worldToScreen(pointMeters, viewport);
+      const point = worldToScreen(idealPositionMeters(currentScene, selectedProjectile, timeSeconds), viewport);
       screenPoints.push(point);
 
       if (index === 0) {
@@ -604,7 +613,9 @@ export function mountLabRenderer(
     const height = host.clientHeight;
 
     // Resize the canvas only when its actual display dimensions change.
-    if (application.screen.width !== width || application.screen.height !== height) {
+    const resized = application.screen.width !== width || application.screen.height !== height;
+
+    if (resized) {
       application.renderer.resize(width, height);
     }
     if (backgroundWidth !== width || backgroundHeight !== height) {
@@ -622,8 +633,14 @@ export function mountLabRenderer(
       return;
     }
 
-    // First fitting waits until real visible dimensions are available.
-    if (!editorState.cameraInitialized) {
+    // Fit the first scene, a newly loaded scene, or a still-fitted view whose canvas changed size.
+    const stillFitted = fittedCamera !== null &&
+      editorState.pixelsPerMeter === fittedCamera.pixelsPerMeter &&
+      editorState.cameraCenterWorldMeters.x === fittedCamera.center.x &&
+      editorState.cameraCenterWorldMeters.y === fittedCamera.center.y;
+
+    if (!editorState.cameraInitialized || fitPending || (resized && stillFitted)) {
+      fitPending = false;
       fitScene();
       return;
     }
@@ -708,6 +725,12 @@ export function mountLabRenderer(
   function updateScene(nextScene: SceneDefinition, nextSnapshot: Snapshot): void {
     if (disposed) {
       return;
+    }
+
+    // A different or reloaded scene (a question, challenge or restored setup) is fitted; an edit keeps the view.
+    // Edits only raise the revision, so a lower one means the scene was loaded again.
+    if (nextScene.id !== currentScene.id || nextScene.revision < currentScene.revision) {
+      fitPending = true;
     }
 
     currentScene = structuredClone(nextScene);
@@ -982,6 +1005,18 @@ export function mountLabRenderer(
     resizeAndRender();
   }
 
+  // Draw the selected object above the others, so a ball hidden under another ball shows when picked.
+  function raiseSelected(): void {
+    const item = renderItems.get(labStore.getState().selectedEntityId ?? "");
+
+    if (!initialized || item === undefined) {
+      return;
+    }
+
+    const overlayIndex = application.stage.getChildIndex(horizontalVelocityGraphic);
+    application.stage.setChildIndex(item.graphic, overlayIndex - 1);
+  }
+
   // Replace authoring graphics synchronously inside the existing application.
   function rebuildRenderItems(): void {
     const nextItems = createRenderItems(
@@ -1011,6 +1046,8 @@ export function mountLabRenderer(
       const overlayIndex = application.stage.getChildIndex(horizontalVelocityGraphic);
       application.stage.addChildAt(item.graphic, overlayIndex);
     }
+
+    raiseSelected();
   }
 
   function fitScene(): void {
@@ -1044,21 +1081,37 @@ export function mountLabRenderer(
         include(positionMeters.x, positionMeters.y);
       }
     }
-    // The ideal path may extend beyond the experiment; it must not shrink the authored objects.
+    // Frame where each ball is going, so a launched ball starts near the left with room for its flight.
+    for (const entity of currentScene.bodies) {
+      if (entity.kind !== "dynamic") {
+        continue;
+      }
+
+      const flightSeconds = idealLandingTimeSeconds(currentScene, entity);
+
+      for (let index = 1; index <= 24; index += 1) {
+        const point = idealPositionMeters(currentScene, entity, flightSeconds * index / 24);
+        include(point.x, point.y, entity.shape.radiusMeters, entity.shape.radiusMeters);
+      }
+    }
     if (currentScene.bodies.length + currentScene.triggers.length === 0) {
       editorState.setCamera({ x: 0, y: 0 }, CAMERA_ZOOM.basePixelsPerMeter);
       return;
     }
+    // Leave a margin around the frame, and never zoom in past the normal 100% scale.
     const scale = Math.max(.01, Math.min(
-      CAMERA_ZOOM.basePixelsPerMeter * 2,
-      Math.max(1, application.screen.width - 80) / Math.max(1, bounds.width),
-      Math.max(1, application.screen.height - 128) / Math.max(1, bounds.height),
+      CAMERA_ZOOM.basePixelsPerMeter,
+      Math.max(1, application.screen.width * .8) / Math.max(1, bounds.width),
+      Math.max(1, application.screen.height * .7) / Math.max(1, bounds.height),
     ));
-    labStore.getState().setCamera({
+    const center = {
       x: bounds.x + bounds.width / 2,
       // Reserve more room for the title/tools above the diagram.
       y: bounds.y + bounds.height / 2 + 25 / scale,
-    }, scale);
+    };
+
+    fittedCamera = { center, pixelsPerMeter: scale };
+    labStore.getState().setCamera(center, scale);
   }
 
   function handleWheel(event: WheelEvent): void {
@@ -1194,6 +1247,9 @@ export function mountLabRenderer(
       if (state.activeTool !== previousState.activeTool) {
         stopPan();
         cancelActiveDrag();
+      }
+      if (state.selectedEntityId !== previousState.selectedEntityId) {
+        raiseSelected();
       }
       if ((dragState !== null && state.selectedEntityId !== dragState.entityId) || (pullState !== null && state.selectedEntityId !== pullState.entityId)) {
         cancelActiveDrag();

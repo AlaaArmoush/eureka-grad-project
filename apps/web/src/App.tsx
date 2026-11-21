@@ -342,10 +342,8 @@ export function App() {
       selectedEntityId: loaded.selectedEntityId,
       selectionNotice: null,
       activeTool: { kind: "select" },
-      cameraCenterWorldMeters: { ...loaded.camera.centerWorldMeters },
-      pixelsPerMeter: loaded.camera.pixelsPerMeter,
-      cameraInitialized: true,
-      pendingCameraView: loaded.camera,
+      // The canvas fits the new scene itself once it has drawn it, the same way the Fit button does.
+      pendingCameraView: null,
       overlayVisibility: { ...loaded.overlays },
     });
 
