@@ -178,26 +178,49 @@ function paintTarget(g: Graphics, radius: number, paint: TargetPaint): void {
   }
 }
 
-function paintBall(g: Graphics, radius: number): void {
+// One pigment per ball, so several balls in a scene can be told apart. The first is the original orange.
+export interface BallPigment {
+  readonly fill: number;
+  readonly shade: number;
+  readonly light: number;
+  readonly edge: number;
+}
+
+const ORANGE_PIGMENT: BallPigment = { fill: 0xf36b3f, shade: 0xb13b2b, light: 0xffc76d, edge: 0xbe432b };
+
+export const BALL_PIGMENTS: readonly BallPigment[] = [
+  ORANGE_PIGMENT,
+  { fill: 0x8a63d2, shade: 0x4e2d91, light: 0xd2bfff, edge: 0x5d3aa6 },
+  { fill: 0x1fa79a, shade: 0x0e5d55, light: 0x9ff0e4, edge: 0x137a70 },
+  { fill: 0xd9478f, shade: 0x8f2156, light: 0xffb3d6, edge: 0xa52a66 },
+  { fill: 0xe0a21a, shade: 0x8a5c05, light: 0xffe597, edge: 0xa8720a },
+];
+
+// The nth ball in a scene gets the nth pigment, repeating after the last.
+export function ballPigment(index: number): BallPigment {
+  return BALL_PIGMENTS[Math.max(0, index) % BALL_PIGMENTS.length] ?? ORANGE_PIGMENT;
+}
+
+function paintBall(g: Graphics, radius: number, pigment: BallPigment): void {
   // Fine pencil texture cannot fit inside a sub-ten-pixel ball.
   if (radius < 5) {
-    g.circle(0, 0, radius).fill(sceneColors.projectile)
-      .stroke({ color: sceneColors.reference, width: Math.min(.8, radius * .4) });
+    g.circle(0, 0, radius).fill(pigment.fill)
+      .stroke({ color: pigment.edge, width: Math.min(.8, radius * .4) });
     return;
   }
   g.ellipse(1, radius + 2, radius * 1.05, Math.max(1, radius * .22)).fill({ color: 0x7b6550, alpha: .06 });
-  g.circle(0, 0, radius).fill(sceneColors.projectile);
+  g.circle(0, 0, radius).fill(pigment.fill);
   // A quiet shaded rim and upper-left wash give the pigment some depth.
   g.moveTo(0, -radius).arc(0, 0, radius, -Math.PI / 2, Math.PI / 2)
-    .quadraticCurveTo(radius * .65, 0, 0, -radius).closePath().fill({ color: 0xb13b2b, alpha: .23 });
-  g.ellipse(-radius * .18, -radius * .20, radius * .62, radius * .66).fill({ color: 0xffc76d, alpha: .55 });
+    .quadraticCurveTo(radius * .65, 0, 0, -radius).closePath().fill({ color: pigment.shade, alpha: .23 });
+  g.ellipse(-radius * .18, -radius * .20, radius * .62, radius * .66).fill({ color: pigment.light, alpha: .55 });
   // Colored-pencil strokes stay inside the mathematically circular body.
   for (let index = 0; index < 6; index++) {
     const y = radius * (-.15 + index * .17);
     const extent = Math.sqrt(Math.max(0, radius * radius - y * y)) * .82;
-    pencilLine(g, -.05 * radius, y, extent, y - .16 * radius, sceneColors.reference, .65, .28);
+    pencilLine(g, -.05 * radius, y, extent, y - .16 * radius, pigment.edge, .65, .28);
   }
-  pencilEllipse(g, 0, 0, radius, radius, 0xbe432b, 1.3);
+  pencilEllipse(g, 0, 0, radius, radius, pigment.edge, 1.3);
   g.arc(-radius * .03, -radius * .03, radius * .7, Math.PI * 1.04, Math.PI * 1.48).stroke({ color: 0xffdfae, width: 1.2, alpha: .7, cap: "round" });
 }
 
@@ -230,13 +253,13 @@ function paintSurface(g: Graphics, width: number, height: number, ramp: boolean,
   }
 }
 
-export function paintEntity(g: Graphics, entity: Body | TargetTrigger, pixelsPerMeter: number, targetEntered: boolean, visible?: PaintBounds, targetPaint: TargetPaint = zoneColors.reached): void {
+export function paintEntity(g: Graphics, entity: Body | TargetTrigger, pixelsPerMeter: number, targetEntered: boolean, visible?: PaintBounds, targetPaint: TargetPaint = zoneColors.reached, pigment: BallPigment = ORANGE_PIGMENT): void {
   g.clear();
   const shape = entity.shape;
   if (shape.kind === "circle") {
     const radius = shape.radiusMeters * pixelsPerMeter;
     if (entity.kind === "target") paintTarget(g, radius, targetPaint);
-    else paintBall(g, radius);
+    else paintBall(g, radius, pigment);
     return;
   }
   const width = shape.widthMeters * pixelsPerMeter;

@@ -18,7 +18,7 @@ import {
 
 import { CAMERA_ZOOM, labStore } from "./store.js";
 import type { MoveEntityRequest, PlacementRequest } from "./authoring.js";
-import { createPaperTexture, sceneColors } from "./materials.js";
+import { ballPigment, createPaperTexture, sceneColors } from "./materials.js";
 import { createNotebookGrid } from "./sketchbook.js";
 import { createEntityVisual } from "./entity-visuals.js";
 
@@ -40,8 +40,10 @@ export const VELOCITY_ARROW_SCALE = {
 // Used only when there is no ground below the ball to land on.
 export const IDEAL_PREDICTION_DURATION_SECONDS = 2;
 
-// The trail shows only the last few seconds of motion, so a ball sliding along the ground does not draw forever.
-const TRAIL_DURATION_SECONDS = 3;
+// A ball's whole trail stays while it flies; this long after it first touches a surface, the trail starts erasing from its start.
+const TRAIL_AFTER_CONTACT_SECONDS = 3;
+// Memory bound for very long runs: keep at most this many recorded ticks (one minute at 60 Hz).
+const MAXIMUM_TRAIL_SAMPLES = 3600;
 
 interface RenderItem {
   readonly kind: "body" | "target";
@@ -98,6 +100,8 @@ function createRenderItems(
   scene: SceneDefinition,
   snapshot: Snapshot,
 ): readonly RenderItem[] {
+  const ballIds = scene.bodies.filter((body) => body.kind === "dynamic").map((body) => body.id);
+
   return [...scene.triggers, ...scene.bodies].map((entity) => {
     const pose = entity.kind === "target"
       ? entity.pose
@@ -105,7 +109,7 @@ function createRenderItems(
     if (pose === undefined) {
       throw new Error(`Snapshot omitted scene body "${entity.id}".`);
     }
-    const visual = createEntityVisual(entity);
+    const visual = createEntityVisual(entity, ballIds.indexOf(entity.id));
     return {
       kind: entity.kind === "target" ? "target" : "body",
       graphic: visual.graphic,
@@ -208,7 +212,7 @@ export function mountLabRenderer(
   // The simulated trail, recorded from the ticks this renderer is given to draw.
   let trailSamples: TrailSample[] = [];
 
-  const trailGraphic = new Graphics({ label: "selected-projectile-trail", });
+  const trailGraphic = new Graphics({ label: "projectile-trails" });
   const predictionGraphic = new Graphics({ label: "selected-projectile-ideal-prediction" });
   predictionGraphic.eventMode = "none";
   const challengePathGraphic = new Graphics({ label: "challenge-paths" });
@@ -418,48 +422,48 @@ export function mountLabRenderer(
     });
   }
 
-  function redrawSelectedTrail(
-    viewport: ViewportTransform,
-    selectedProjectile: ReturnType<typeof getSelectedProjectile>,
-  ): void {
+  // Every ball draws its own trail in its own colour, selected or not.
+  function redrawTrails(viewport: ViewportTransform): void {
     trailGraphic.clear();
 
-    if (!trailGraphic.visible || selectedProjectile === undefined) {
+    if (!trailGraphic.visible) {
       return;
     }
 
-    const trailPoints: Vector2[] = [];
+    const balls = currentScene.bodies.filter((body) => body.kind === "dynamic");
+    const waitTicks = Math.round(TRAIL_AFTER_CONTACT_SECONDS / currentScene.numericalProfile.fixedTimeStepSeconds);
+    const firstTick = trailSamples[0]?.tick ?? 0;
 
-    for (const sample of trailSamples) {
-      const positionMeters = sample.positionsMeters.get(selectedProjectile.id);
+    for (const [ballIndex, ball] of balls.entries()) {
+      const trailPoints: Vector2[] = [];
+      // Erasing starts a few seconds after the first touch and moves forward one tick per tick.
+      const contactTick = runEvents.find((event) => event.kind === "groundContact" && event.bodyId === ball.id)?.tick;
+      const oldestTick = contactTick === undefined ? firstTick : firstTick + Math.max(0, currentSnapshot.tick - contactTick - waitTicks);
 
-      if (positionMeters !== undefined) {
-        trailPoints.push(positionMeters);
+      for (const sample of trailSamples) {
+        const positionMeters = sample.positionsMeters.get(ball.id);
+
+        if (positionMeters !== undefined && sample.tick >= oldestTick) {
+          trailPoints.push(positionMeters);
+        }
       }
+
+      const [firstPointMeters, ...remainingPoints] = trailPoints;
+
+      if (firstPointMeters === undefined || remainingPoints.length === 0) {
+        continue;
+      }
+
+      const firstPoint = worldToScreen(firstPointMeters, viewport);
+      trailGraphic.moveTo(firstPoint.x, firstPoint.y);
+
+      for (const pointMeters of remainingPoints) {
+        const point = worldToScreen(pointMeters, viewport);
+        trailGraphic.lineTo(point.x, point.y);
+      }
+
+      trailGraphic.stroke({ color: ballPigment(ballIndex).edge, width: 1.7, alpha: 0.86, cap: "round", join: "round" });
     }
-
-    const [firstPointMeters, ...remainingPoints] = trailPoints;
-
-    if (firstPointMeters === undefined) {
-      return;
-    }
-
-    const firstPoint = worldToScreen(firstPointMeters, viewport);
-
-    trailGraphic.moveTo(firstPoint.x, firstPoint.y);
-
-    for (const pointMeters of remainingPoints) {
-      const point = worldToScreen(pointMeters, viewport);
-      trailGraphic.lineTo(point.x, point.y);
-    }
-
-    trailGraphic.stroke({
-      color: sceneColors.trail,
-      width: 1.7,
-      alpha: 0.86,
-      cap: "round",
-      join: "round",
-    });
   }
 
 
@@ -645,7 +649,7 @@ export function mountLabRenderer(
     }
     notebook.update(viewport, editorState.overlayVisibility.grid);
     const selectedProjectile = getSelectedProjectile(editorState.selectedEntityId);
-    redrawSelectedTrail(viewport, selectedProjectile);
+    redrawTrails(viewport);
     redrawChallengePaths(viewport);
     redrawSelectedVelocity(viewport, selectedProjectile);
     redrawSelectedPrediction(viewport, selectedProjectile);
@@ -695,12 +699,8 @@ export function mountLabRenderer(
 
     trailSamples.push({ tick: snapshot.tick, positionsMeters });
 
-    // Drop samples older than the trail duration.
-    const oldestTick = snapshot.tick - Math.round(TRAIL_DURATION_SECONDS / currentScene.numericalProfile.fixedTimeStepSeconds);
-    const firstKept = trailSamples.findIndex((sample) => sample.tick >= oldestTick);
-
-    if (firstKept > 0) {
-      trailSamples.splice(0, firstKept);
+    if (trailSamples.length > MAXIMUM_TRAIL_SAMPLES) {
+      trailSamples.splice(0, trailSamples.length - MAXIMUM_TRAIL_SAMPLES);
     }
   }
 
