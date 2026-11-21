@@ -1,9 +1,22 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import type { SceneDefinition } from "@eureka/contracts";
-import { Circle, Layers, Search, Target } from "lucide-react";
+import { Layers, Search } from "lucide-react";
 import { labStore } from "./store.js";
+// Supplies the same colours the canvas draws each object in.
+import { ballPigment, objectColor, zoneColors } from "./materials.js";
 // Supplies readable object names and kinds.
-import { objectKindLabel, objectName } from "./lab-messages.js";
+import { objectName, objectSummary } from "./lab-messages.js";
+
+type SceneEntity = SceneDefinition["bodies"][number] | SceneDefinition["triggers"][number];
+
+// A small swatch in the object's canvas colour: a ball in its own colour, a target ring as it looks before a hit,
+// and a surface bar tilted to its angle.
+function swatchStyle(entity: SceneEntity, ballIndex: number): CSSProperties {
+  const color = entity.kind === "dynamic" ? ballPigment(ballIndex).fill : entity.kind === "target" ? zoneColors.waiting.ink : objectColor(entity, 0);
+  const angleDegrees = entity.kind === "static" ? -entity.pose.angleRadians * 180 / Math.PI : 0;
+
+  return { "--swatch": `#${color.toString(16).padStart(6, "0")}`, transform: angleDegrees === 0 ? undefined : `rotate(${angleDegrees}deg)` } as CSSProperties;
+}
 
 // List the current scene independently of the property form and canvas lifetime.
 export function SceneOutline(props: {
@@ -11,7 +24,13 @@ export function SceneOutline(props: {
   selectedEntityId: string | null;
   onClose(): void;
 }) {
-  const entities = [...props.scene.bodies, ...props.scene.triggers];
+  // Group by kind so related objects sit together: balls, then surfaces, then targets.
+  const balls = props.scene.bodies.filter((body) => body.kind === "dynamic");
+  const entities = [
+    ...balls,
+    ...props.scene.bodies.filter((body) => body.kind === "static"),
+    ...props.scene.triggers,
+  ];
   const [search, setSearch] = useState("");
   const visibleEntities = entities.filter((entity) => entity.id.replaceAll("-", " ").toLowerCase().includes(search.trim().toLowerCase()));
   const outlineRef = useRef<HTMLElement>(null);
@@ -45,7 +64,6 @@ export function SceneOutline(props: {
         <h3 id="scene-outline-title"><Layers size={14} />Scene objects <span className="count-badge">{entities.length}</span></h3>
       </header>
       <label className="scene-search"><Search size={13} /><span className="visually-hidden">Filter scene objects</span><input type="search" placeholder="Find an object…" value={search} onChange={(event) => setSearch(event.currentTarget.value)} /></label>
-      <p className="scene-root"><span className="status-dot" />Experiment<span>2D</span></p>
       <ul className="bodies" aria-label="Scene objects">
         {visibleEntities.map((entity) => {
           return (
@@ -55,14 +73,15 @@ export function SceneOutline(props: {
                 title={entity.id}
                 aria-pressed={entity.id === props.selectedEntityId}
                 onClick={() => {
-                  labStore.getState().selectEntity(entity.id);
+                  // Clicking the selected object again clears the selection.
+                  labStore.getState().selectEntity(entity.id === props.selectedEntityId ? null : entity.id);
                   if (window.matchMedia("(max-width: 1100px)").matches) {
                     props.onClose();
                   }
                 }}
               >
-                {entity.kind === "target" ? <Target size={15} /> : entity.kind === "dynamic" ? <Circle size={15} /> : <Layers size={15} />}
-                <span>{objectName(entity.id)}<small>{objectKindLabel(entity.kind)}</small></span>
+                <span className={`object-swatch is-${entity.kind}`} style={swatchStyle(entity, balls.findIndex((ball) => ball.id === entity.id))} aria-hidden="true" />
+                <span>{objectName(entity.id)}<small>{objectSummary(entity)}</small></span>
               </button>
             </li>
           );

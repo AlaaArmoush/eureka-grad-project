@@ -6,6 +6,14 @@ export type { DemonstrationControl, DemonstrationOption } from "@eureka/contract
 
 export type DemonstrationParameters = Readonly<Record<string, string>>;
 
+// Questions whose lab step asks the learner to change one setting, by question id, and where that setting is edited.
+// The others already show everything side by side, so they open without a guide.
+// This belongs in the stored question data once the shared demonstration format gains a field for it.
+export const DEMONSTRATION_GUIDE_FIELDS: Readonly<Record<string, { readonly tab: "properties" | "environment"; readonly fieldName: string }>> = {
+  "angle-sweep": { tab: "properties", fieldName: "edit-angle" },
+  "linear-drag": { tab: "environment", fieldName: "environment-drag" },
+};
+
 // One investigation: two setups that differ in the primary variable, and shared settings for both.
 export interface DemonstrationDefinition extends SavedDemonstration {
   // Build a starting scene from one complete set of parameters, so no scene list has to be stored.

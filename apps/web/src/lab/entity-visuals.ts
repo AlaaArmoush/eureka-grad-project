@@ -2,17 +2,19 @@
 import type { Body, TargetTrigger, Vector2 } from "@eureka/contracts";
 import { Circle, Container, Graphics, Polygon } from "pixi.js";
 import { notebookLabel } from "./sketchbook.js";
-import { paintEntity, pencilEllipse, sceneColors, zoneColors, type PaintBounds } from "./materials.js";
+import { ballPigment, objectColor, paintEntity, pencilEllipse, sceneColors, zoneColors, type PaintBounds } from "./materials.js";
 import type { ChallengeZoneView } from "./store.js";
 
-export function createEntityVisual(entity: Body | TargetTrigger) {
+// ballIndex is this ball's place among the scene's balls; it picks the ball's colour.
+export function createEntityVisual(entity: Body | TargetTrigger, ballIndex = 0) {
+  const pigment = ballPigment(ballIndex);
   const graphic = new Container({ eventMode: "static", cursor: "pointer" });
   const geometry = new Graphics({ eventMode: "none" });
   const selection = new Graphics({ eventMode: "none" });
   const isGround = entity.id.toLowerCase().includes("ground");
   const isRamp = entity.id.toLowerCase().includes("ramp");
   const name = entity.kind === "target" ? "Target zone" : entity.kind === "dynamic" ? "Projectile" : isGround ? "Ground" : isRamp ? "Inclined plane" : "Platform";
-  const color = entity.kind === "target" ? sceneColors.target : entity.kind === "dynamic" ? sceneColors.reference : isGround ? sceneColors.ground : isRamp ? sceneColors.ramp : sceneColors.platform;
+  const color = objectColor(entity, ballIndex);
   const caption = notebookLabel(name, color);
   graphic.addChild(selection, geometry, caption);
   let paintKey = "";
@@ -48,7 +50,7 @@ export function createEntityVisual(entity: Body | TargetTrigger) {
     const selectionWash = selectionColor;
     if (key !== paintKey) {
       paintKey = key;
-      paintEntity(geometry, entity, scale, entered, visible, targetPaint);
+      paintEntity(geometry, entity, scale, entered, visible, targetPaint, pigment);
       selection.clear();
       if (selected && shape.kind === "circle") {
         const radius = shape.radiusMeters * scale + 8;

@@ -140,7 +140,7 @@ export function SceneInspector({ onClose, ...props }: ComponentProps<typeof Prop
             onReset={() => setEnvironmentError(null)}
           >
             <NumberField label="Gravity (m/s²)" name="environment-gravity" defaultValue={gravityStrength} rule="nonnegative" />
-            <NumberField label="Linear drag (kg/s)" name="environment-drag" defaultValue={props.editableScene.environment.linearDragKilogramsPerSecond} rule="nonnegative" />
+            <NumberField label="Linear drag b (kg/s)" name="environment-drag" defaultValue={props.editableScene.environment.linearDragKilogramsPerSecond} rule="nonnegative" />
             <details className="gravity-direction">
               <summary>Gravity direction</summary>
               <NumberField label="Gravity direction (° counterclockwise from right)" name="environment-direction" defaultValue={gravityDirectionDegrees} />

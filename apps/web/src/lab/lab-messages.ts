@@ -48,6 +48,34 @@ export function pullWorkText(joules: number): string {
   return `Your pull did ${joules.toFixed(2)} J of work`;
 }
 
+// Shown over an empty canvas.
+export const EMPTY_SCENE_HINT = "This scene is empty. Add a ball, then press Run.";
+
+// Two decimals at most, without trailing zeros: 17.32, 30, 0.5.
+function shortNumber(value: number): string {
+  return String(Number(value.toFixed(2)));
+}
+
+// One line for the scene list: what an object is and the numbers that matter most for it.
+export function objectSummary(entity: SceneObject): string {
+  if (entity.kind === "dynamic") {
+    const { x, y } = entity.velocity.linearMetersPerSecond;
+    const speed = Math.hypot(x, y);
+    return speed === 0 ? "Ball · at rest" : `Ball · ${shortNumber(speed)} m/s at ${shortNumber(Math.atan2(y, x) * 180 / Math.PI)}°`;
+  }
+
+  if (entity.kind === "target") {
+    return `Target · ${shortNumber(entity.shape.radiusMeters)} m radius`;
+  }
+
+  const size = `${shortNumber(entity.shape.widthMeters)} × ${shortNumber(entity.shape.heightMeters)} m`;
+  const angle = entity.pose.angleRadians * 180 / Math.PI;
+  return angle === 0 ? `Surface · ${size}` : `Surface · ${size} at ${shortNumber(angle)}°`;
+}
+
+// The bubble shown once above the setting a Curriculum question is about, when that question opens in the lab.
+export const FIELD_GUIDE = "Try changing this, then press Run.";
+
 // Shown when the run has more events than the lab keeps.
 export function eventLimitNote(limit: number): string {
   return `Only the first ${limit} events of this run are listed.`;
@@ -64,7 +92,7 @@ const FIELD_NAMES: readonly (readonly [string, string])[] = [
   ["positionMeters", "Position"],
   ["linearMetersPerSecond", "Launch velocity"],
   ["gravityMetersPerSecondSquared", "Gravity"],
-  ["linearDragKilogramsPerSecond", "Air resistance"],
+  ["linearDragKilogramsPerSecond", "Linear drag"],
 ];
 
 function fieldName(path: string): string | undefined {

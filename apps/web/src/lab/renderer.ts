@@ -18,7 +18,7 @@ import {
 
 import { CAMERA_ZOOM, labStore } from "./store.js";
 import type { MoveEntityRequest, PlacementRequest } from "./authoring.js";
-import { createPaperTexture, sceneColors } from "./materials.js";
+import { ballPigment, createPaperTexture, sceneColors } from "./materials.js";
 import { createNotebookGrid } from "./sketchbook.js";
 import { createEntityVisual } from "./entity-visuals.js";
 
@@ -40,8 +40,10 @@ export const VELOCITY_ARROW_SCALE = {
 // Used only when there is no ground below the ball to land on.
 export const IDEAL_PREDICTION_DURATION_SECONDS = 2;
 
-// The trail shows only the last few seconds of motion, so a ball sliding along the ground does not draw forever.
-const TRAIL_DURATION_SECONDS = 3;
+// A ball's whole trail stays while it flies; this long after it first touches a surface, the trail starts erasing from its start.
+const TRAIL_AFTER_CONTACT_SECONDS = 3;
+// Memory bound for very long runs: keep at most this many recorded ticks (one minute at 60 Hz).
+const MAXIMUM_TRAIL_SAMPLES = 3600;
 
 interface RenderItem {
   readonly kind: "body" | "target";
@@ -98,6 +100,8 @@ function createRenderItems(
   scene: SceneDefinition,
   snapshot: Snapshot,
 ): readonly RenderItem[] {
+  const ballIds = scene.bodies.filter((body) => body.kind === "dynamic").map((body) => body.id);
+
   return [...scene.triggers, ...scene.bodies].map((entity) => {
     const pose = entity.kind === "target"
       ? entity.pose
@@ -105,7 +109,7 @@ function createRenderItems(
     if (pose === undefined) {
       throw new Error(`Snapshot omitted scene body "${entity.id}".`);
     }
-    const visual = createEntityVisual(entity);
+    const visual = createEntityVisual(entity, ballIds.indexOf(entity.id));
     return {
       kind: entity.kind === "target" ? "target" : "body",
       graphic: visual.graphic,
@@ -149,8 +153,21 @@ function idealLandingTimeSeconds(scene: SceneDefinition, projectile: DynamicBody
   return (vy + Math.sqrt(vy * vy + 2 * g * (startY - landingY))) / g;
 }
 
+// Ideal position at time t from the starting conditions: x = x0 + vx·t + gx·t²/2, and the same for y.
+function idealPositionMeters(scene: SceneDefinition, projectile: DynamicBody, timeSeconds: number): Vector2 {
+  const position = projectile.pose.positionMeters;
+  const velocity = projectile.velocity.linearMetersPerSecond;
+  const gravity = scene.environment.gravityMetersPerSecondSquared;
+  const halfTimeSquared = 0.5 * timeSeconds * timeSeconds;
+
+  return {
+    x: position.x + velocity.x * timeSeconds + gravity.x * halfTimeSquared,
+    y: position.y + velocity.y * timeSeconds + gravity.y * halfTimeSquared,
+  };
+}
+
 // Draw an open-headed arrow between two screen positions.
-function drawVelocityArrow(graphic: Graphics, start: Vector2, tip: Vector2, widthPixels: number): void {
+function drawVelocityArrow(graphic: Graphics, start: Vector2, tip: Vector2, widthPixels: number, color: number = sceneColors.velocity): void {
   const lengthPixels = Math.hypot(tip.x - start.x, tip.y - start.y);
 
   if (lengthPixels === 0) {
@@ -171,10 +188,10 @@ function drawVelocityArrow(graphic: Graphics, start: Vector2, tip: Vector2, widt
     y: tip.y + headLengthPixels * Math.sin(reverseAngle + 0.45),
   };
 
-  // Back the blue strokes with paper for contrast.
+  // Back the coloured stroke with paper for contrast.
   for (const stroke of [
     { color: sceneColors.paper, width: 4 },
-    { color: sceneColors.velocity, width: widthPixels },
+    { color, width: widthPixels },
   ]) {
     graphic
       .moveTo(start.x, start.y)
@@ -208,7 +225,7 @@ export function mountLabRenderer(
   // The simulated trail, recorded from the ticks this renderer is given to draw.
   let trailSamples: TrailSample[] = [];
 
-  const trailGraphic = new Graphics({ label: "selected-projectile-trail", });
+  const trailGraphic = new Graphics({ label: "projectile-trails" });
   const predictionGraphic = new Graphics({ label: "selected-projectile-ideal-prediction" });
   predictionGraphic.eventMode = "none";
   const challengePathGraphic = new Graphics({ label: "challenge-paths" });
@@ -227,11 +244,17 @@ export function mountLabRenderer(
   horizontalVelocityGraphic.eventMode = "none";
 
   trailGraphic.eventMode = "none";
+  const launchGraphic = new Graphics({ label: "launch-arrows", alpha: 0.75 });
+  launchGraphic.eventMode = "none";
   const pullGraphic = new Graphics({ label: "pointer-pull-spring" });
   pullGraphic.eventMode = "none";
   let panState: PanState | null = null;
   let dragState: DragState | null = null;
   let pullState: PullState | null = null;
+  // A newly loaded scene is fitted on the next draw.
+  let fitPending = false;
+  // The camera the last fit chose; while it is unchanged, the view refits when the canvas changes size.
+  let fittedCamera: { readonly center: Vector2; readonly pixelsPerMeter: number } | null = null;
   // This run's events, so a target stays coloured after the tick it was entered.
   let runEvents: readonly SnapshotEvent[] = [];
   const background = new Graphics();
@@ -364,9 +387,6 @@ export function mountLabRenderer(
       return;
     }
 
-    const position = selectedProjectile.pose.positionMeters;
-    const velocity = selectedProjectile.velocity.linearMetersPerSecond;
-    const gravity = currentScene.environment.gravityMetersPerSecondSquared;
     const screenPoints: Vector2[] = [];
     const intervalCount = 100;
     const flightTimeSeconds = idealLandingTimeSeconds(currentScene, selectedProjectile);
@@ -374,12 +394,7 @@ export function mountLabRenderer(
     // Calculate 101 independent positions, including both endpoints.
     for (let index = 0; index <= intervalCount; index += 1) {
       const timeSeconds = flightTimeSeconds * index / intervalCount;
-      const halfTimeSquared = 0.5 * timeSeconds * timeSeconds;
-      const pointMeters = {
-        x: position.x + velocity.x * timeSeconds + gravity.x * halfTimeSquared,
-        y: position.y + velocity.y * timeSeconds + gravity.y * halfTimeSquared,
-      };
-      const point = worldToScreen(pointMeters, viewport);
+      const point = worldToScreen(idealPositionMeters(currentScene, selectedProjectile, timeSeconds), viewport);
       screenPoints.push(point);
 
       if (index === 0) {
@@ -418,48 +433,48 @@ export function mountLabRenderer(
     });
   }
 
-  function redrawSelectedTrail(
-    viewport: ViewportTransform,
-    selectedProjectile: ReturnType<typeof getSelectedProjectile>,
-  ): void {
+  // Every ball draws its own trail in its own colour, selected or not.
+  function redrawTrails(viewport: ViewportTransform): void {
     trailGraphic.clear();
 
-    if (!trailGraphic.visible || selectedProjectile === undefined) {
+    if (!trailGraphic.visible) {
       return;
     }
 
-    const trailPoints: Vector2[] = [];
+    const balls = currentScene.bodies.filter((body) => body.kind === "dynamic");
+    const waitTicks = Math.round(TRAIL_AFTER_CONTACT_SECONDS / currentScene.numericalProfile.fixedTimeStepSeconds);
+    const firstTick = trailSamples[0]?.tick ?? 0;
 
-    for (const sample of trailSamples) {
-      const positionMeters = sample.positionsMeters.get(selectedProjectile.id);
+    for (const [ballIndex, ball] of balls.entries()) {
+      const trailPoints: Vector2[] = [];
+      // Erasing starts a few seconds after the first touch and moves forward one tick per tick.
+      const contactTick = runEvents.find((event) => event.kind === "groundContact" && event.bodyId === ball.id)?.tick;
+      const oldestTick = contactTick === undefined ? firstTick : firstTick + Math.max(0, currentSnapshot.tick - contactTick - waitTicks);
 
-      if (positionMeters !== undefined) {
-        trailPoints.push(positionMeters);
+      for (const sample of trailSamples) {
+        const positionMeters = sample.positionsMeters.get(ball.id);
+
+        if (positionMeters !== undefined && sample.tick >= oldestTick) {
+          trailPoints.push(positionMeters);
+        }
       }
+
+      const [firstPointMeters, ...remainingPoints] = trailPoints;
+
+      if (firstPointMeters === undefined || remainingPoints.length === 0) {
+        continue;
+      }
+
+      const firstPoint = worldToScreen(firstPointMeters, viewport);
+      trailGraphic.moveTo(firstPoint.x, firstPoint.y);
+
+      for (const pointMeters of remainingPoints) {
+        const point = worldToScreen(pointMeters, viewport);
+        trailGraphic.lineTo(point.x, point.y);
+      }
+
+      trailGraphic.stroke({ color: ballPigment(ballIndex).edge, width: 1.7, alpha: 0.86, cap: "round", join: "round" });
     }
-
-    const [firstPointMeters, ...remainingPoints] = trailPoints;
-
-    if (firstPointMeters === undefined) {
-      return;
-    }
-
-    const firstPoint = worldToScreen(firstPointMeters, viewport);
-
-    trailGraphic.moveTo(firstPoint.x, firstPoint.y);
-
-    for (const pointMeters of remainingPoints) {
-      const point = worldToScreen(pointMeters, viewport);
-      trailGraphic.lineTo(point.x, point.y);
-    }
-
-    trailGraphic.stroke({
-      color: sceneColors.trail,
-      width: 1.7,
-      alpha: 0.86,
-      cap: "round",
-      join: "round",
-    });
   }
 
 
@@ -590,6 +605,33 @@ export function mountLabRenderer(
     pullGraphic.circle(pointer.x, pointer.y, 4).stroke({ color: sceneColors.ink, width: 1.5 });
   }
 
+  // Before the first tick, each ball shows a faint arrow along its launch velocity in its own colour,
+  // so the scene says what will happen. The selected ball already has its full velocity arrow.
+  function redrawLaunchArrows(viewport: ViewportTransform, selectedEntityId: string | null, velocityVisible: boolean): void {
+    launchGraphic.clear();
+
+    if (currentSnapshot.tick !== 0 || !velocityVisible) {
+      return;
+    }
+
+    const balls = currentScene.bodies.filter((body) => body.kind === "dynamic");
+
+    for (const [ballIndex, ball] of balls.entries()) {
+      const velocity = ball.velocity.linearMetersPerSecond;
+      const speed = Math.hypot(velocity.x, velocity.y);
+
+      if (ball.id === selectedEntityId || speed === 0) {
+        continue;
+      }
+
+      const lengthPixels = Math.min(VELOCITY_ARROW_SCALE.maximumLengthPixels, Math.max(VELOCITY_ARROW_SCALE.minimumLengthPixels, speed * VELOCITY_ARROW_SCALE.pixelsPerMeterPerSecond));
+      const start = worldToScreen(ball.pose.positionMeters, viewport);
+      // Screen y points down, so the velocity's y is flipped.
+      const tip = { x: start.x + velocity.x / speed * lengthPixels, y: start.y - velocity.y / speed * lengthPixels };
+      drawVelocityArrow(launchGraphic, start, tip, 1.5, ballPigment(ballIndex).edge);
+    }
+  }
+
   const resizeAndRender = (): void => {
     // Hidden pages retain their view instead of resizing it to a one-pixel canvas.
     if (!initialized || disposed || host.clientWidth === 0 || host.clientHeight === 0) {
@@ -600,7 +642,9 @@ export function mountLabRenderer(
     const height = host.clientHeight;
 
     // Resize the canvas only when its actual display dimensions change.
-    if (application.screen.width !== width || application.screen.height !== height) {
+    const resized = application.screen.width !== width || application.screen.height !== height;
+
+    if (resized) {
       application.renderer.resize(width, height);
     }
     if (backgroundWidth !== width || backgroundHeight !== height) {
@@ -618,8 +662,14 @@ export function mountLabRenderer(
       return;
     }
 
-    // First fitting waits until real visible dimensions are available.
-    if (!editorState.cameraInitialized) {
+    // Fit the first scene, a newly loaded scene, or a still-fitted view whose canvas changed size.
+    const stillFitted = fittedCamera !== null &&
+      editorState.pixelsPerMeter === fittedCamera.pixelsPerMeter &&
+      editorState.cameraCenterWorldMeters.x === fittedCamera.center.x &&
+      editorState.cameraCenterWorldMeters.y === fittedCamera.center.y;
+
+    if (!editorState.cameraInitialized || fitPending || (resized && stillFitted)) {
+      fitPending = false;
       fitScene();
       return;
     }
@@ -645,10 +695,11 @@ export function mountLabRenderer(
     }
     notebook.update(viewport, editorState.overlayVisibility.grid);
     const selectedProjectile = getSelectedProjectile(editorState.selectedEntityId);
-    redrawSelectedTrail(viewport, selectedProjectile);
+    redrawTrails(viewport);
     redrawChallengePaths(viewport);
     redrawSelectedVelocity(viewport, selectedProjectile);
     redrawSelectedPrediction(viewport, selectedProjectile);
+    redrawLaunchArrows(viewport, editorState.selectedEntityId, editorState.overlayVisibility.velocity);
     redrawPull(viewport);
 
     for (const item of renderItems.values()) {
@@ -695,12 +746,8 @@ export function mountLabRenderer(
 
     trailSamples.push({ tick: snapshot.tick, positionsMeters });
 
-    // Drop samples older than the trail duration.
-    const oldestTick = snapshot.tick - Math.round(TRAIL_DURATION_SECONDS / currentScene.numericalProfile.fixedTimeStepSeconds);
-    const firstKept = trailSamples.findIndex((sample) => sample.tick >= oldestTick);
-
-    if (firstKept > 0) {
-      trailSamples.splice(0, firstKept);
+    if (trailSamples.length > MAXIMUM_TRAIL_SAMPLES) {
+      trailSamples.splice(0, trailSamples.length - MAXIMUM_TRAIL_SAMPLES);
     }
   }
 
@@ -708,6 +755,12 @@ export function mountLabRenderer(
   function updateScene(nextScene: SceneDefinition, nextSnapshot: Snapshot): void {
     if (disposed) {
       return;
+    }
+
+    // A different or reloaded scene (a question, challenge or restored setup) is fitted; an edit keeps the view.
+    // Edits only raise the revision, so a lower one means the scene was loaded again.
+    if (nextScene.id !== currentScene.id || nextScene.revision < currentScene.revision) {
+      fitPending = true;
     }
 
     currentScene = structuredClone(nextScene);
@@ -982,6 +1035,18 @@ export function mountLabRenderer(
     resizeAndRender();
   }
 
+  // Draw the selected object above the others, so a ball hidden under another ball shows when picked.
+  function raiseSelected(): void {
+    const item = renderItems.get(labStore.getState().selectedEntityId ?? "");
+
+    if (!initialized || item === undefined) {
+      return;
+    }
+
+    const overlayIndex = application.stage.getChildIndex(horizontalVelocityGraphic);
+    application.stage.setChildIndex(item.graphic, overlayIndex - 1);
+  }
+
   // Replace authoring graphics synchronously inside the existing application.
   function rebuildRenderItems(): void {
     const nextItems = createRenderItems(
@@ -1011,6 +1076,8 @@ export function mountLabRenderer(
       const overlayIndex = application.stage.getChildIndex(horizontalVelocityGraphic);
       application.stage.addChildAt(item.graphic, overlayIndex);
     }
+
+    raiseSelected();
   }
 
   function fitScene(): void {
@@ -1044,21 +1111,41 @@ export function mountLabRenderer(
         include(positionMeters.x, positionMeters.y);
       }
     }
-    // The ideal path may extend beyond the experiment; it must not shrink the authored objects.
+    // Frame where each ball is going, so a launched ball starts near the left with room for its flight.
+    for (const entity of currentScene.bodies) {
+      if (entity.kind !== "dynamic") {
+        continue;
+      }
+
+      const flightSeconds = idealLandingTimeSeconds(currentScene, entity);
+
+      for (let index = 1; index <= 24; index += 1) {
+        const point = idealPositionMeters(currentScene, entity, flightSeconds * index / 24);
+        include(point.x, point.y, entity.shape.radiusMeters, entity.shape.radiusMeters);
+      }
+    }
     if (currentScene.bodies.length + currentScene.triggers.length === 0) {
       editorState.setCamera({ x: 0, y: 0 }, CAMERA_ZOOM.basePixelsPerMeter);
       return;
     }
+    // Leave a margin around the frame, and never zoom in past the normal 100% scale.
     const scale = Math.max(.01, Math.min(
-      CAMERA_ZOOM.basePixelsPerMeter * 2,
-      Math.max(1, application.screen.width - 80) / Math.max(1, bounds.width),
-      Math.max(1, application.screen.height - 128) / Math.max(1, bounds.height),
+      CAMERA_ZOOM.basePixelsPerMeter,
+      Math.max(1, application.screen.width * .8) / Math.max(1, bounds.width),
+      Math.max(1, application.screen.height * .7) / Math.max(1, bounds.height),
     ));
-    labStore.getState().setCamera({
+    // With a ground plane, its top sits 15% above the canvas bottom instead of floating mid-screen;
+    // the frame is at most 70% of the canvas tall, so everything above the ground still fits.
+    const groundTops = currentScene.bodies.filter(isGroundPlane).map((ground) => ground.pose.positionMeters.y + ground.shape.heightMeters / 2);
+    const groundTop = groundTops.length === 0 ? undefined : Math.max(...groundTops);
+    const center = {
       x: bounds.x + bounds.width / 2,
-      // Reserve more room for the title/tools above the diagram.
-      y: bounds.y + bounds.height / 2 + 25 / scale,
-    }, scale);
+      // Without a ground, reserve a little room for the canvas tools above the diagram.
+      y: groundTop === undefined ? bounds.y + bounds.height / 2 + 25 / scale : groundTop + 0.35 * application.screen.height / scale,
+    };
+
+    fittedCamera = { center, pixelsPerMeter: scale };
+    labStore.getState().setCamera(center, scale);
   }
 
   function handleWheel(event: WheelEvent): void {
@@ -1109,7 +1196,7 @@ export function mountLabRenderer(
     application.stage.addChild(paper, notebook.root);
     // Paths stay behind bodies; arrows and the pull line go above them.
     application.stage.addChild(
-      trailGraphic, challengePathGraphic, predictionGraphic,
+      trailGraphic, challengePathGraphic, predictionGraphic, launchGraphic,
       horizontalVelocityGraphic, verticalVelocityGraphic, velocityGraphic, pullGraphic,
     );
     application.stage.addChildAt(background, 0);
@@ -1195,6 +1282,9 @@ export function mountLabRenderer(
         stopPan();
         cancelActiveDrag();
       }
+      if (state.selectedEntityId !== previousState.selectedEntityId) {
+        raiseSelected();
+      }
       if ((dragState !== null && state.selectedEntityId !== dragState.entityId) || (pullState !== null && state.selectedEntityId !== pullState.entityId)) {
         cancelActiveDrag();
       }
@@ -1253,6 +1343,7 @@ export function mountLabRenderer(
       verticalVelocityGraphic.destroy();
       predictionGraphic.destroy();
       challengePathGraphic.destroy();
+      launchGraphic.destroy();
       pullGraphic.destroy();
       notebook.root.destroy({ children: true });
     }

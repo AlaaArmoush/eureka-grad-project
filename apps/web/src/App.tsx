@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type KeyboardEvent as ReactKeyboardEvent } from "react";
 // Supply the lab's starting 20 m/s, 30° projectile scene.
 import { PROJECTILE_LAB_MOCK } from "./lab/mocks.js";
 import type { MoveEntityRequest, PlacementRequest } from "./lab/authoring";
@@ -6,9 +6,9 @@ import { ObjectLibrary } from "./lab/ObjectLibrary";
 import {
   Atom,
   Activity,
+  ArrowLeft,
   ChevronDown,
   ChevronRight,
-  Crosshair,
   Layers,
   BookOpen,
   CircleHelp,
@@ -51,7 +51,8 @@ import { useDemonstrationCatalogue } from "./lab/demonstration-client.js";
 import { ChallengesPage } from "./pages/ChallengesPage.js";
 import { createWorkspaceNavigation, type WorkspacePage } from "./navigation.js";
 // Supplies learner-facing wording for engine and controller problems.
-import { describeProblem, LAB_NOT_READY, RUN_STOPPED } from "./lab/lab-messages.js";
+import { describeProblem, EMPTY_SCENE_HINT, FIELD_GUIDE, LAB_NOT_READY, RUN_STOPPED } from "./lab/lab-messages.js";
+import { DEMONSTRATION_GUIDE_FIELDS } from "./lab/demonstrations.js";
 
 const WORKSPACE_NAVIGATION = [
   {
@@ -92,6 +93,13 @@ export function App() {
   const [labVisible, setLabVisible] = useState(true);
   const [navigation] = useState(() => createWorkspaceNavigation(window));
   const activePage = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot);
+
+  // The browser's Back and Forward change page too; a "try it" bubble never outlives the lab page.
+  useEffect(() => {
+    if (activePage !== "laboratory") {
+      labStore.getState().setFieldGuide(null);
+    }
+  }, [activePage]);
   // The sidebar's Curriculum link returns to where the student left off, not to the topic list.
   const lastCurriculumPageRef = useRef<"curriculum" | "projectiles">("curriculum");
 
@@ -108,6 +116,10 @@ export function App() {
   const challenge = useChallengeSession(setEditableScene, controllerRef);
   const reportEngineFailure = challenge.onEngineFailure;
   const challengeActive = challenge.session !== null;
+  // The open Curriculum question's title, shown in the breadcrumb; none for the learner's own scene or a challenge.
+  const openQuestionTitle = activeDemonstration === null || challengeActive || demonstrationCatalogue.catalogue.status !== "ready"
+    ? null
+    : demonstrationCatalogue.catalogue.demonstrations.find((demonstration) => demonstration.id === activeDemonstration.groupId)?.title ?? null;
   const [sceneOutlineOpen, setSceneOutlineOpen] = useState(() => window.matchMedia("(min-width: 1101px)").matches);
   const [inspectorOpen, setInspectorOpen] = useState(() => window.matchMedia("(min-width: 901px)").matches);
   const [measurementsOpen, setMeasurementsOpen] = useState(true);
@@ -143,6 +155,7 @@ export function App() {
   }
 
   function toggleInspector(): void {
+    labStore.getState().setFieldGuide(null);
     setInspectorOpen((open) => !open);
     if (!inspectorOpen && window.matchMedia("(max-width: 900px)").matches) {
       setSceneOutlineOpen(false);
@@ -150,6 +163,7 @@ export function App() {
   }
 
   function closeInspector(): void {
+    labStore.getState().setFieldGuide(null);
     setInspectorOpen(false);
     inspectorToggleRef.current?.focus();
   }
@@ -339,14 +353,15 @@ export function App() {
 
     setDisplayedSnapshot(loaded.initialSnapshot);
     labStore.setState({
-      selectedEntityId: loaded.selectedEntityId,
+      // A loaded scene opens with nothing selected, on the Environment panel; the learner picks what to inspect.
+      selectedEntityId: null,
+      inspectorTab: "environment",
       selectionNotice: null,
       activeTool: { kind: "select" },
-      cameraCenterWorldMeters: { ...loaded.camera.centerWorldMeters },
-      pixelsPerMeter: loaded.camera.pixelsPerMeter,
-      cameraInitialized: true,
-      pendingCameraView: loaded.camera,
+      // The canvas fits the new scene itself once it has drawn it, the same way the Fit button does.
+      pendingCameraView: null,
       overlayVisibility: { ...loaded.overlays },
+      fieldGuide: null,
     });
 
     setSceneGeneration((generation) => generation + 1);
@@ -364,6 +379,16 @@ export function App() {
     applyLoad(loaded);
     // The overlay's ghost paths also carry a demonstration's reference flight; a challenge or the next load replaces them.
     labStore.getState().setChallengeOverlay({ zones: [], live: [], ghosts: loaded.referencePaths });
+
+    // For a question that asks the learner to change one setting: open the inspector on its tab and show a "try it" bubble.
+    const field = DEMONSTRATION_GUIDE_FIELDS[loaded.selection.groupId];
+
+    if (field !== undefined) {
+      setInspectorOpen(true);
+      // A ball setting needs its ball selected so the field is on screen; scene settings need no selection.
+      const guidedEntityId = field.tab === "properties" ? loaded.selectedEntityId : null;
+      labStore.setState({ selectedEntityId: guidedEntityId, inspectorTab: field.tab, fieldGuide: { fieldName: field.fieldName, message: FIELD_GUIDE } });
+    }
   }
 
   function applyChallenge(loaded: ChallengeLoad): void {
@@ -378,6 +403,8 @@ export function App() {
 
     const editor = labStore.getState();
     editor.setActiveTool({ ...editor.activeTool });
+    // A "try it" bubble belongs to the page it was shown on.
+    editor.setFieldGuide(null);
 
     navigation.navigate(page);
 
@@ -422,6 +449,25 @@ export function App() {
     }
 
     reportLabResult(context, controller[action]());
+  }
+
+  // Lab shortcuts: Space runs or pauses, "." steps one tick, R resets. Typing in a field is never intercepted.
+  function handleLabShortcut(event: ReactKeyboardEvent<HTMLElement>): void {
+    const target = event.target as HTMLElement;
+
+    if (playbackState === null || event.altKey || event.ctrlKey || event.metaKey || target.closest("input, textarea, select, [contenteditable='true']") !== null) {
+      return;
+    }
+
+    // A focused button already answers Space itself.
+    if (event.key === " " && target.closest("button") === null) {
+      event.preventDefault();
+      handlePlaybackAction(playbackState.playing ? "pause" : "play");
+    } else if (event.key === "." && !playbackState.playing) {
+      handlePlaybackAction("stepOnce");
+    } else if (event.key === "r" || event.key === "R") {
+      handlePlaybackAction("reset");
+    }
   }
 
   // Accept only a speed listed by the existing controller boundary.
@@ -609,7 +655,8 @@ export function App() {
                   aria-current={activePage === id || (id === "curriculum" && activePage === "projectiles") ? "page" : undefined}
                   aria-label={label}
                   title={label}
-                  onClick={() => navigateTo(id === "curriculum" ? lastCurriculumPageRef.current : id)}
+                  // From inside Curriculum the link goes to the topic list; from elsewhere it returns where you were.
+                  onClick={() => navigateTo(id !== "curriculum" ? id : activePage === "curriculum" || activePage === "projectiles" ? "curriculum" : lastCurriculumPageRef.current)}
                 ><Icon size={18} /><span>{label}</span></button>
               ) : (
                 <button key={id} className="rail-link" type="button" aria-label={label} title={label} disabled><Icon size={18} /><span>{label}</span></button>
@@ -628,16 +675,27 @@ export function App() {
         <div className="workspace-topbar">
           <button className="tool-btn navigation-toggle" type="button" aria-label="Toggle main navigation" title="Toggle main navigation" aria-expanded={navigationOpen} aria-controls="eureka-navigation" onClick={() => setNavigationOpen((open) => !open)}><PanelLeft size={18} /></button>
           <div className="workspace-breadcrumb">
-            <span>Workspace</span><ChevronRight size={12} />
             {activePage === "laboratory" ? (
-              <><span>Physics lab</span><ChevronRight size={12} /><strong>Projectiles</strong></>
+              openQuestionTitle !== null
+                ? <><button className="crumb-link" type="button" onClick={() => navigateTo("curriculum")}>Curriculum</button><ChevronRight size={12} /><button className="crumb-link" type="button" onClick={() => navigateTo("projectiles")}>Projectiles</button><ChevronRight size={12} /><strong>{openQuestionTitle}</strong></>
+                : <strong>Physics lab</strong>
             ) : activePage === "challenges" ? (
               <><span>Challenges</span><ChevronRight size={12} /><strong>Projectiles</strong></>
             ) : (
-              <><span>Curriculum</span>{activePage === "projectiles" && <><ChevronRight size={12} /><strong>Projectiles</strong></>}</>
+              activePage === "projectiles"
+                ? <><button className="crumb-link" type="button" onClick={() => navigateTo("curriculum")}>Curriculum</button><ChevronRight size={12} /><strong>Projectiles</strong></>
+                : <span>Curriculum</span>
             )}
           </div>
-          <span className="local-status"><span className="status-dot" />Local workspace</span>
+          {/* The lab's page actions live in the top bar, so the canvas gets the vertical space. */}
+          {activePage === "laboratory" && (
+            <div className="topbar-actions">
+              {activeDemonstration !== null && !challengeActive && (
+                <button className="tool-btn" type="button" onClick={() => navigateTo("projectiles")}><ArrowLeft size={14} />Back to question</button>
+              )}
+              <button className="tool-btn lab-power" onClick={() => setLabVisible((visible) => !visible)} type="button"><Power size={14} />{labVisible ? "Leave lab" : "Enter lab"}</button>
+            </div>
+          )}
         </div>
         <CurriculumPage
           visible={activePage === "curriculum" || activePage === "projectiles"}
@@ -652,13 +710,9 @@ export function App() {
           onReturnToLab={() => navigateTo("laboratory")}
         />
         <ChallengesPage visible={activePage === "challenges"} error={labError} onPlay={handleChallengeOpen} />
-        <main id="laboratory" className="lab-shell" hidden={activePage !== "laboratory"}>
-          <header className="lab-header">
-            <div className="experiment-heading"><span className="experiment-mark"><Atom size={21} /></span><div><h1 ref={labHeadingRef} tabIndex={-1}>Projectile laboratory</h1><p>Build a scene. Follow the physics.</p></div><span className="scene-badge">{challengeActive ? "Challenge" : "Your scene"}</span></div>
-            <div className="header-actions">
-              <button className="tool-btn lab-power" onClick={() => setLabVisible((visible) => !visible)} type="button"><Power size={14} />{labVisible ? "Leave lab" : "Enter lab"}</button>
-            </div>
-          </header>
+        <main id="laboratory" className="lab-shell" hidden={activePage !== "laboratory"} onKeyDown={handleLabShortcut}>
+          {/* The breadcrumb already names the page; this heading is for screen readers and focus after navigation. */}
+          <h1 ref={labHeadingRef} tabIndex={-1} className="visually-hidden">Physics lab</h1>
           <div ref={viewportRef} className={`lab-layout${sceneOutlineOpen ? " scene-open" : ""}${inspectorOpen ? "" : " inspector-closed"}`}>
             <aside id="editor-panels" className="scene-dock" aria-label="Scene and object library" hidden={!sceneOutlineOpen}>
               <div className="scene-dock-tabs" aria-label="Editor panels">
@@ -675,9 +729,9 @@ export function App() {
             <div className="workbench-column">
               <div className="playback-bar">
                 <div className="transport-controls">
-                  <span className="playback-action" title={playbackState?.playing ? "Pause" : "Play"}>
+                  <span className="playback-action" title={playbackState?.playing ? "Pause (Space)" : "Run (Space)"}>
                     <button
-                      className="run-button"
+                      className={`run-button${playbackState?.playing ? " is-running" : ""}`}
                       aria-label={playbackState?.playing ? "Pause" : "Play"} type="button"
                       disabled={playbackState?.playing !== true && !playbackReady}
                       onClick={() => handlePlaybackAction(playbackState?.playing ? "pause" : "play")}
@@ -685,7 +739,7 @@ export function App() {
                       {playbackState?.playing ? <Pause size={14} /> : <Play size={14} />}<span>{playbackState?.playing ? "Pause" : "Run"}</span>
                     </button>
                   </span>
-                  <span className="playback-action" title="Step">
+                  <span className="playback-action" title="Step one tick (.)">
                     <button
                       aria-label="Step" type="button"
                       disabled={!playbackReady || playbackState?.playing === true}
@@ -694,7 +748,7 @@ export function App() {
                       <StepForward size={14} />
                     </button>
                   </span>
-                  <span className="playback-action" title="Reset">
+                  <span className="playback-action" title="Reset (R)">
                     <button
                       aria-label="Reset" type="button"
                       disabled={playbackState === null}
@@ -721,47 +775,44 @@ export function App() {
                   {playbackState === null
                     ? "Unavailable"
                     : playbackState.playing
-                      ? "Playing"
-                      : "Paused"}
+                      ? "Running"
+                      : displayedSnapshot.tick === 0 ? "Ready" : "Paused"}
                 </span>
                 {playbackState?.unableToMaintainRealTimeSpeed && (
                   <span role="status">Unable to maintain real-time speed.</span>
                 )}
                 <div className="transport-readouts"><span>Time <b>{displayedSnapshot.simulationTimeSeconds.toFixed(3)} <small>s</small></b></span><span>Tick <b>{displayedSnapshot.tick}</b></span></div>
+                <div className="viewport-actions">
+                  <button className="tool-btn add-object-toolbar" type="button" onClick={openObjectLibrary}><Plus size={14} />Add</button>
+                  <button
+                    ref={outlineToggleRef}
+                    className="tool-btn"
+                    type="button"
+                    aria-label="Scene"
+                    title="Scene objects"
+                    aria-expanded={sceneOutlineOpen}
+                    aria-controls="editor-panels"
+                    onClick={toggleSceneOutline}
+                  >
+                    <PanelLeft size={14} /><span className="tool-label">Scene</span>
+                  </button>
+                  <button ref={inspectorToggleRef} className="tool-btn" type="button" aria-label="Toggle inspector" title="Toggle inspector" aria-expanded={inspectorOpen} aria-controls="inspector-dock" onClick={toggleInspector}><Settings2 size={14} /><span className="tool-label">Inspector</span></button>
+                  <button
+                    className="tool-btn"
+                    type="button"
+                    aria-label={viewportExpanded ? "Exit expanded viewport" : "Expand viewport"}
+                    title={viewportExpanded ? "Exit expanded viewport" : "Expand viewport"}
+                    disabled={!document.fullscreenEnabled}
+                    onClick={() => { void toggleViewportSize(); }}
+                  >
+                    {viewportExpanded ? <Shrink size={14} /> : <Expand size={14} />}
+                  </button>
+                </div>
               </div>
               <section className="canvas" aria-label="Scene viewport">
-                <header className="panel-heading">
-                  <h2><Crosshair size={14} />Viewport<span className="viewport-dimension">2D</span></h2>
-                  <div className="viewport-actions">
-                    <button className="tool-btn add-object-toolbar" type="button" onClick={openObjectLibrary}><Plus size={14} />Add</button>
-                    <button
-                      ref={outlineToggleRef}
-                      className="tool-btn"
-                      type="button"
-                      aria-label="Scene"
-                      title="Scene objects"
-                      aria-expanded={sceneOutlineOpen}
-                      aria-controls="editor-panels"
-                      onClick={toggleSceneOutline}
-                    >
-                      <PanelLeft size={14} /><span className="tool-label">Scene</span>
-                    </button>
-                    <button ref={inspectorToggleRef} className="tool-btn" type="button" aria-label="Toggle inspector" title="Toggle inspector" aria-expanded={inspectorOpen} aria-controls="inspector-dock" onClick={toggleInspector}><Settings2 size={14} /><span className="tool-label">Inspector</span></button>
-                    <button
-                      className="tool-btn"
-                      type="button"
-                      aria-label={viewportExpanded ? "Exit expanded viewport" : "Expand viewport"}
-                      title={viewportExpanded ? "Exit expanded viewport" : "Expand viewport"}
-                      disabled={!document.fullscreenEnabled}
-                      onClick={() => { void toggleViewportSize(); }}
-                    >
-                      {viewportExpanded ? <Shrink size={14} /> : <Expand size={14} />}
-                    </button>
-                  </div>
-                </header>
                 <div className="canvas-workbench">
                   <div className="canvas-page">
-                    <div className="canvas-heading"><span>— Motion study</span>
+                    <div className="canvas-heading">
                       <CanvasTools />
                     </div>
                     {labVisible ? (
@@ -775,6 +826,13 @@ export function App() {
                         onMoveRequested={handleMoveRequested} onDeleteRequested={handleDeleteRequested}
                       />
                     ) : <div className="closed-lab"><Atom size={32} /><p>Your laboratory is closed.</p><button type="button" className="tool-btn" onClick={() => setLabVisible(true)}>Enter lab</button></div>}
+                    {/* An empty scene says what to do next instead of showing blank paper. */}
+                    {labVisible && editableScene.bodies.length + editableScene.triggers.length === 0 && (
+                      <div className="canvas-empty">
+                        <p>{EMPTY_SCENE_HINT}</p>
+                        <button type="button" className="tool-btn" onClick={openObjectLibrary}><Plus size={14} />Add an object</button>
+                      </div>
+                    )}
                     {/* Messages float over the paper so the canvas never changes size; the next successful action or the close button clears them. */}
                     {(selectionNotice !== null || labError !== null || viewportError !== null) && (
                       <div className="canvas-notices">
