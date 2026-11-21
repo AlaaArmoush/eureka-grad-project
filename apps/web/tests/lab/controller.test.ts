@@ -7,7 +7,7 @@ import {
   DEFAULT_PROJECTILE_PROPERTIES, DEFAULT_RAMP_PROPERTIES, DEFAULT_TARGET_PROPERTIES,
 } from "../../src/lab/authoring.js";
 
-function createPlaybackHarness(playbackBrowser?: PlaybackBrowser, stopAtTick?: number) {
+function createPlaybackHarness(playbackBrowser?: PlaybackBrowser) {
   let nowMilliseconds = 0;
   let tick = 0;
   const scene = structuredClone(PROJECTILE_LAB_MOCK.scene);
@@ -61,7 +61,6 @@ function createPlaybackHarness(playbackBrowser?: PlaybackBrowser, stopAtTick?: n
     nowMilliseconds: () => nowMilliseconds,
     playbackBrowser,
     onPlaybackChange,
-    stopAtTick,
   });
 
   if (!result.ok) {
@@ -87,7 +86,7 @@ function createPlaybackHarness(playbackBrowser?: PlaybackBrowser, stopAtTick?: n
   };
 }
 
-function createBrowserHarness(initiallyHidden = false, stopAtTick?: number) {
+function createBrowserHarness(initiallyHidden = false) {
   let hidden = initiallyHidden;
   let nextFrameHandle = 1;
   const pendingFrames = new Map<number, () => void>();
@@ -119,7 +118,7 @@ function createBrowserHarness(initiallyHidden = false, stopAtTick?: number) {
     onFrameResult: vi.fn<PlaybackBrowser["onFrameResult"]>(),
   };
 
-  const h = createPlaybackHarness(browser, stopAtTick);
+  const h = createPlaybackHarness(browser);
 
   return {
     ...h,
@@ -612,37 +611,6 @@ it("does not publish readouts during or after disposal", () => {
   expect(h.readouts).toHaveLength(readoutCount);
 });
 
-// A finite sample must stop on its last accepted tick, even during a longer catch-up callback.
-it("pauses at a finite sample boundary without an extra engine call", () => {
-  const h = createBrowserHarness(false, 3);
-  h.controller.play();
-  h.runFrameAt(100);
-
-  expect(h.engine.advance).toHaveBeenCalledTimes(3);
-  expect(h.engine.advance.mock.calls.every(([count]) => count === 1)).toBe(true);
-  expect(h.controller.getPlaybackState().playing).toBe(false);
-  expect(h.pendingFrameCount()).toBe(0);
-  expect(h.readouts.at(-1)?.tick).toBe(3);
-  expect(h.controller.play().ok).toBe(false);
-  expect(h.controller.stepOnce().ok).toBe(false);
-  expect(h.engine.advance).toHaveBeenCalledTimes(3);
-
-  h.controller.reset();
-  expect(h.readouts.at(-1)?.tick).toBe(0);
-  expect(h.controller.play()).toEqual({ ok: true });
-  expect(h.pendingFrameCount()).toBe(1);
-});
-
-// A zero-length sample starts at its boundary and cannot schedule a physics advance.
-it("keeps a sample ending at tick zero paused", () => {
-  const h = createBrowserHarness(false, 0);
-
-  expect(h.controller.play().ok).toBe(false);
-  expect(h.controller.stepOnce().ok).toBe(false);
-  expect(h.pendingFrameCount()).toBe(0);
-  expect(h.engine.advance).not.toHaveBeenCalled();
-});
-
 // Physical authoring during playback must be rejected before any starting-scene mutation.
 it.each([
   { name: "projectile placement", edit: (c: LabController) => c.placeProjectile({ x: 20, y: 20 }) },
@@ -671,7 +639,7 @@ it.each([
 // Zero coordinates are valid when the proposed object does not penetrate a static surface.
 it.each([
   { entityId: "projectile", position: { x: 0, y: 1 } },
-  { entityId: "projectile", position: { x: 25, y: 0 } },
+  { entityId: "projectile", position: { x: 700, y: 0 } },
   { entityId: "ramp", position: { x: 0, y: 0 } },
   { entityId: "target", position: { x: 0, y: 0 } },
 ])("accepts paused coordinate editing for $entityId at $position without replacing its identity or other properties", ({ entityId, position }) => {
@@ -700,7 +668,7 @@ it.each([
   expect(h.controller.getPlaybackState().playing).toBe(false);
 });
 
-// Ground occupies x=[-10,20], y=[-0.5,0]; a radius-0.1 ball centred at the origin penetrates it.
+// Ground occupies x=[-600,600], y=[-0.5,0]; a radius-0.1 ball centred at the origin penetrates it.
 it("rejects a coordinate edit that embeds the projectile in the ground and preserves the accepted scene", () => {
   const h = createPlaybackHarness();
   const accepted = h.controller.copyScene();

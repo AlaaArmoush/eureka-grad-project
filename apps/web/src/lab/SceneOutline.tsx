@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import type { SceneDefinition } from "@eureka/contracts";
 import { Circle, Layers, Search, Target } from "lucide-react";
 import { labStore } from "./store.js";
+// Supplies readable object names and kinds.
+import { objectKindLabel, objectName } from "./lab-messages.js";
 
 // List the current scene independently of the property form and canvas lifetime.
 export function SceneOutline(props: {
@@ -46,7 +48,6 @@ export function SceneOutline(props: {
       <p className="scene-root"><span className="status-dot" />Experiment<span>2D</span></p>
       <ul className="bodies" aria-label="Scene objects">
         {visibleEntities.map((entity) => {
-          const name = entity.id.replaceAll("-", " ");
           return (
             <li key={entity.id}>
               <button
@@ -61,7 +62,7 @@ export function SceneOutline(props: {
                 }}
               >
                 {entity.kind === "target" ? <Target size={15} /> : entity.kind === "dynamic" ? <Circle size={15} /> : <Layers size={15} />}
-                <span>{name.charAt(0).toUpperCase() + name.slice(1)}<small>{entity.kind === "target" ? "Sensor" : entity.kind === "dynamic" ? "Dynamic body" : "Fixed surface"}</small></span>
+                <span>{objectName(entity.id)}<small>{objectKindLabel(entity.kind)}</small></span>
               </button>
             </li>
           );

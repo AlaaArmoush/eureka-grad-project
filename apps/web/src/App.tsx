@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
-// Supply the reviewed static observation and its consecutive playback frames.
-import { PROJECTILE_LAB_MOCK, PROJECTILE_PLAYBACK_SNAPSHOTS } from "./lab/mocks.js";
+// Supply the lab's starting 20 m/s, 30° projectile scene.
+import { PROJECTILE_LAB_MOCK } from "./lab/mocks.js";
 import type { MoveEntityRequest, PlacementRequest } from "./lab/authoring";
 import { ObjectLibrary } from "./lab/ObjectLibrary";
 import {
@@ -36,13 +36,13 @@ import { PLAYBACK_SPEEDS, type LabController, type PlaybackState } from "./lab/c
 // Describe operation results displayed by the playback controls.
 import type { EngineStatus } from "@eureka/engine";
 import { LabCanvas } from "./lab/LabCanvas";
-import type { ChallengeDefinition, Snapshot, SceneDefinition } from "@eureka/contracts";
+import type { ChallengeDefinition, Snapshot, SnapshotEvent, SceneDefinition } from "@eureka/contracts";
 import "./App.css";
 import { CanvasTools } from "./lab/CanvasTools.js";
 import { SceneInspector } from "./lab/SceneInspector.js";
 import { SceneOutline } from "./lab/SceneOutline.js";
 import { ObservationNotebook } from "./lab/ObservationNotebook.js";
-import { prepareChallengeLoad, prepareDemonstrationLoad, type ChallengeLoad, type DemonstrationLoad, type DemonstrationSelection, type SceneLoad } from "./lab/demo-loading.js";
+import { copyInitialSnapshot, prepareChallengeLoad, prepareDemonstrationLoad, type ChallengeLoad, type DemonstrationLoad, type DemonstrationSelection, type SceneLoad } from "./lab/demo-loading.js";
 import { ChallengePanel } from "./lab/ChallengePanel.js";
 import { useChallengeSession } from "./lab/useChallengeSession.js";
 import { ReplaceSceneDialog } from "./lab/ReplaceSceneDialog.js";
@@ -50,6 +50,8 @@ import { CurriculumPage } from "./pages/CurriculumPage.js";
 import { useDemonstrationCatalogue } from "./lab/demonstration-client.js";
 import { ChallengesPage } from "./pages/ChallengesPage.js";
 import { createWorkspaceNavigation, type WorkspacePage } from "./navigation.js";
+// Supplies learner-facing wording for engine and controller problems.
+import { describeProblem, LAB_NOT_READY, RUN_STOPPED } from "./lab/lab-messages.js";
 
 const WORKSPACE_NAVIGATION = [
   {
@@ -74,9 +76,16 @@ const WORKSPACE_NAVIGATION = [
 ] as const;
 
 export function App() {
-  const [displayedSnapshot, setDisplayedSnapshot] = useState<Snapshot>(
-    PROJECTILE_PLAYBACK_SNAPSHOTS[0] ?? PROJECTILE_LAB_MOCK.snapshot,
-  );
+  // The first readout is the engine's own tick-zero state of the starting scene.
+  const [displayedSnapshot, setDisplayedSnapshot] = useState<Snapshot>(() => {
+    const result = copyInitialSnapshot(PROJECTILE_LAB_MOCK.scene);
+
+    if (!result.ok) {
+      throw new Error("The starting projectile scene must be accepted by the engine.");
+    }
+
+    return result.value;
+  });
   const [editableScene, setEditableScene] = useState<SceneDefinition>(() =>
     structuredClone(PROJECTILE_LAB_MOCK.scene),
   );
@@ -251,25 +260,15 @@ export function App() {
     (state) => state.selectedEntityId,
   );
   const selectionNotice = useStore(labStore, (state) => state.selectionNotice);
-  let activeSampleSnapshots;
-
-  if (
-    editableScene.id === PROJECTILE_LAB_MOCK.scene.id &&
-    editableScene.revision === PROJECTILE_LAB_MOCK.scene.revision
-  ) {
-    // Enable motion only for the scene covered by these reviewed frames.
-    activeSampleSnapshots = PROJECTILE_PLAYBACK_SNAPSHOTS;
-  } else {
-    activeSampleSnapshots = undefined;
-  }
 
   // Hold the last reported playback metadata for HTML rendering.
   const [playbackState, setPlaybackState] = useState<PlaybackState | null>(null);
+  // The current run's events; changes only when an event arrives or Reset clears them.
+  const [runEvents, setRunEvents] = useState<readonly SnapshotEvent[]>([]);
   const [labError, setLabError] = useState<string | null>(null);
 
-  const sampleEndTick = activeSampleSnapshots?.at(-1)?.tick;
-  const playbackReady = playbackState !== null && (sampleEndTick !== undefined || challengeActive);
-  const sampleFinished = sampleEndTick !== undefined && displayedSnapshot.tick >= sampleEndTick;
+  // Any mounted controller can run its scene on the real engine.
+  const playbackReady = playbackState !== null;
 
   // Keep the imperative handle and clear toolbar availability when it is released.
   const setActiveController = useCallback((controller: LabController | null) => {
@@ -289,15 +288,12 @@ export function App() {
     }
 
     // A failed tick during a challenge attempt makes that attempt unjudgeable.
-    if (context === "Physics failed to complete a tick") {
+    if (context === RUN_STOPPED) {
       reportEngineFailure();
     }
 
-    const details = result.diagnostics
-      .map((diagnostic) => diagnostic.message || `${diagnostic.code} (${diagnostic.path})`)
-      .join(" ");
-
-    setLabError(`${context}: ${details || "No diagnostic details were supplied."}`);
+    // A short lead-in names what failed; the sentence after it says what to do.
+    setLabError(`${context}. ${describeProblem(result.diagnostics, "Please try again.")}`);
   }, [reportEngineFailure]);
 
   function handleDemonstrationOpen(selection: DemonstrationSelection): void {
@@ -408,13 +404,13 @@ export function App() {
     const controller = controllerRef.current;
 
     if (controller === null) {
-      setLabError("Command rejected: the laboratory is not available.");
+      setLabError(LAB_NOT_READY);
       return;
     }
 
     const context = action === "stepOnce"
-      ? "Physics failed to complete a tick"
-      : "Command rejected";
+      ? RUN_STOPPED
+      : "Couldn't do that";
 
     // A finished attempt is retried before Run, and a reset ends the attempt in progress.
     if (challengeActive && action === "play" && !challenge.beforeRun()) {
@@ -434,11 +430,11 @@ export function App() {
     const selectedSpeed = PLAYBACK_SPEEDS.find((candidate) => String(candidate) === value);
 
     if (controller === null || selectedSpeed === undefined) {
-      setLabError("Command rejected: the laboratory or requested speed is unavailable.");
+      setLabError("That speed isn't available.");
       return;
     }
 
-    reportLabResult("Command rejected", controller.setSpeed(selectedSpeed));
+    reportLabResult("Couldn't change the speed", controller.setSpeed(selectedSpeed));
   }
 
   useEffect(() => {
@@ -491,7 +487,7 @@ export function App() {
     const controller = controllerRef.current;
 
     if (controller === null) {
-      setLabError("Command rejected: the laboratory is not available.");
+      setLabError(LAB_NOT_READY);
       return;
     }
 
@@ -519,11 +515,11 @@ export function App() {
       );
     }
     if (!placementResult.ok) {
-      reportLabResult("Command rejected — placement", placementResult);
+      reportLabResult("Couldn't place that", placementResult);
       return;
     }
 
-    reportLabResult("Command rejected — placement", placementResult);
+    reportLabResult("Couldn't place that", placementResult);
     setEditableScene(placementResult.value.scene);
     labStore.getState().selectEntity(placementResult.value.entityId);
   }, [reportLabResult, challengeActive]);
@@ -537,7 +533,7 @@ export function App() {
       const controller = controllerRef.current;
 
       if (controller === null) {
-        setLabError("Command rejected: the laboratory is not available.");
+        setLabError(LAB_NOT_READY);
         return false;
       }
 
@@ -547,11 +543,11 @@ export function App() {
       );
 
       if (!moveResult.ok) {
-        reportLabResult("Command rejected — movement", moveResult);
+        reportLabResult("Couldn't move that", moveResult);
         return false;
       }
 
-      reportLabResult("Command rejected — movement", moveResult);
+      reportLabResult("Couldn't move that", moveResult);
       setEditableScene(moveResult.value.scene);
       labStore.getState().selectEntity(moveResult.value.entityId);
       return true;
@@ -567,18 +563,18 @@ export function App() {
     const controller = controllerRef.current;
 
     if (controller === null) {
-      setLabError("Command rejected: the laboratory is not available.");
+      setLabError(LAB_NOT_READY);
       return false;
     }
 
     const deleteResult = controller.deleteEntity(entityId);
 
     if (!deleteResult.ok) {
-      reportLabResult("Command rejected — deletion", deleteResult);
+      reportLabResult("Couldn't delete that", deleteResult);
       return false;
     }
 
-    reportLabResult("Command rejected — deletion", deleteResult);
+    reportLabResult("Couldn't delete that", deleteResult);
     setEditableScene(deleteResult.value.scene);
     labStore.getState().selectEntity(null);
     return true;
@@ -589,7 +585,17 @@ export function App() {
         <a className="brand" href="#/lab" aria-label="Eureka laboratory" title="Eureka laboratory" onClick={(event) => {
           event.preventDefault();
           navigateTo("laboratory");
-        }}><Atom size={25} /><span>Eureka<small>The physics workspace</small></span></a>
+        }}>
+          {/* Eureka mark: the king's crown sinking into the bath water. */}
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M5.2 15L4 7.5l4.5 3.5L12 5.5l3.5 5.5L20 7.5 18.8 15" />
+            <circle cx="4" cy="5.3" r=".9" /><circle cx="12" cy="3.3" r=".9" /><circle cx="20" cy="5.3" r=".9" />
+            <path d="M12 10.6l1.3 1.6-1.3 1.6-1.3-1.6Z" strokeWidth="1.4" />
+            <path d="M2 17c1.7-1.2 3.3-1.2 5 0s3.3 1.2 5 0 3.3-1.2 5 0 3.3 1.2 5 0" />
+            <path d="M2 21c1.7-1.2 3.3-1.2 5 0s3.3 1.2 5 0 3.3-1.2 5 0 3.3 1.2 5 0" />
+          </svg>
+          <span>Eureka</span>
+        </a>
         <button className="rail-close" type="button" aria-label="Close main navigation" onClick={() => setNavigationOpen(false)}><X size={17} /></button>
         <nav aria-label="Main navigation">
           {WORKSPACE_NAVIGATION.map((section) => (
@@ -648,7 +654,7 @@ export function App() {
         <ChallengesPage visible={activePage === "challenges"} error={labError} onPlay={handleChallengeOpen} />
         <main id="laboratory" className="lab-shell" hidden={activePage !== "laboratory"}>
           <header className="lab-header">
-            <div className="experiment-heading"><span className="experiment-mark"><Atom size={21} /></span><div><h1 ref={labHeadingRef} tabIndex={-1}>Projectile laboratory</h1><p>Build a scene. Follow the physics.</p></div><span className="scene-badge">{challengeActive ? "Challenge" : activeSampleSnapshots === undefined ? "Authored scene" : "Sample scene"}</span></div>
+            <div className="experiment-heading"><span className="experiment-mark"><Atom size={21} /></span><div><h1 ref={labHeadingRef} tabIndex={-1}>Projectile laboratory</h1><p>Build a scene. Follow the physics.</p></div><span className="scene-badge">{challengeActive ? "Challenge" : "Your scene"}</span></div>
             <div className="header-actions">
               <button className="tool-btn lab-power" onClick={() => setLabVisible((visible) => !visible)} type="button"><Power size={14} />{labVisible ? "Leave lab" : "Enter lab"}</button>
             </div>
@@ -673,7 +679,7 @@ export function App() {
                     <button
                       className="run-button"
                       aria-label={playbackState?.playing ? "Pause" : "Play"} type="button"
-                      disabled={playbackState?.playing !== true && (!playbackReady || sampleFinished)}
+                      disabled={playbackState?.playing !== true && !playbackReady}
                       onClick={() => handlePlaybackAction(playbackState?.playing ? "pause" : "play")}
                     >
                       {playbackState?.playing ? <Pause size={14} /> : <Play size={14} />}<span>{playbackState?.playing ? "Pause" : "Run"}</span>
@@ -682,7 +688,7 @@ export function App() {
                   <span className="playback-action" title="Step">
                     <button
                       aria-label="Step" type="button"
-                      disabled={!playbackReady || playbackState?.playing === true || sampleFinished}
+                      disabled={!playbackReady || playbackState?.playing === true}
                       onClick={() => handlePlaybackAction("stepOnce")}
                     >
                       <StepForward size={14} />
@@ -716,9 +722,7 @@ export function App() {
                     ? "Unavailable"
                     : playbackState.playing
                       ? "Playing"
-                      : playbackReady && sampleFinished
-                        ? "Finished · Reset to replay"
-                        : "Paused"}
+                      : "Paused"}
                 </span>
                 {playbackState?.unableToMaintainRealTimeSpeed && (
                   <span role="status">Unable to maintain real-time speed.</span>
@@ -762,8 +766,8 @@ export function App() {
                     </div>
                     {labVisible ? (
                       <LabCanvas
-                        scene={editableScene} sampleSnapshots={activeSampleSnapshots}
-                        setDisplayedSnapshot={setDisplayedSnapshot} setActiveController={setActiveController}
+                        scene={editableScene}
+                        setDisplayedSnapshot={setDisplayedSnapshot} setActiveController={setActiveController} setRunEvents={setRunEvents}
                         onPlaybackChange={setPlaybackState}
                         onTick={challenge.onTick}
                         onOperationResult={reportLabResult}
@@ -771,20 +775,30 @@ export function App() {
                         onMoveRequested={handleMoveRequested} onDeleteRequested={handleDeleteRequested}
                       />
                     ) : <div className="closed-lab"><Atom size={32} /><p>Your laboratory is closed.</p><button type="button" className="tool-btn" onClick={() => setLabVisible(true)}>Enter lab</button></div>}
+                    {/* Messages float over the paper so the canvas never changes size; the next successful action or the close button clears them. */}
+                    {(selectionNotice !== null || labError !== null || viewportError !== null) && (
+                      <div className="canvas-notices">
+                        {selectionNotice !== null && <p className="canvas-notice" role="status">{selectionNotice}</p>}
+                        {labError !== null && (
+                          <p className="canvas-notice is-error" role="alert">
+                            <span>{labError}</span>
+                            <button type="button" aria-label="Dismiss message" title="Dismiss" onClick={() => setLabError(null)}><X size={12} /></button>
+                          </p>
+                        )}
+                        {viewportError !== null && (
+                          <p className="canvas-notice is-error" role="alert">
+                            <span>{viewportError}</span>
+                            <button type="button" aria-label="Dismiss message" title="Dismiss" onClick={() => setViewportError(null)}><X size={12} /></button>
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="viewport-status"><span><span className="status-dot" />{activeSampleSnapshots === undefined ? "Authored initial state" : "Sample playback"}</span><span>Metres · Seconds · Kilograms</span></div>
-                {selectionNotice !== null && (
-                  <p className="viewport-error" role="status">{selectionNotice}</p>
-                )}
-                {labError !== null && (
-                  <p className="viewport-error" role="alert">{labError}</p>
-                )}
-                {viewportError !== null && <p className="viewport-error" role="alert">{viewportError}</p>}
               </section>
               <section className="measurement-dock" aria-label="Measurement dock">
-                <button className="measurement-toggle" type="button" aria-expanded={measurementsOpen} aria-controls="measurement-content" onClick={() => setMeasurementsOpen((open) => !open)}><Activity size={15} /><span>Measurements & events</span><span className="measurement-source">Snapshot readouts</span><ChevronDown size={14} /></button>
-                <div id="measurement-content" className="measurement-content" hidden={!measurementsOpen}><ObservationNotebook key={sceneGeneration} snapshot={displayedSnapshot} selectedEntityId={selectedEntityId} /></div>
+                <button className="measurement-toggle" type="button" aria-expanded={measurementsOpen} aria-controls="measurement-content" onClick={() => setMeasurementsOpen((open) => !open)}><Activity size={15} /><span>Measurements & events</span><ChevronDown size={14} /></button>
+                <div id="measurement-content" className="measurement-content" hidden={!measurementsOpen}><ObservationNotebook key={sceneGeneration} snapshot={displayedSnapshot} selectedEntityId={selectedEntityId} runEvents={runEvents} /></div>
               </section>
             </div>
             <div id="inspector-dock" className="inspector-dock" hidden={!inspectorOpen}>

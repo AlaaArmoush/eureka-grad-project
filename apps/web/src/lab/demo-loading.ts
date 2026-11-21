@@ -68,7 +68,7 @@ function unavailable(path: string, message: string): EngineResult<never> {
 }
 
 // Check a scene with the engine and copy its tick-zero snapshot. The temporary engine is always disposed.
-function prepareSceneLoad(title: string, scene: SceneDefinition, selectedEntityId: string | null, camera: CameraView, overlays: SceneLoad["overlays"]): EngineResult<SceneLoad> {
+export function copyInitialSnapshot(scene: SceneDefinition): EngineResult<Snapshot> {
   const engineResult = createEngine(scene);
 
   if (!engineResult.ok) {
@@ -78,16 +78,20 @@ function prepareSceneLoad(title: string, scene: SceneDefinition, selectedEntityI
   const engine = engineResult.value;
 
   try {
-    const snapshotResult = engine.copySnapshot();
-
-    if (!snapshotResult.ok) {
-      return snapshotResult;
-    }
-
-    return { ok: true, value: { title, scene, initialSnapshot: snapshotResult.value, selectedEntityId, camera, overlays } };
+    return engine.copySnapshot();
   } finally {
     engine.dispose();
   }
+}
+
+function prepareSceneLoad(title: string, scene: SceneDefinition, selectedEntityId: string | null, camera: CameraView, overlays: SceneLoad["overlays"]): EngineResult<SceneLoad> {
+  const snapshotResult = copyInitialSnapshot(scene);
+
+  if (!snapshotResult.ok) {
+    return snapshotResult;
+  }
+
+  return { ok: true, value: { title, scene, initialSnapshot: snapshotResult.value, selectedEntityId, camera, overlays } };
 }
 
 // Prepare independent starting data without changing the mounted lab or editor store. The questions are the catalogue loaded from the server.

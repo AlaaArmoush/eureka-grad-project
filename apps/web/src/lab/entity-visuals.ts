@@ -18,7 +18,7 @@ export function createEntityVisual(entity: Body | TargetTrigger) {
   let paintKey = "";
   let lastCaptionColor: number = color;
 
-  // For a target used as a challenge zone, `entry` is the zone and its state; otherwise it is the one-tick entry flash.
+  // For a target used as a challenge zone, `entry` is the zone and its state; otherwise it says whether a ball has entered it this run.
   function update(scale: number, angle: number, selected: boolean, entry: boolean | ChallengeZoneView, labels: boolean, position: Vector2, viewportWidth: number, viewportHeight: number, moveMode: boolean): void {
     const shape = entity.shape;
     let visible: PaintBounds | undefined;
@@ -41,7 +41,8 @@ export function createEntityVisual(entity: Body | TargetTrigger) {
     }
     const zone = typeof entry === "boolean" ? undefined : entry;
     const entered = zone === undefined ? entry === true : zone.state === "reached";
-    const targetPaint = zoneColors[zone?.state ?? "reached"];
+    // A lab target turns from red to green when a ball enters it, like a challenge zone.
+    const targetPaint = zone !== undefined ? zoneColors[zone.state] : entered ? zoneColors.reached : zoneColors.waiting;
     const key = [scale, selected, entered, zone?.state, moveMode, visible?.left, visible?.right, visible?.top, visible?.bottom].join(":");
     const selectionColor = moveMode ? sceneColors.velocity : color;
     const selectionWash = selectionColor;
@@ -77,7 +78,7 @@ export function createEntityVisual(entity: Body | TargetTrigger) {
         -x * cosine + y * sine, x * sine + y * cosine,
       ]);
     }
-    caption.text = zone !== undefined ? zone.zone.label + (entered ? " ✓" : "") : entered && entity.kind === "target" ? "Target entered ✓" : name;
+    caption.text = zone !== undefined ? zone.zone.label + (entered ? " ✓" : "") : name;
     const captionColor = entity.kind === "target" ? targetPaint.ink : color;
 
     // Restyle only on a change, so the caption is not re-rendered every frame.

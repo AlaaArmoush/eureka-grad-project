@@ -2,13 +2,22 @@
 
 Run from the repository root.
 
-## Run
+## Run the app
+
+Run these in order at the start of a session. Curriculum and Challenges read from the database, so the lab alone needs only the last line.
 
 ```bash
-docker compose up -d --wait db                                   # start of a session that uses the server or challenges
-npm run dev --workspace=@eureka/server                           # when the page needs the API (Challenges); leave it running
-npm run dev --workspace=@eureka/web -- --host 127.0.0.1          # whenever you want to see the website or lab; leave it running
-docker compose stop db                                           # end of the day; keeps all data
+npm run build --workspace=@eureka/engine                         # web and server read the built contracts and engine
+docker compose up -d --wait db                                   # start the database
+npm run db:seed                                                  # load the demonstration and challenge files; unchanged records are skipped
+npm run dev --workspace=@eureka/server                           # the API; leave it running in its own terminal
+npm run dev --workspace=@eureka/web -- --host 127.0.0.1          # the website and lab; leave it running, open the address Vite prints
+```
+
+At the end of the day:
+
+```bash
+docker compose stop db                                           # keeps all data
 ```
 
 ## Check
@@ -32,6 +41,6 @@ npm run build --workspace=@eureka/engine     # after editing packages/contracts 
 ```bash
 npm run db:migrate -- --name <what_changed>  # after you edit schema.prisma: creates and applies the migration
 npm run db:generate                          # after pulling a changed schema.prisma, or when TypeScript says a table or field is missing on prisma
-npm run db:seed                              # after adding or editing a challenge file, and on a new database
+npm run db:seed                              # after adding or editing a challenge or demonstration file, and on a new database
 npm exec --workspace=@eureka/server -- prisma studio --config prisma.config.ts   # when you want to look at or edit rows in the browser
 ```

@@ -1,5 +1,5 @@
 import type { Body, TargetTrigger } from "@eureka/contracts";
-import { Graphics, Texture } from "pixi.js";
+import { BufferImageSource, Graphics, Texture } from "pixi.js";
 
 // Visible screen area expressed in the object's own drawing coordinates.
 export interface PaintBounds {
@@ -65,7 +65,10 @@ export function createPaperTexture(): Texture {
     context.lineTo(x + 1 + random() * 5, y + random() - .5);
     context.stroke();
   }
-  return Texture.from(canvas, true);
+  // Hand Pixi the finished bytes, never the canvas: Firefox may keep a 2D canvas on the GPU in blue-first order, and
+  // uploading that canvas straight to WebGL swapped red and blue, so the paper turned blue.
+  const { data } = context.getImageData(0, 0, 512, 512);
+  return new Texture({ source: new BufferImageSource({ resource: new Uint8Array(data.buffer), width: 512, height: 512, format: "rgba8unorm" }) });
 }
 
 export function paintPaper(g: Graphics, width: number, height: number): void {
@@ -161,7 +164,8 @@ export const zoneColors = {
 
 export type TargetPaint = (typeof zoneColors)[keyof typeof zoneColors];
 
-function paintTarget(g: Graphics, radius: number, entered: boolean, paint: TargetPaint): void {
+// The colour alone shows whether a ball has entered the target.
+function paintTarget(g: Graphics, radius: number, paint: TargetPaint): void {
   const green = paint.ink;
   // A translucent watercolor ring keeps the projectile visible inside the sensor.
   g.circle(0, 0, radius).fill({ color: paint.wash, alpha: .28 });
@@ -171,12 +175,6 @@ function paintTarget(g: Graphics, radius: number, entered: boolean, paint: Targe
   for (let index = 0; index < 4; index++) {
     const angle = index * Math.PI / 2;
     pencilLine(g, Math.cos(angle) * (radius - 2), Math.sin(angle) * (radius - 2), Math.cos(angle) * (radius + 6), Math.sin(angle) * (radius + 6), green, 1);
-  }
-  if (entered) {
-    const offset = radius + 6;
-    g.roundRect(offset - 5, -offset - 5, 11, 11, 1.5).fill(0xb7edc9).stroke({ color: green, width: .9 });
-    pencilLine(g, offset - 2.5, -offset, offset, -offset + 2.5, green, 1.4);
-    pencilLine(g, offset, -offset + 2.5, offset + 4, -offset - 2.5, green, 1.4);
   }
 }
 
@@ -237,7 +235,7 @@ export function paintEntity(g: Graphics, entity: Body | TargetTrigger, pixelsPer
   const shape = entity.shape;
   if (shape.kind === "circle") {
     const radius = shape.radiusMeters * pixelsPerMeter;
-    if (entity.kind === "target") paintTarget(g, radius, targetEntered, targetPaint);
+    if (entity.kind === "target") paintTarget(g, radius, targetPaint);
     else paintBall(g, radius);
     return;
   }

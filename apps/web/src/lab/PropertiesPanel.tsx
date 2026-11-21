@@ -5,6 +5,8 @@ import type { SceneDefinition, Snapshot } from "@eureka/contracts";
 // Supplies the accepted property-edit operations.
 import type { LabController } from "./controller.js";
 import { NumberField } from "./NumberField.js";
+// Supplies learner-facing wording for rejected edits.
+import { describeProblem, LAB_NOT_READY, objectKindLabel } from "./lab-messages.js";
 
 // Remember launch text alongside the physical values accepted for this projectile.
 interface AcceptedLaunchInput {
@@ -65,19 +67,19 @@ export function PropertiesPanel(props: {
     selectedProjectile === undefined
       ? 0
       : Math.hypot(
-          selectedProjectile.velocity.linearMetersPerSecond.x,
-          selectedProjectile.velocity.linearMetersPerSecond.y,
-        );
+        selectedProjectile.velocity.linearMetersPerSecond.x,
+        selectedProjectile.velocity.linearMetersPerSecond.y,
+      );
 
   const selectedProjectileAngleDegrees =
     selectedProjectile === undefined || selectedProjectileSpeed === 0
       ? 0
       : (Math.atan2(
-          selectedProjectile.velocity.linearMetersPerSecond.y,
-          selectedProjectile.velocity.linearMetersPerSecond.x,
-        ) *
-          180) /
-        Math.PI;
+        selectedProjectile.velocity.linearMetersPerSecond.y,
+        selectedProjectile.velocity.linearMetersPerSecond.x,
+      ) *
+        180) /
+      Math.PI;
 
   const selectedStaticBody =
     selectedDefinition?.kind === "static" ? selectedDefinition : undefined;
@@ -96,6 +98,9 @@ export function PropertiesPanel(props: {
   const [targetEditError, setTargetEditError] = usePropertyError(errorScope);
   const [positionEditError, setPositionEditError] = usePropertyError(errorScope);
   const panelRef = useRef<HTMLElement>(null);
+  // The most recently queued edit, discarded when Reset remounts SceneInspector.
+  const [runEdit, setRunEdit] = useState<{ readonly entityId: string; readonly appliesAtTick: number } | null>(null);
+
 
   // Keep accepted launch text across renders and selection changes.
   const [acceptedLaunchInputs, setAcceptedLaunchInputs] = useState<
@@ -137,13 +142,13 @@ export function PropertiesPanel(props: {
 
     if (input.value.trim() === "" || !Number.isFinite(value)) {
       form.reset();
-      setPositionEditError(`${axis.toUpperCase()} must be a finite number.`);
+      setPositionEditError(`${axis.toUpperCase()} must be a number.`);
       return;
     }
 
     if (controller === null) {
       form.reset();
-      setPositionEditError("Command rejected: the laboratory is not available.");
+      setPositionEditError(LAB_NOT_READY);
       return;
     }
 
@@ -154,8 +159,7 @@ export function PropertiesPanel(props: {
 
     if (!result.ok) {
       form.reset();
-      const details = result.diagnostics.map((diagnostic) => diagnostic.message || diagnostic.code).join(" ");
-      setPositionEditError(`Command rejected: ${details || "The position could not be changed."}`);
+      setPositionEditError(describeProblem(result.diagnostics, "That position couldn't be used."));
       return;
     }
 
@@ -204,7 +208,7 @@ export function PropertiesPanel(props: {
             ? selectedEntityId === null
               ? "Select an object on the page or open the scene outline."
               : "This object is absent from the scene. Select another object."
-            : `${selectedDefinition.kind === "dynamic" ? "Dynamic body" : selectedDefinition.kind === "target" ? "Pass-through sensor" : "Fixed surface"} · ${selectedDefinition.shape.kind}`}
+            : objectKindLabel(selectedDefinition.kind)}
         </p>
       </header>
       {selectedPose !== undefined && selectedDefinition !== undefined && (
@@ -239,6 +243,13 @@ export function PropertiesPanel(props: {
         </dl>
       )}
       {positionEditError !== null && <p className="coordinate-error" role="alert">{positionEditError}</p>}
+      {runEdit !== null && runEdit.entityId === selectedEntityId && (
+        <p role="status">
+          {displayedSnapshot.tick === runEdit.appliesAtTick
+            ? `Queued for tick ${runEdit.appliesAtTick}: applies on the next Step or Run. Reset returns to the starting scene.`
+            : `Applied at tick ${runEdit.appliesAtTick}. Reset returns to the starting scene.`}
+        </p>
+      )}
       {selectedProjectile !== undefined && (
         <form
           className="property-editor-inline"
@@ -252,7 +263,7 @@ export function PropertiesPanel(props: {
             const read = (name: string) => String(form.get(name) ?? "").trim();
 
             const rejectEdit = (message: string) => {
-              setProjectileEditError(`Command rejected: ${message}`);
+              setProjectileEditError(message);
 
               formElement.reset();
             };
@@ -287,13 +298,13 @@ export function PropertiesPanel(props: {
               !Number.isFinite(angle) ||
               !Number.isFinite(restitution)
             ) {
-              rejectEdit("Every value must be finite.");
+              rejectEdit("Every value must be a number.");
               return;
             }
 
             if (mass <= 0 || radius <= 0 || speed < 0) {
               rejectEdit(
-                "Mass and radius must be positive; speed cannot be negative.",
+                "Mass and radius must be more than 0, and speed can't be negative.",
               );
               return;
             }
@@ -306,7 +317,48 @@ export function PropertiesPanel(props: {
             const controller = controllerRef.current;
 
             if (controller === null) {
-              rejectEdit("The laboratory is not available.");
+              rejectEdit(LAB_NOT_READY);
+              return;
+            }
+
+            // Partway through a run, mass, bounce and launch become engine commands; a radius change restarts from the starting scene.
+            if (displayedSnapshot.tick > 0 && radius === selectedProjectile.shape.radiusMeters) {
+              const currentPosition = selectedBody?.pose.positionMeters;
+
+              if (currentPosition === undefined) {
+                rejectEdit("The ball isn't in the scene right now. Select it again.");
+                return;
+              }
+
+              const bodyResult = controller.queueRunEdit({
+                kind: "editBody",
+                bodyId: selectedProjectile.id,
+                changes: { massKilograms: mass, material: { ...selectedProjectile.material, restitution } },
+              });
+
+              if (!bodyResult.ok) {
+                rejectEdit(describeProblem(bodyResult.diagnostics, "That change couldn't be made."));
+                return;
+              }
+
+              // Relaunch only when the launch inputs changed, from where the ball is now.
+              if (speedText !== launchSpeedInput || angleText !== launchAngleInput) {
+                const angleRadians = (angle * Math.PI) / 180;
+                const launchResult = controller.queueRunEdit({
+                  kind: "launchBody",
+                  bodyId: selectedProjectile.id,
+                  positionMeters: { ...currentPosition },
+                  velocity: { linearMetersPerSecond: { x: speed * Math.cos(angleRadians), y: speed * Math.sin(angleRadians) }, angularRadiansPerSecond: 0 },
+                });
+
+                if (!launchResult.ok) {
+                  rejectEdit(describeProblem(launchResult.diagnostics, "That launch couldn't be made."));
+                  return;
+                }
+              }
+
+              setProjectileEditError(null);
+              setRunEdit({ entityId: selectedProjectile.id, appliesAtTick: bodyResult.value.appliesAtTick });
               return;
             }
 
@@ -323,8 +375,7 @@ export function PropertiesPanel(props: {
 
             if (!editResult.ok) {
               rejectEdit(
-                editResult.diagnostics[0]?.message ??
-                  "The projectile edit was rejected.",
+                describeProblem(editResult.diagnostics, "That change couldn't be made."),
               );
               return;
             }
@@ -380,199 +431,202 @@ export function PropertiesPanel(props: {
             <button type="submit">Apply changes</button>
           </div>
         </form>
-      )}
-      {selectedStaticBody !== undefined && (
-        <form
-          className="property-editor-inline"
-          key={`${selectedStaticBody.id}-${editableScene.revision}`}
-          onSubmit={(event) => {
-            event.preventDefault();
+      )
+      }
+      {
+        selectedStaticBody !== undefined && (
+          <form
+            className="property-editor-inline"
+            key={`${selectedStaticBody.id}-${editableScene.revision}`}
+            onSubmit={(event) => {
+              event.preventDefault();
 
-            const formElement = event.currentTarget;
-            const form = new FormData(formElement);
+              const formElement = event.currentTarget;
+              const form = new FormData(formElement);
 
-            const read = (name: string) => String(form.get(name) ?? "").trim();
+              const read = (name: string) => String(form.get(name) ?? "").trim();
 
-            const rejectEdit = (message: string) => {
-              setStaticBodyEditError(`Command rejected: ${message}`);
-              formElement.reset();
-            };
+              const rejectEdit = (message: string) => {
+                setStaticBodyEditError(message);
+                formElement.reset();
+              };
 
-            const widthText = read("edit-static-width");
-            const heightText = read("edit-static-height");
-            const angleText = read("edit-static-angle");
-            const restitutionText = read("edit-static-restitution");
+              const widthText = read("edit-static-width");
+              const heightText = read("edit-static-height");
+              const angleText = read("edit-static-angle");
+              const restitutionText = read("edit-static-restitution");
 
-            if (
-              widthText === "" ||
-              heightText === "" ||
-              angleText === "" ||
-              restitutionText === ""
-            ) {
-              rejectEdit("Every field is required.");
-              return;
-            }
+              if (
+                widthText === "" ||
+                heightText === "" ||
+                angleText === "" ||
+                restitutionText === ""
+              ) {
+                rejectEdit("Every field is required.");
+                return;
+              }
 
-            const width = Number(widthText);
-            const height = Number(heightText);
-            const angle = Number(angleText);
-            const restitution = Number(restitutionText);
+              const width = Number(widthText);
+              const height = Number(heightText);
+              const angle = Number(angleText);
+              const restitution = Number(restitutionText);
 
-            if (
-              !Number.isFinite(width) ||
-              !Number.isFinite(height) ||
-              !Number.isFinite(angle) ||
-              !Number.isFinite(restitution)
-            ) {
-              rejectEdit("Every value must be finite.");
-              return;
-            }
+              if (
+                !Number.isFinite(width) ||
+                !Number.isFinite(height) ||
+                !Number.isFinite(angle) ||
+                !Number.isFinite(restitution)
+              ) {
+                rejectEdit("Every value must be a number.");
+                return;
+              }
 
-            if (width <= 0 || height <= 0) {
-              rejectEdit("Width and height must be greater than zero.");
-              return;
-            }
+              if (width <= 0 || height <= 0) {
+                rejectEdit("Width and height must be more than 0.");
+                return;
+              }
 
-            if (restitution < 0 || restitution > 1) {
-              rejectEdit("Restitution must be between 0 and 1.");
-              return;
-            }
+              if (restitution < 0 || restitution > 1) {
+                rejectEdit("Restitution must be between 0 and 1.");
+                return;
+              }
 
-            const controller = controllerRef.current;
+              const controller = controllerRef.current;
 
-            if (controller === null) {
-              rejectEdit("The laboratory is not available.");
-              return;
-            }
+              if (controller === null) {
+                rejectEdit(LAB_NOT_READY);
+                return;
+              }
 
-            const editResult = controller.updateStaticBodyProperties(
-              selectedStaticBody.id,
-              {
-                widthMeters: width,
-                heightMeters: height,
-                angleDegrees: angle,
-                restitution,
-              },
-            );
-
-            if (!editResult.ok) {
-              rejectEdit(
-                editResult.diagnostics[0]?.message ??
-                  "The static-body edit was rejected.",
+              const editResult = controller.updateStaticBodyProperties(
+                selectedStaticBody.id,
+                {
+                  widthMeters: width,
+                  heightMeters: height,
+                  angleDegrees: angle,
+                  restitution,
+                },
               );
-              return;
-            }
 
-            setEditableScene(editResult.value.scene);
-            setStaticBodyEditError(null);
-          }}
-        >
-          <NumberField label="Width (m)" name="edit-static-width" defaultValue={selectedStaticBody.shape.widthMeters} rule="positive" />
-          <NumberField label="Height (m)" name="edit-static-height" defaultValue={selectedStaticBody.shape.heightMeters} rule="positive" />
-          <NumberField label="Surface angle (°)" name="edit-static-angle" defaultValue={formatDerivedInput(selectedStaticAngleDegrees)} />
-          <NumberField label="Restitution (0–1)" name="edit-static-restitution" defaultValue={selectedStaticBody.material.restitution} rule="unitInterval" />
+              if (!editResult.ok) {
+                rejectEdit(
+                  describeProblem(editResult.diagnostics, "That change couldn't be made."),
+                );
+                return;
+              }
 
-          {staticBodyEditError !== null && (
-            <p role="alert">{staticBodyEditError}</p>
-          )}
+              setEditableScene(editResult.value.scene);
+              setStaticBodyEditError(null);
+            }}
+          >
+            <NumberField label="Width (m)" name="edit-static-width" defaultValue={selectedStaticBody.shape.widthMeters} rule="positive" />
+            <NumberField label="Height (m)" name="edit-static-height" defaultValue={selectedStaticBody.shape.heightMeters} rule="positive" />
+            <NumberField label="Surface angle (°)" name="edit-static-angle" defaultValue={formatDerivedInput(selectedStaticAngleDegrees)} />
+            <NumberField label="Restitution (0–1)" name="edit-static-restitution" defaultValue={selectedStaticBody.material.restitution} rule="unitInterval" />
 
-          <div className="property-editor-inline__actions">
-            <button
-              type="button"
-              onClick={(event) => {
-                event.currentTarget.form?.reset();
-                setStaticBodyEditError(null);
-              }}
-            >
-              Cancel
-            </button>
+            {staticBodyEditError !== null && (
+              <p role="alert">{staticBodyEditError}</p>
+            )}
 
-            <button type="submit">Apply changes</button>
-          </div>
-        </form>
-      )}
-      {selectedTarget !== undefined && (
-        <form
-          className="property-editor-inline"
-          key={`${selectedTarget.id}-${editableScene.revision}`}
-          onSubmit={(event) => {
-            event.preventDefault();
+            <div className="property-editor-inline__actions">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.currentTarget.form?.reset();
+                  setStaticBodyEditError(null);
+                }}
+              >
+                Cancel
+              </button>
 
-            const formElement = event.currentTarget;
-            const form = new FormData(formElement);
+              <button type="submit">Apply changes</button>
+            </div>
+          </form>
+        )
+      }
+      {
+        selectedTarget !== undefined && (
+          <form
+            className="property-editor-inline"
+            key={`${selectedTarget.id}-${editableScene.revision}`}
+            onSubmit={(event) => {
+              event.preventDefault();
 
-            const radiusText = String(
-              form.get("edit-target-radius") ?? "",
-            ).trim();
+              const formElement = event.currentTarget;
+              const form = new FormData(formElement);
 
-            const rejectEdit = (message: string) => {
-              setTargetEditError(`Command rejected: ${message}`);
+              const radiusText = String(
+                form.get("edit-target-radius") ?? "",
+              ).trim();
 
-              formElement.reset();
-            };
+              const rejectEdit = (message: string) => {
+                setTargetEditError(message);
 
-            if (radiusText === "") {
-              rejectEdit("Radius is required.");
-              return;
-            }
+                formElement.reset();
+              };
 
-            const radius = Number(radiusText);
+              if (radiusText === "") {
+                rejectEdit("Radius is required.");
+                return;
+              }
 
-            if (!Number.isFinite(radius)) {
-              rejectEdit("Radius must be finite.");
-              return;
-            }
+              const radius = Number(radiusText);
 
-            if (radius <= 0) {
-              rejectEdit("Radius must be greater than zero.");
-              return;
-            }
+              if (!Number.isFinite(radius)) {
+                rejectEdit("Radius must be a number.");
+                return;
+              }
 
-            const controller = controllerRef.current;
+              if (radius <= 0) {
+                rejectEdit("Radius must be more than 0.");
+                return;
+              }
 
-            if (controller === null) {
-              rejectEdit("The laboratory is not available.");
-              return;
-            }
+              const controller = controllerRef.current;
 
-            const editResult = controller.updateTargetProperties(
-              selectedTarget.id,
-              {
-                radiusMeters: radius,
-              },
-            );
+              if (controller === null) {
+                rejectEdit(LAB_NOT_READY);
+                return;
+              }
 
-            if (!editResult.ok) {
-              rejectEdit(
-                editResult.diagnostics[0]?.message ??
-                  "The target edit was rejected.",
+              const editResult = controller.updateTargetProperties(
+                selectedTarget.id,
+                {
+                  radiusMeters: radius,
+                },
               );
-              return;
-            }
 
-            setEditableScene(editResult.value.scene);
-            setTargetEditError(null);
-          }}
-        >
-          <NumberField label="Radius (m)" name="edit-target-radius" defaultValue={selectedTarget.shape.radiusMeters} rule="positive" />
+              if (!editResult.ok) {
+                rejectEdit(
+                  describeProblem(editResult.diagnostics, "That change couldn't be made."),
+                );
+                return;
+              }
 
-          {targetEditError !== null && <p role="alert">{targetEditError}</p>}
+              setEditableScene(editResult.value.scene);
+              setTargetEditError(null);
+            }}
+          >
+            <NumberField label="Radius (m)" name="edit-target-radius" defaultValue={selectedTarget.shape.radiusMeters} rule="positive" />
 
-          <div className="property-editor-inline__actions">
-            <button
-              type="button"
-              onClick={(event) => {
-                event.currentTarget.form?.reset();
-                setTargetEditError(null);
-              }}
-            >
-              Cancel
-            </button>
+            {targetEditError !== null && <p role="alert">{targetEditError}</p>}
 
-            <button type="submit">Apply changes</button>
-          </div>
-        </form>
-      )}
-    </section>
+            <div className="property-editor-inline__actions">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.currentTarget.form?.reset();
+                  setTargetEditError(null);
+                }}
+              >
+                Cancel
+              </button>
+
+              <button type="submit">Apply changes</button>
+            </div>
+          </form>
+        )
+      }
+    </section >
   );
 }

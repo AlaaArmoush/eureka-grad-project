@@ -1,16 +1,16 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 // Supplies the portable scene and snapshot records.
-import type { SceneDefinition, Snapshot } from "@eureka/contracts";
+import type { SceneDefinition, Snapshot, SnapshotEvent } from "@eureka/contracts";
 // Creates the headless physical-state owner for this mounted lab.
 import { createEngine, type EngineStatus } from "@eureka/engine";
-// Adapt reviewed frame sequences without running the numerical solver.
-import { createSnapshotPlaybackEngine } from "./mocks.js";
 // Supplies typed placement and movement requests from Pixi to React.
 import type { MoveEntityRequest, PlacementRequest } from "./authoring.js";
 // Creates and types the lab lifetime coordinator.
 import { createLabController, type LabController, type PlaybackBrowser, type PlaybackState } from "./controller.js";
 // Owns the mounted renderer.
-import { mountLabRenderer, type LabRenderer } from "./renderer.js";
+import { mountLabRenderer, type LabRenderer, type PullHandlers } from "./renderer.js";
+// Names a failed tick so App can tell it apart from other rejected actions.
+import { PULL_FAILED, RUN_STOPPED } from "./lab-messages.js";
 
 // Supply browser facilities and forward failures from scheduled playback.
 function createPlaybackBrowser(
@@ -30,7 +30,7 @@ function createPlaybackBrowser(
     // The controller has already paused before reporting a failed tick.
     onFrameResult: (result) => {
       if (!result.ok) {
-        onOperationResult("Physics failed to complete a tick", result);
+        onOperationResult(RUN_STOPPED, result);
       }
     },
   };
@@ -40,28 +40,31 @@ function createPlaybackBrowser(
 export function LabCanvas(props: {
   scene: SceneDefinition;
   setDisplayedSnapshot(snapshot: Snapshot): void;
+  setRunEvents(events: readonly SnapshotEvent[]): void;
   setActiveController(controller: LabController | null): void;
   onPlaybackChange(state: PlaybackState): void;
   onOperationResult(context: string, result: EngineStatus): void;
   onPlacementRequested(request: PlacementRequest): void;
   onMoveRequested(request: MoveEntityRequest): boolean;
   onDeleteRequested(entityId: string): boolean;
-  sampleSnapshots?: readonly Snapshot[] | undefined;
   onTick?(snapshot: Snapshot): void;
 }) {
   const toSetDisplayedSnapshot = props.setDisplayedSnapshot;
+  const setRunEvents = props.setRunEvents;
   const setActiveController = props.setActiveController;
   const onPlaybackChange = props.onPlaybackChange;
   const onOperationResult = props.onOperationResult;
   const onPlacementRequested = props.onPlacementRequested;
   const onMoveRequested = props.onMoveRequested;
   const onDeleteRequested = props.onDeleteRequested;
-  const sampleSnapshots = props.sampleSnapshots;
   const onTick = props.onTick;
   const scene = props.scene;
   const hostRef = useRef<HTMLDivElement>(null);
   // Keep the same Pixi application across accepted authoring edits.
   const rendererRef = useRef<LabRenderer | null>(null);
+  // The renderer keeps its first pull handlers, so they find the current controller through these refs.
+  const controllerRef = useRef<LabController | null>(null);
+  const reportRef = useRef(onOperationResult);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -71,16 +74,49 @@ export function LabCanvas(props: {
     }
 
     setActiveController(null);
+    reportRef.current = onOperationResult;
+
+    const pullHandlers: PullHandlers = {
+      start(bodyId, localAnchorMeters, targetMeters) {
+        const controller = controllerRef.current;
+
+        // Before Run or while paused, the Move tool moves the starting position instead.
+        if (controller === null || !controller.getPlaybackState().playing) {
+          return "notRunning";
+        }
+
+        const result = controller.startPull(bodyId, localAnchorMeters, targetMeters);
+
+        if (!result.ok) {
+          reportRef.current(PULL_FAILED, result);
+          return "rejected";
+        }
+
+        return "started";
+      },
+      move(targetMeters) {
+        const result = controllerRef.current?.movePull(targetMeters);
+
+        if (result !== undefined && !result.ok) {
+          reportRef.current(PULL_FAILED, result);
+          return false;
+        }
+
+        return true;
+      },
+      release() {
+        controllerRef.current?.endPull();
+      },
+    };
+
     function failSetup(result: EngineStatus): void {
-      onOperationResult("Laboratory unavailable", result);
+      onOperationResult("The lab couldn't open this scene", result);
       rendererRef.current?.dispose();
       rendererRef.current = null;
     }
 
-    // Use prepared frames for reviewed samples and the existing initial-state source for authoring.
-    const engineResult = sampleSnapshots === undefined
-      ? createEngine(scene)
-      : createSnapshotPlaybackEngine(sampleSnapshots);
+    // Every scene, including the starting projectile launch, runs on the real engine.
+    const engineResult = createEngine(scene);
 
     if (!engineResult.ok) {
       failSetup(engineResult);
@@ -96,7 +132,7 @@ export function LabCanvas(props: {
       return;
     }
 
-    // Start the viewport at the selected source's tick-zero state.
+    // Start the viewport at the engine's tick-zero state.
     const initialViewSnapshot = initialSnapshotResult.value;
 
     // Create Pixi once, then update its scene without removing the canvas.
@@ -108,13 +144,13 @@ export function LabCanvas(props: {
       onPlacementRequested,
       onMoveRequested,
       onDeleteRequested,
-      sampleSnapshots ?? [],
+      pullHandlers,
     );
 
     rendererRef.current = renderer;
 
     if (previousRenderer !== null) {
-      renderer.updateScene(scene, initialViewSnapshot, sampleSnapshots ?? []);
+      renderer.updateScene(scene, initialViewSnapshot);
     }
 
     const controllerResult = createLabController({
@@ -124,10 +160,13 @@ export function LabCanvas(props: {
       consumeSnapshot: renderer.updateSnapshot,
       consumeReadout: toSetDisplayedSnapshot,
       consumeTick: onTick,
+      consumeRunEvents: (events) => {
+        renderer.updateRunEvents(events);
+        setRunEvents(events);
+      },
       releaseView: renderer.dispose,
       playbackBrowser: createPlaybackBrowser(onOperationResult),
       onPlaybackChange,
-      stopAtTick: sampleSnapshots?.at(-1)?.tick,
     });
 
     if (!controllerResult.ok) {
@@ -138,23 +177,25 @@ export function LabCanvas(props: {
 
     const controller = controllerResult.value;
 
+    controllerRef.current = controller;
     setActiveController(controller);
 
     return () => {
       // Dispose first so any final playback report precedes clearing the toolbar.
       controller.dispose({ preserveView: true });
+      controllerRef.current = null;
       setActiveController(null);
     };
   }, [
     scene,
     toSetDisplayedSnapshot,
+    setRunEvents,
     setActiveController,
     onPlaybackChange,
     onOperationResult,
     onPlacementRequested,
     onMoveRequested,
     onDeleteRequested,
-    sampleSnapshots,
     onTick,
   ]);
 

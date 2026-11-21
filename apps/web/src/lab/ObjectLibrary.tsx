@@ -145,7 +145,7 @@ export function ObjectLibrary() {
                   !Number.isFinite(angle) ||
                   !Number.isFinite(restitution)
                 ) {
-                  setProjectileFormError("Every value must be finite.");
+                  setProjectileFormError("Every value must be a number.");
                   return;
                 }
 
@@ -258,13 +258,13 @@ export function ObjectLibrary() {
                   !Number.isFinite(height) ||
                   !Number.isFinite(restitution)
                 ) {
-                  setPlatformFormError("Every value must be finite.");
+                  setPlatformFormError("Every value must be a number.");
                   return;
                 }
 
                 if (width <= 0 || height <= 0) {
                   setPlatformFormError(
-                    "Width and height must be greater than zero.",
+                    "Width and height must be more than 0.",
                   );
                   return;
                 }
@@ -368,13 +368,13 @@ export function ObjectLibrary() {
                   !Number.isFinite(angle) ||
                   !Number.isFinite(restitution)
                 ) {
-                  setRampFormError("Every value must be finite.");
+                  setRampFormError("Every value must be a number.");
                   return;
                 }
 
                 if (width <= 0 || height <= 0) {
                   setRampFormError(
-                    "Width and height must be greater than zero.",
+                    "Width and height must be more than 0.",
                   );
                   return;
                 }
@@ -460,12 +460,12 @@ export function ObjectLibrary() {
                 const radius = Number(radiusText);
 
                 if (!Number.isFinite(radius)) {
-                  setTargetFormError("Radius must be finite.");
+                  setTargetFormError("Radius must be a number.");
                   return;
                 }
 
                 if (radius <= 0) {
-                  setTargetFormError("Radius must be greater than zero.");
+                  setTargetFormError("Radius must be more than 0.");
                   return;
                 }
 
