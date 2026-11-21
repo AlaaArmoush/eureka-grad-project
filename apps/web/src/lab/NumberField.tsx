@@ -1,4 +1,10 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
+import { useStore } from "zustand";
+import { labStore } from "./store.js";
+
+// Half the guide bubble's widest size, used to keep it inside the window.
+const GUIDE_HALF_WIDTH_PIXELS = 110;
 
 export function NumberField(props: {
   label: string;
@@ -10,7 +16,44 @@ export function NumberField(props: {
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const errorId = useId();
+  const guideId = useId();
   const [error, setError] = useState<string | null>(null);
+  // An opened Curriculum question can point the learner at this field, once.
+  const guide = useStore(labStore, (state) => {
+    const fieldGuide = state.fieldGuide;
+    return fieldGuide !== null && fieldGuide.fieldName === props.name ? fieldGuide.message : null;
+  });
+  // Where the bubble sits on screen: centred above the input, kept inside the window.
+  const [guidePosition, setGuidePosition] = useState<{ left: number; top: number; arrowOffset: number } | null>(null);
+
+  useEffect(() => {
+    const input = inputRef.current;
+
+    if (guide === null || input === null) {
+      return;
+    }
+
+    input.focus({ preventScroll: true });
+    input.scrollIntoView({ block: "nearest" });
+
+    // Measure on the next frame, after the scroll has moved the field.
+    const frame = requestAnimationFrame(() => {
+      const rect = input.getBoundingClientRect();
+      const centre = rect.left + rect.width / 2;
+      const left = Math.min(Math.max(centre, GUIDE_HALF_WIDTH_PIXELS + 8), window.innerWidth - GUIDE_HALF_WIDTH_PIXELS - 8);
+      setGuidePosition({ left, top: rect.top - 10, arrowOffset: centre - left });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [guide]);
+
+  // The bubble shows once, then removes itself when its fade-out ends.
+  function endGuide(): void {
+    setGuidePosition(null);
+    labStore.getState().setFieldGuide(null);
+  }
+
+  const describedBy = [error === null ? null : errorId, guide === null ? null : guideId].filter((id) => id !== null).join(" ");
 
   function describeError(text: string): string | null {
     if (text.trim() === "") {
@@ -67,7 +110,7 @@ export function NumberField(props: {
         autoFocus={props.autoFocus ?? false}
         required
         aria-invalid={error !== null}
-        aria-describedby={error === null ? undefined : errorId}
+        aria-describedby={describedBy === "" ? undefined : describedBy}
         onKeyDown={(event) => {
           if (props.compact && event.key === "Escape") {
             event.preventDefault();
@@ -80,6 +123,11 @@ export function NumberField(props: {
         onChange={(event) => {
           event.currentTarget.setCustomValidity(describeError(event.currentTarget.value) ?? "");
           setError(null);
+
+          // The learner has found the setting, so the guide is done.
+          if (guide !== null) {
+            endGuide();
+          }
         }}
         onInvalid={(event) => {
           event.preventDefault();
@@ -106,6 +154,19 @@ export function NumberField(props: {
         }}
       />
       {error !== null && <span id={errorId} role="alert">{error}</span>}
+      {/* Rendered at the page level so no panel edge can cut it off. */}
+      {guide !== null && guidePosition !== null && createPortal(
+        <span
+          id={guideId}
+          className="field-guide"
+          role="status"
+          style={{ left: guidePosition.left, top: guidePosition.top, "--arrow-offset": `${guidePosition.arrowOffset}px` } as CSSProperties}
+          onAnimationEnd={endGuide}
+        >
+          {guide}
+        </span>,
+        document.body,
+      )}
     </label>
   );
 }

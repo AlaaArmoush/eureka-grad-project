@@ -6,6 +6,7 @@ import { ObjectLibrary } from "./lab/ObjectLibrary";
 import {
   Atom,
   Activity,
+  ArrowLeft,
   ChevronDown,
   ChevronRight,
   Crosshair,
@@ -51,7 +52,8 @@ import { useDemonstrationCatalogue } from "./lab/demonstration-client.js";
 import { ChallengesPage } from "./pages/ChallengesPage.js";
 import { createWorkspaceNavigation, type WorkspacePage } from "./navigation.js";
 // Supplies learner-facing wording for engine and controller problems.
-import { describeProblem, LAB_NOT_READY, RUN_STOPPED } from "./lab/lab-messages.js";
+import { describeProblem, FIELD_GUIDE, LAB_NOT_READY, RUN_STOPPED } from "./lab/lab-messages.js";
+import { DEMONSTRATION_GUIDE_FIELDS } from "./lab/demonstrations.js";
 
 const WORKSPACE_NAVIGATION = [
   {
@@ -92,6 +94,13 @@ export function App() {
   const [labVisible, setLabVisible] = useState(true);
   const [navigation] = useState(() => createWorkspaceNavigation(window));
   const activePage = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot);
+
+  // The browser's Back and Forward change page too; a "try it" bubble never outlives the lab page.
+  useEffect(() => {
+    if (activePage !== "laboratory") {
+      labStore.getState().setFieldGuide(null);
+    }
+  }, [activePage]);
   // The sidebar's Curriculum link returns to where the student left off, not to the topic list.
   const lastCurriculumPageRef = useRef<"curriculum" | "projectiles">("curriculum");
 
@@ -108,6 +117,10 @@ export function App() {
   const challenge = useChallengeSession(setEditableScene, controllerRef);
   const reportEngineFailure = challenge.onEngineFailure;
   const challengeActive = challenge.session !== null;
+  // The open Curriculum question's title, shown in the breadcrumb; none for the learner's own scene or a challenge.
+  const openQuestionTitle = activeDemonstration === null || challengeActive || demonstrationCatalogue.catalogue.status !== "ready"
+    ? null
+    : demonstrationCatalogue.catalogue.demonstrations.find((demonstration) => demonstration.id === activeDemonstration.groupId)?.title ?? null;
   const [sceneOutlineOpen, setSceneOutlineOpen] = useState(() => window.matchMedia("(min-width: 1101px)").matches);
   const [inspectorOpen, setInspectorOpen] = useState(() => window.matchMedia("(min-width: 901px)").matches);
   const [measurementsOpen, setMeasurementsOpen] = useState(true);
@@ -143,6 +156,7 @@ export function App() {
   }
 
   function toggleInspector(): void {
+    labStore.getState().setFieldGuide(null);
     setInspectorOpen((open) => !open);
     if (!inspectorOpen && window.matchMedia("(max-width: 900px)").matches) {
       setSceneOutlineOpen(false);
@@ -150,6 +164,7 @@ export function App() {
   }
 
   function closeInspector(): void {
+    labStore.getState().setFieldGuide(null);
     setInspectorOpen(false);
     inspectorToggleRef.current?.focus();
   }
@@ -347,6 +362,7 @@ export function App() {
       // The canvas fits the new scene itself once it has drawn it, the same way the Fit button does.
       pendingCameraView: null,
       overlayVisibility: { ...loaded.overlays },
+      fieldGuide: null,
     });
 
     setSceneGeneration((generation) => generation + 1);
@@ -364,6 +380,16 @@ export function App() {
     applyLoad(loaded);
     // The overlay's ghost paths also carry a demonstration's reference flight; a challenge or the next load replaces them.
     labStore.getState().setChallengeOverlay({ zones: [], live: [], ghosts: loaded.referencePaths });
+
+    // For a question that asks the learner to change one setting: open the inspector on its tab and show a "try it" bubble.
+    const field = DEMONSTRATION_GUIDE_FIELDS[loaded.selection.groupId];
+
+    if (field !== undefined) {
+      setInspectorOpen(true);
+      // A ball setting needs its ball selected so the field is on screen; scene settings need no selection.
+      const guidedEntityId = field.tab === "properties" ? loaded.selectedEntityId : null;
+      labStore.setState({ selectedEntityId: guidedEntityId, inspectorTab: field.tab, fieldGuide: { fieldName: field.fieldName, message: FIELD_GUIDE } });
+    }
   }
 
   function applyChallenge(loaded: ChallengeLoad): void {
@@ -378,6 +404,8 @@ export function App() {
 
     const editor = labStore.getState();
     editor.setActiveTool({ ...editor.activeTool });
+    // A "try it" bubble belongs to the page it was shown on.
+    editor.setFieldGuide(null);
 
     navigation.navigate(page);
 
@@ -609,7 +637,8 @@ export function App() {
                   aria-current={activePage === id || (id === "curriculum" && activePage === "projectiles") ? "page" : undefined}
                   aria-label={label}
                   title={label}
-                  onClick={() => navigateTo(id === "curriculum" ? lastCurriculumPageRef.current : id)}
+                  // From inside Curriculum the link goes to the topic list; from elsewhere it returns where you were.
+                  onClick={() => navigateTo(id !== "curriculum" ? id : activePage === "curriculum" || activePage === "projectiles" ? "curriculum" : lastCurriculumPageRef.current)}
                 ><Icon size={18} /><span>{label}</span></button>
               ) : (
                 <button key={id} className="rail-link" type="button" aria-label={label} title={label} disabled><Icon size={18} /><span>{label}</span></button>
@@ -630,11 +659,15 @@ export function App() {
           <div className="workspace-breadcrumb">
             <span>Workspace</span><ChevronRight size={12} />
             {activePage === "laboratory" ? (
-              <><span>Physics lab</span><ChevronRight size={12} /><strong>Projectiles</strong></>
+              openQuestionTitle !== null
+                ? <><button className="crumb-link" type="button" onClick={() => navigateTo("curriculum")}>Curriculum</button><ChevronRight size={12} /><button className="crumb-link" type="button" onClick={() => navigateTo("projectiles")}>Projectiles</button><ChevronRight size={12} /><strong>{openQuestionTitle}</strong></>
+                : <strong>Physics lab</strong>
             ) : activePage === "challenges" ? (
               <><span>Challenges</span><ChevronRight size={12} /><strong>Projectiles</strong></>
             ) : (
-              <><span>Curriculum</span>{activePage === "projectiles" && <><ChevronRight size={12} /><strong>Projectiles</strong></>}</>
+              activePage === "projectiles"
+                ? <><button className="crumb-link" type="button" onClick={() => navigateTo("curriculum")}>Curriculum</button><ChevronRight size={12} /><strong>Projectiles</strong></>
+                : <span>Curriculum</span>
             )}
           </div>
           <span className="local-status"><span className="status-dot" />Local workspace</span>
@@ -654,8 +687,12 @@ export function App() {
         <ChallengesPage visible={activePage === "challenges"} error={labError} onPlay={handleChallengeOpen} />
         <main id="laboratory" className="lab-shell" hidden={activePage !== "laboratory"}>
           <header className="lab-header">
-            <div className="experiment-heading"><span className="experiment-mark"><Atom size={21} /></span><div><h1 ref={labHeadingRef} tabIndex={-1}>Projectile laboratory</h1><p>Build a scene. Follow the physics.</p></div><span className="scene-badge">{challengeActive ? "Challenge" : "Your scene"}</span></div>
+            <div className="experiment-heading"><span className="experiment-mark"><Atom size={21} /></span><div><h1 ref={labHeadingRef} tabIndex={-1}>Physics lab</h1><p>Build a scene. Follow the physics.</p></div></div>
             <div className="header-actions">
+              {/* While a Curriculum question is open in the lab, one click returns to it. */}
+              {activeDemonstration !== null && !challengeActive && (
+                <button className="tool-btn" type="button" onClick={() => navigateTo("projectiles")}><ArrowLeft size={14} />Back to question</button>
+              )}
               <button className="tool-btn lab-power" onClick={() => setLabVisible((visible) => !visible)} type="button"><Power size={14} />{labVisible ? "Leave lab" : "Enter lab"}</button>
             </div>
           </header>
@@ -761,7 +798,7 @@ export function App() {
                 </header>
                 <div className="canvas-workbench">
                   <div className="canvas-page">
-                    <div className="canvas-heading"><span>— Motion study</span>
+                    <div className="canvas-heading">
                       <CanvasTools />
                     </div>
                     {labVisible ? (

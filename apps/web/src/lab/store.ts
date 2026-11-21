@@ -46,6 +46,12 @@ export interface ChallengeOverlay {
 // The inspector's three panels; the store owns which one is showing so selection can bring the Object panel forward.
 export type InspectorTab = "properties" | "environment" | "display";
 
+// A "try it" bubble shown once above one inspector field, by its input name; it fades out on its own.
+export interface FieldGuide {
+  readonly fieldName: string;
+  readonly message: string;
+}
+
 export interface LabEditorState {
   readonly cameraCenterWorldMeters: Vector2;
   readonly pixelsPerMeter: number;
@@ -58,6 +64,8 @@ export interface LabEditorState {
   selectEntity(entityId: string | null, notice?: string): void;
   readonly inspectorTab: InspectorTab;
   setInspectorTab(tab: InspectorTab): void;
+  readonly fieldGuide: FieldGuide | null;
+  setFieldGuide(guide: FieldGuide | null): void;
   readonly overlayVisibility: OverlayVisibility;
   readonly challengeOverlay: ChallengeOverlay;
   setChallengeOverlay(overlay: ChallengeOverlay): void;
@@ -100,6 +108,10 @@ export const labStore = createStore<LabEditorState>()((set) => ({
   inspectorTab: "environment",
   setInspectorTab: (inspectorTab) => {
     set({ inspectorTab });
+  },
+  fieldGuide: null,
+  setFieldGuide: (fieldGuide) => {
+    set({ fieldGuide });
   },
   overlayVisibility: {
     trail: true,

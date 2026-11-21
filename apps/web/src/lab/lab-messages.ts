@@ -48,6 +48,9 @@ export function pullWorkText(joules: number): string {
   return `Your pull did ${joules.toFixed(2)} J of work`;
 }
 
+// The bubble shown once above the setting a Curriculum question is about, when that question opens in the lab.
+export const FIELD_GUIDE = "Try changing this, then press Run.";
+
 // Shown when the run has more events than the lab keeps.
 export function eventLimitNote(limit: number): string {
   return `Only the first ${limit} events of this run are listed.`;
@@ -64,7 +67,7 @@ const FIELD_NAMES: readonly (readonly [string, string])[] = [
   ["positionMeters", "Position"],
   ["linearMetersPerSecond", "Launch velocity"],
   ["gravityMetersPerSecondSquared", "Gravity"],
-  ["linearDragKilogramsPerSecond", "Air resistance"],
+  ["linearDragKilogramsPerSecond", "Linear drag"],
 ];
 
 function fieldName(path: string): string | undefined {
