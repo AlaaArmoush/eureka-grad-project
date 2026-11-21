@@ -1,4 +1,4 @@
-import type { SceneDefinition, Snapshot, Vector2 } from "@eureka/contracts";
+import type { DynamicBody, SceneDefinition, Snapshot, SnapshotEvent, StaticBody, Vector2 } from "@eureka/contracts";
 
 import {
   Application,
@@ -37,7 +37,11 @@ export const VELOCITY_ARROW_SCALE = {
   maximumLengthPixels: 144,
 } as const;
 
+// Used only when there is no ground below the ball to land on.
 export const IDEAL_PREDICTION_DURATION_SECONDS = 2;
+
+// The trail shows only the last few seconds of motion, so a ball sliding along the ground does not draw forever.
+const TRAIL_DURATION_SECONDS = 3;
 
 interface RenderItem {
   readonly kind: "body" | "target";
@@ -54,6 +58,22 @@ interface DragState {
   readonly pointerOffsetMeters: Vector2; // Preserves the exact point where the object was grabbed.
 }
 
+// During a run, dragging a ball pulls it with a spring instead of moving it.
+interface PullState {
+  readonly entityId: string;
+  readonly pointerId: number;
+  readonly localAnchorMeters: Vector2; // Grab point, relative to the ball.
+  targetMeters: Vector2; // Current pointer position.
+}
+
+// Implemented by LabCanvas; the renderer only reports pointer positions.
+export interface PullHandlers {
+  // "notRunning" means the Move tool should move the starting position as before.
+  start(bodyId: string, localAnchorMeters: Vector2, targetMeters: Vector2): "started" | "notRunning" | "rejected";
+  move(targetMeters: Vector2): boolean;
+  release(): void;
+}
+
 interface PanState {
   readonly pointerId: number;
   readonly buttonMask: number;
@@ -63,6 +83,7 @@ interface PanState {
 }
 export interface LabRenderer {
   updateSnapshot(snapshot: Snapshot): void;
+  updateRunEvents(events: readonly SnapshotEvent[]): void;
   // Replace an authored scene without replacing the mounted canvas.
   updateScene(scene: SceneDefinition, snapshot: Snapshot): void;
   dispose(): void;
@@ -94,6 +115,38 @@ function createRenderItems(
       updateAppearance: visual.update,
     };
   });
+}
+
+function isGroundPlane(body: SceneDefinition["bodies"][number]): body is StaticBody {
+  return body.kind === "static" && body.pose.angleRadians === 0 && body.shape.widthMeters >= GROUND_PLANE_WIDTH_METERS;
+}
+
+// Ideal time for the ball's centre to come down onto the highest ground below it.
+// Solves y0 + vy·t − g·t²/2 = yLand: t = (vy + √(vy² + 2·g·(y0 − yLand))) / g.
+function idealLandingTimeSeconds(scene: SceneDefinition, projectile: DynamicBody): number {
+  const g = -scene.environment.gravityMetersPerSecondSquared.y;
+  const startY = projectile.pose.positionMeters.y;
+  const vy = projectile.velocity.linearMetersPerSecond.y;
+  let landingY: number | undefined;
+
+  for (const body of scene.bodies) {
+    if (!isGroundPlane(body)) {
+      continue;
+    }
+
+    // The centre stops one radius above the ground's top.
+    const centreY = body.pose.positionMeters.y + body.shape.heightMeters / 2 + projectile.shape.radiusMeters;
+
+    if (centreY <= startY && (landingY === undefined || centreY > landingY)) {
+      landingY = centreY;
+    }
+  }
+
+  if (landingY === undefined || g <= 0) {
+    return IDEAL_PREDICTION_DURATION_SECONDS;
+  }
+
+  return (vy + Math.sqrt(vy * vy + 2 * g * (startY - landingY))) / g;
 }
 
 // Draw an open-headed arrow between two screen positions.
@@ -140,6 +193,7 @@ export function mountLabRenderer(
   onPlacementRequested: (request: PlacementRequest) => void,
   onMoveRequested: (request: MoveEntityRequest) => boolean,
   onDeleteRequested: (entityId: string) => boolean,
+  pullHandlers: PullHandlers,
 ): LabRenderer {
   // Keep an owned snapshot for later camera and selection redraws.
   // Keep the accepted scene available to drawing and selection.
@@ -173,8 +227,13 @@ export function mountLabRenderer(
   horizontalVelocityGraphic.eventMode = "none";
 
   trailGraphic.eventMode = "none";
+  const pullGraphic = new Graphics({ label: "pointer-pull-spring" });
+  pullGraphic.eventMode = "none";
   let panState: PanState | null = null;
   let dragState: DragState | null = null;
+  let pullState: PullState | null = null;
+  // This run's events, so a target stays coloured after the tick it was entered.
+  let runEvents: readonly SnapshotEvent[] = [];
   const background = new Graphics();
   background.eventMode = "static";
   let backgroundWidth = 0;
@@ -294,7 +353,7 @@ export function mountLabRenderer(
     );
   }
 
-  // Predict free flight from the scene's initial conditions.
+  // Ideal flight from the starting conditions, up to the formula landing time.
   function redrawSelectedPrediction(
     viewport: ViewportTransform,
     selectedProjectile: ReturnType<typeof getSelectedProjectile>,
@@ -310,10 +369,11 @@ export function mountLabRenderer(
     const gravity = currentScene.environment.gravityMetersPerSecondSquared;
     const screenPoints: Vector2[] = [];
     const intervalCount = 100;
+    const flightTimeSeconds = idealLandingTimeSeconds(currentScene, selectedProjectile);
 
     // Calculate 101 independent positions, including both endpoints.
     for (let index = 0; index <= intervalCount; index += 1) {
-      const timeSeconds = IDEAL_PREDICTION_DURATION_SECONDS * index / intervalCount;
+      const timeSeconds = flightTimeSeconds * index / intervalCount;
       const halfTimeSquared = 0.5 * timeSeconds * timeSeconds;
       const pointMeters = {
         x: position.x + velocity.x * timeSeconds + gravity.x * halfTimeSquared,
@@ -507,6 +567,29 @@ export function mountLabRenderer(
     }
   }
 
+  // A line from the grab point on the ball to the pointer while a pull is held.
+  function redrawPull(viewport: ViewportTransform): void {
+    pullGraphic.clear();
+    const pull = pullState;
+    const item = pull === null ? undefined : renderItems.get(pull.entityId);
+
+    if (pull === null || item === undefined) {
+      return;
+    }
+
+    // Rotate the grab point with the ball, as the engine does.
+    const cosine = Math.cos(item.angleRadians);
+    const sine = Math.sin(item.angleRadians);
+    const anchor = worldToScreen({
+      x: item.positionMeters.x + cosine * pull.localAnchorMeters.x - sine * pull.localAnchorMeters.y,
+      y: item.positionMeters.y + sine * pull.localAnchorMeters.x + cosine * pull.localAnchorMeters.y,
+    }, viewport);
+    const pointer = worldToScreen(pull.targetMeters, viewport);
+
+    pullGraphic.moveTo(anchor.x, anchor.y).lineTo(pointer.x, pointer.y).stroke({ color: sceneColors.ink, width: 1.5, alpha: 0.75, cap: "round" });
+    pullGraphic.circle(pointer.x, pointer.y, 4).stroke({ color: sceneColors.ink, width: 1.5 });
+  }
+
   const resizeAndRender = (): void => {
     // Hidden pages retain their view instead of resizing it to a one-pixel canvas.
     if (!initialized || disposed || host.clientWidth === 0 || host.clientHeight === 0) {
@@ -542,7 +625,7 @@ export function mountLabRenderer(
     }
 
     // Apply editor choices without changing the physical snapshot.
-    const toolCursor = panState !== null || dragState !== null ? "grabbing" :
+    const toolCursor = panState !== null || dragState !== null || pullState !== null ? "grabbing" :
       editorState.activeTool.kind === "pan" ? "grab" :
         editorState.activeTool.kind === "move" ? "move" :
           editorState.activeTool.kind === "place" ? "copy" :
@@ -566,13 +649,15 @@ export function mountLabRenderer(
     redrawChallengePaths(viewport);
     redrawSelectedVelocity(viewport, selectedProjectile);
     redrawSelectedPrediction(viewport, selectedProjectile);
+    redrawPull(viewport);
 
     for (const item of renderItems.values()) {
       item.graphic.cursor = editorState.activeTool.kind === "select" && panState === null ? "pointer" : toolCursor;
-      const entered = editorState.overlayVisibility.events && currentSnapshot.events.some(
-        (event) => event.kind === "targetEntered" && event.targetId === item.entityId && event.tick === currentSnapshot.tick,
+      // Once a ball enters a target, the target changes colour until Reset.
+      const entered = editorState.overlayVisibility.events && runEvents.some(
+        (event) => event.kind === "targetEntered" && event.targetId === item.entityId,
       );
-      // A target used as a challenge zone shows the attempt's state instead of the one-tick entry flash.
+      // A target used as a challenge zone shows the attempt's state instead.
       const zone = editorState.challengeOverlay.zones.find((view) => view.zone.targetId === item.entityId);
       item.updateAppearance(
         editorState.pixelsPerMeter,
@@ -596,6 +681,8 @@ export function mountLabRenderer(
 
     if (previous !== undefined && snapshot.tick <= previous.tick) {
       trailSamples = [];
+      // Reset also removed the engine's pull.
+      pullState = null;
     }
 
     const positionsMeters = new Map<string, Vector2>();
@@ -607,6 +694,14 @@ export function mountLabRenderer(
     }
 
     trailSamples.push({ tick: snapshot.tick, positionsMeters });
+
+    // Drop samples older than the trail duration.
+    const oldestTick = snapshot.tick - Math.round(TRAIL_DURATION_SECONDS / currentScene.numericalProfile.fixedTimeStepSeconds);
+    const firstKept = trailSamples.findIndex((sample) => sample.tick >= oldestTick);
+
+    if (firstKept > 0) {
+      trailSamples.splice(0, firstKept);
+    }
   }
 
   // Apply an authored revision without another asynchronous Pixi initialization.
@@ -621,8 +716,10 @@ export function mountLabRenderer(
     trailSamples = [];
     recordTrailSample(currentSnapshot);
 
-    // Discard pointer previews belonging to the previous revision.
+    // Discard pointer work and events from the previous scene.
     dragState = null;
+    pullState = null;
+    runEvents = [];
     stopPan();
 
     if (!initialized) {
@@ -662,6 +759,18 @@ export function mountLabRenderer(
     resizeAndRender();
   }
 
+  function updateRunEvents(events: readonly SnapshotEvent[]): void {
+    if (disposed) {
+      return;
+    }
+
+    runEvents = events;
+
+    if (initialized) {
+      resizeAndRender();
+    }
+  }
+
   function deleteItem(item: RenderItem, event: FederatedPointerEvent): void {
     if (event.button !== 0 || !event.isPrimary) {
       return;
@@ -693,6 +802,63 @@ export function mountLabRenderer(
     event.stopPropagation();
   }
 
+  // Returns false when the Move tool should move the starting position instead.
+  function startPull(item: RenderItem, event: FederatedPointerEvent): boolean {
+    const isBall = currentScene.bodies.some((body) => body.id === item.entityId && body.kind === "dynamic");
+
+    if (!isBall) {
+      return false;
+    }
+
+    if (pullState !== null) {
+      return true;
+    }
+
+    const pointerWorld = screenToWorld(event.global, getViewport());
+    // Store the grab point relative to the ball, undoing the ball's rotation.
+    const offsetX = pointerWorld.x - item.positionMeters.x;
+    const offsetY = pointerWorld.y - item.positionMeters.y;
+    const cosine = Math.cos(item.angleRadians);
+    const sine = Math.sin(item.angleRadians);
+    const localAnchorMeters = { x: cosine * offsetX + sine * offsetY, y: -sine * offsetX + cosine * offsetY };
+    const outcome = pullHandlers.start(item.entityId, localAnchorMeters, pointerWorld);
+
+    if (outcome === "notRunning") {
+      return false;
+    }
+
+    if (outcome === "started") {
+      pullState = { entityId: item.entityId, pointerId: event.pointerId, localAnchorMeters, targetMeters: pointerWorld };
+      resizeAndRender();
+    }
+
+    event.stopPropagation();
+    return true;
+  }
+
+  // The ball moves only through the engine; here we just send the new target.
+  function updatePull(event: FederatedPointerEvent): void {
+    const pull = pullState;
+
+    if (pull === null) {
+      return;
+    }
+
+    if (labStore.getState().activeTool.kind !== "move" || (event.buttons & 1) === 0) {
+      cancelActiveDrag();
+      return;
+    }
+
+    pull.targetMeters = screenToWorld(event.global, getViewport());
+
+    if (!pullHandlers.move(pull.targetMeters)) {
+      pullState = null;
+      pullHandlers.release();
+    }
+
+    resizeAndRender();
+  }
+
   function handleItemPointerDown(
     item: RenderItem,
     event: FederatedPointerEvent,
@@ -709,12 +875,17 @@ export function mountLabRenderer(
 
     labStore.getState().selectEntity(item.entityId);
 
-    if (activeTool.kind === "move") {
+    if (activeTool.kind === "move" && !startPull(item, event)) {
       startDrag(item, event);
     }
   }
 
   function previewDrag(event: FederatedPointerEvent): void {
+    if (pullState !== null && pullState.pointerId === event.pointerId) {
+      updatePull(event);
+      return;
+    }
+
     if (dragState === null || dragState.pointerId !== event.pointerId) {
       return;
     }
@@ -740,6 +911,13 @@ export function mountLabRenderer(
     resizeAndRender();
   }
   function cancelActiveDrag(): void {
+    // Ending a pull removes the force; the ball keeps moving.
+    if (pullState !== null) {
+      pullState = null;
+      pullHandlers.release();
+      resizeAndRender();
+    }
+
     if (dragState === null) {
       return;
     }
@@ -758,11 +936,16 @@ export function mountLabRenderer(
   }
 
   function cancelPointerDrag(event: FederatedPointerEvent): void {
-    if (dragState?.pointerId === event.pointerId) {
+    if (dragState?.pointerId === event.pointerId || pullState?.pointerId === event.pointerId) {
       cancelActiveDrag();
     }
   }
   function finishDrag(event: FederatedPointerEvent): void {
+    if (pullState !== null && pullState.pointerId === event.pointerId) {
+      cancelActiveDrag();
+      return;
+    }
+
     if (dragState === null || dragState.pointerId !== event.pointerId) {
       return;
     }
@@ -849,7 +1032,7 @@ export function mountLabRenderer(
         const halfWidth = (shape.widthMeters * cosine + shape.heightMeters * sine) / 2;
         const halfHeight = (shape.widthMeters * sine + shape.heightMeters * cosine) / 2;
         // A long ground establishes height without shrinking the experiment, whatever its id.
-        const groundPlane = entity.kind === "static" && entity.pose.angleRadians === 0 && shape.widthMeters >= GROUND_PLANE_WIDTH_METERS;
+        const groundPlane = entity.kind !== "target" && isGroundPlane(entity);
         include(pose.positionMeters.x, pose.positionMeters.y, groundPlane ? 0 : halfWidth, halfHeight);
       }
       if (entity.kind === "dynamic") {
@@ -924,10 +1107,10 @@ export function mountLabRenderer(
     paperTexture = createPaperTexture();
     paper = new TilingSprite({ texture: paperTexture, width: host.clientWidth, height: host.clientHeight, eventMode: "none" });
     application.stage.addChild(paper, notebook.root);
-    // Keep paths behind bodies and velocity arrows.
+    // Paths stay behind bodies; arrows and the pull line go above them.
     application.stage.addChild(
       trailGraphic, challengePathGraphic, predictionGraphic,
-      horizontalVelocityGraphic, verticalVelocityGraphic, velocityGraphic,
+      horizontalVelocityGraphic, verticalVelocityGraphic, velocityGraphic, pullGraphic,
     );
     application.stage.addChildAt(background, 0);
     rebuildRenderItems();
@@ -1012,7 +1195,7 @@ export function mountLabRenderer(
         stopPan();
         cancelActiveDrag();
       }
-      if (dragState !== null && state.selectedEntityId !== dragState.entityId) {
+      if ((dragState !== null && state.selectedEntityId !== dragState.entityId) || (pullState !== null && state.selectedEntityId !== pullState.entityId)) {
         cancelActiveDrag();
       }
 
@@ -1057,6 +1240,7 @@ export function mountLabRenderer(
     window.removeEventListener("blur", cancelInteractions);
     stopPan();
     dragState = null;
+    pullState = null;
     unsubscribeFromStore?.();
     if (initialized) {
       application.destroy({ removeView: true }, { children: true });
@@ -1069,6 +1253,7 @@ export function mountLabRenderer(
       verticalVelocityGraphic.destroy();
       predictionGraphic.destroy();
       challengePathGraphic.destroy();
+      pullGraphic.destroy();
       notebook.root.destroy({ children: true });
     }
 
@@ -1077,6 +1262,7 @@ export function mountLabRenderer(
 
   return {
     updateSnapshot,
+    updateRunEvents,
     updateScene,
     dispose,
   };

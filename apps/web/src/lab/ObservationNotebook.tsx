@@ -1,6 +1,7 @@
-import type { Snapshot } from "@eureka/contracts";
+import type { Snapshot, SnapshotEvent } from "@eureka/contracts";
 // Supplies learner-facing wording for the engine's notes about a tick.
-import { describeDiagnostic, objectName } from "./lab-messages.js";
+import { describeDiagnostic, describeEvent, eventLimitNote, objectName, pullWorkText } from "./lab-messages.js";
+import { RUN_EVENT_LIMIT } from "./controller.js";
 
 function formatMeasurement(value: number | undefined): string {
   // A body without readouts (a target, or nothing selected) shows a short dash, so every cell keeps its height.
@@ -17,13 +18,15 @@ function formatMeasurement(value: number | undefined): string {
 }
 
 // HTML readouts consume the displayed snapshot, never the rendered pixel positions.
-export function ObservationNotebook({ snapshot, selectedEntityId }: {
+export function ObservationNotebook({ snapshot, selectedEntityId, runEvents }: {
   snapshot: Snapshot;
   selectedEntityId: string | null;
+  // The whole run's events; without them, only this tick's events are listed.
+  runEvents?: readonly SnapshotEvent[];
 }) {
   const body = snapshot.bodies.find((item) => item.id === selectedEntityId);
   const velocity = body?.velocity.linearMetersPerSecond;
-  const events = snapshot.events.filter((event) => selectedEntityId === null ||
+  const events = (runEvents ?? snapshot.events).filter((event) => selectedEntityId === null ||
     event.bodyId === selectedEntityId ||
     (event.kind === "targetEntered" ? event.targetId === selectedEntityId : event.surfaceBodyId === selectedEntityId));
   const values = [
@@ -34,6 +37,8 @@ export function ObservationNotebook({ snapshot, selectedEntityId }: {
     { title: "Speed", symbol: "|v|", unit: "m/s", value: velocity === undefined ? undefined : Math.hypot(velocity.x, velocity.y) },
     { title: "Time", symbol: "t", unit: "s", value: snapshot.simulationTimeSeconds },
   ];
+  // Older snapshots omit the work total, which means zero.
+  const pullWorkJoules = snapshot.userInteractionWorkJoules ?? 0;
 
   return (
     <>
@@ -43,6 +48,7 @@ export function ObservationNotebook({ snapshot, selectedEntityId }: {
           {/* The heading explains missing readouts, so no extra row changes the notebook's height. */}
           <span>
             {selectedEntityId === null ? "No object selected" : body === undefined ? `${objectName(selectedEntityId)} · Measurement unavailable` : objectName(selectedEntityId)} · tick {snapshot.tick}
+            {pullWorkJoules !== 0 && <> · {pullWorkText(pullWorkJoules)}</>}
           </span>
         </header>
         {/* Always the same six cells, so the notebook and the canvas above it keep their size for every selection. */}
@@ -69,14 +75,19 @@ export function ObservationNotebook({ snapshot, selectedEntityId }: {
         <summary>Recorded events <span className="count-badge">{events.length}</span></summary>
         {events.length === 0 ? <p className="panel-empty">No events reported for this selection.</p> : (
           <ul className="event-list">
-            {events.map((event) => (
-              <li key={event.id}>
-                <div><strong>{event.kind === "targetEntered" ? "Target entry" : "Surface contact"}</strong><span>{objectName(event.bodyId)} · {objectName(event.kind === "targetEntered" ? event.targetId : event.surfaceBodyId)}</span></div>
-                <time>{event.timeSeconds.toFixed(3)} s</time>
-              </li>
-            ))}
+            {events.map((event) => {
+              const description = describeEvent(event);
+
+              return (
+                <li key={event.id}>
+                  <div><strong>{description.title}</strong><span>{description.detail}</span></div>
+                  <time title={`${event.timeSeconds} s, tick ${event.tick}`}>{event.timeSeconds.toFixed(3)} s</time>
+                </li>
+              );
+            })}
           </ul>
         )}
+        {runEvents !== undefined && runEvents.length >= RUN_EVENT_LIMIT && <p className="panel-empty">{eventLimitNote(RUN_EVENT_LIMIT)}</p>}
       </details>
       {snapshot.diagnostics.length > 0 && (
         <section className="lab-diagnostics" aria-label="Simulation notes">

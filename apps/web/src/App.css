@@ -93,7 +93,6 @@ svg { flex-shrink: 0; stroke-width: 1.6; }
 .site-rail { position: sticky; top: 0; height: 100dvh; display: flex; flex-direction: column; min-width: 0; background: #233634; border-right: 1px solid #192b28; color: #e0e7df; }
 .brand { display: flex; align-items: center; gap: 11px; min-height: 57px; padding: 0 18px; color: #f2efe7; border-bottom: 1px solid #ffffff14; text-decoration: none; }
 .brand > span { font-size: 21px; font-weight: 600; letter-spacing: -.6px; }
-.brand small { display: block; margin-top: 3px; color: #b3c2bb; font-size: 9px; font-weight: 400; letter-spacing: 0; }
 .site-rail nav { display: grid; gap: 20px; width: 100%; padding: 22px 9px; overflow-y: auto; }
 .rail-close, .navigation-backdrop { display: none; }
 .navigation-group { display: grid; gap: 3px; }

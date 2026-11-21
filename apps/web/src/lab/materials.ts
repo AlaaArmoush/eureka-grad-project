@@ -164,7 +164,8 @@ export const zoneColors = {
 
 export type TargetPaint = (typeof zoneColors)[keyof typeof zoneColors];
 
-function paintTarget(g: Graphics, radius: number, entered: boolean, paint: TargetPaint): void {
+// The colour alone shows whether a ball has entered the target.
+function paintTarget(g: Graphics, radius: number, paint: TargetPaint): void {
   const green = paint.ink;
   // A translucent watercolor ring keeps the projectile visible inside the sensor.
   g.circle(0, 0, radius).fill({ color: paint.wash, alpha: .28 });
@@ -174,12 +175,6 @@ function paintTarget(g: Graphics, radius: number, entered: boolean, paint: Targe
   for (let index = 0; index < 4; index++) {
     const angle = index * Math.PI / 2;
     pencilLine(g, Math.cos(angle) * (radius - 2), Math.sin(angle) * (radius - 2), Math.cos(angle) * (radius + 6), Math.sin(angle) * (radius + 6), green, 1);
-  }
-  if (entered) {
-    const offset = radius + 6;
-    g.roundRect(offset - 5, -offset - 5, 11, 11, 1.5).fill(0xb7edc9).stroke({ color: green, width: .9 });
-    pencilLine(g, offset - 2.5, -offset, offset, -offset + 2.5, green, 1.4);
-    pencilLine(g, offset, -offset + 2.5, offset + 4, -offset - 2.5, green, 1.4);
   }
 }
 
@@ -240,7 +235,7 @@ export function paintEntity(g: Graphics, entity: Body | TargetTrigger, pixelsPer
   const shape = entity.shape;
   if (shape.kind === "circle") {
     const radius = shape.radiusMeters * pixelsPerMeter;
-    if (entity.kind === "target") paintTarget(g, radius, targetEntered, targetPaint);
+    if (entity.kind === "target") paintTarget(g, radius, targetPaint);
     else paintBall(g, radius);
     return;
   }

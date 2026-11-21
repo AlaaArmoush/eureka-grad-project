@@ -3,6 +3,7 @@ import type {
   CommandPayload,
   SceneDefinition,
   Snapshot,
+  SnapshotEvent,
   Vector2,
 } from "@eureka/contracts";
 // Supplies the headless engine boundary and typed results.
@@ -32,9 +33,31 @@ import {
   deleteEntityFromScene,
   updateEnvironmentInScene
 } from "./authoring.js";
+import { PULL_NEEDS_RUN } from "./lab-messages.js";
 
 export const PLAYBACK_SPEEDS = [0.25, 0.5, 1, 2, 4] as const;
 export type PlaybackSpeed = (typeof PLAYBACK_SPEEDS)[number];
+
+// Upper bound on listed events per run, so a long run with many bounces cannot grow the list forever.
+export const RUN_EVENT_LIMIT = 100;
+
+// Contact reports for the same ball and surface less than this far apart count as one contact.
+const CONTINUING_CONTACT_GAP_SECONDS = 0.1;
+
+// The pull is a spring scaled by mass (k = m·ω², c = 2·m·ω), so every ball settles in about half a second.
+const PULL_ANGULAR_FREQUENCY_RADIANS_PER_SECOND = 10;
+// Largest pull per kilogram, about ten times g.
+const PULL_MAXIMUM_ACCELERATION_METERS_PER_SECOND_SQUARED = 100;
+const POINTER_PULL_INTERACTION_ID = "pointer-pull";
+
+// Fixed when a pull starts; moving the pointer only changes the target.
+interface PullSettings {
+  readonly bodyId: string;
+  readonly localAnchorMeters: Vector2;
+  readonly stiffnessNewtonsPerMeter: number;
+  readonly dampingKilogramsPerSecond: number;
+  readonly maximumForceNewtons: number;
+}
 
 // Expose playback information without exposing the mutable clock accumulator.
 export interface PlaybackState {
@@ -55,6 +78,10 @@ export interface PlaybackBrowser {
 
 export interface LabController {
   queueRunEdit(payload: CommandPayload): EngineResult<{ readonly appliesAtTick: number }>;
+  // Pull a ball toward the pointer with a spring while the run plays.
+  startPull(bodyId: string, localAnchorMeters: Vector2, targetPositionMeters: Vector2): EngineStatus;
+  movePull(targetPositionMeters: Vector2): EngineStatus;
+  endPull(): EngineStatus;
   play(): EngineStatus;
   pause(): void;
   setSpeed(speed: PlaybackSpeed): EngineStatus;
@@ -117,6 +144,8 @@ export interface LabControllerOptions {
   // Receive owned snapshots for retained HTML measurements.
   readonly consumeReadout?: SnapshotConsumer | undefined;
   readonly consumeTick?: SnapshotConsumer | undefined;
+  // Receives this run's events whenever the list changes.
+  readonly consumeRunEvents?: ((events: readonly SnapshotEvent[]) => void) | undefined;
   readonly releaseView: () => void;
   readonly nowMilliseconds?: (() => number) | undefined;
   readonly playbackBrowser?: PlaybackBrowser | undefined;
@@ -125,7 +154,7 @@ export interface LabControllerOptions {
 
 export function createLabController(options: LabControllerOptions): EngineResult<LabController> {
   const {
-    engine, initialScene, consumeSnapshot, consumeReadout, consumeTick, releaseView,
+    engine, initialScene, consumeSnapshot, consumeReadout, consumeTick, consumeRunEvents, releaseView,
     nowMilliseconds = () => performance.now(),
     playbackBrowser, onPlaybackChange,
   } = options;
@@ -153,6 +182,44 @@ export function createLabController(options: LabControllerOptions): EngineResult
   let lastReportedPlaybackState: PlaybackState | undefined;
   // Track the last retained readout's browser timestamp.
   let lastReadoutTimeMilliseconds = Number.NEGATIVE_INFINITY;
+  // The engine reports an event only on its own tick, so the run's events are kept here until Reset.
+  let runEvents: SnapshotEvent[] = [];
+  let activePull: PullSettings | null = null;
+  // Last reported contact time for each ball–surface pair.
+  let lastContactTimes = new Map<string, number>();
+
+  function publishRunEvents(): void {
+    consumeRunEvents?.(runEvents.slice());
+  }
+
+  // A ball resting or sliding on a surface keeps being reported; list only the first report of each contact.
+  function recordRunEvents(snapshot: Snapshot): void {
+    const newEvents: SnapshotEvent[] = [];
+
+    for (const event of snapshot.events) {
+      if (event.kind === "groundContact") {
+        const pair = `${event.bodyId}:${event.surfaceBodyId}`;
+        const previousTime = lastContactTimes.get(pair);
+        lastContactTimes.set(pair, event.timeSeconds);
+
+        // Reports this close together are the same contact continuing, not a new hit.
+        if (previousTime !== undefined && event.timeSeconds - previousTime <= CONTINUING_CONTACT_GAP_SECONDS) {
+          continue;
+        }
+      }
+
+      newEvents.push(event);
+    }
+
+    const room = RUN_EVENT_LIMIT - runEvents.length;
+
+    if (newEvents.length === 0 || room <= 0) {
+      return;
+    }
+
+    runEvents.push(...structuredClone(newEvents.slice(0, room)));
+    publishRunEvents();
+  }
 
   function activeStatus(): EngineStatus {
     if (disposed) {
@@ -326,6 +393,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
       return snapshotResult;
     }
 
+    recordRunEvents(snapshotResult.value);
     consumeSnapshot(snapshotResult.value);
     consumeTick?.(snapshotResult.value);
     return { ok: true };
@@ -466,6 +534,12 @@ export function createLabController(options: LabControllerOptions): EngineResult
       return resetResult;
     }
 
+    // The engine's reset also removed the pull.
+    activePull = null;
+    runEvents = [];
+    lastContactTimes = new Map();
+    publishRunEvents();
+
     droppedWallTimeSeconds = 0;
     unableToMaintainRealTimeSpeed = false;
     reportPlaybackChange();
@@ -499,7 +573,27 @@ export function createLabController(options: LabControllerOptions): EngineResult
   }
 
   // Command IDs must be unique per engine run; a counter never repeats even after Reset.
-  let nextRunEditNumber = 1;
+  let nextCommandNumber = 1;
+
+  // Queue a command for the current tick; the engine applies it before the next step.
+  function enqueueAtCurrentTick(payload: CommandPayload): EngineResult<{ readonly appliesAtTick: number }> {
+    const snapshotResult = currentEngine.getSnapshot();
+
+    if (!snapshotResult.ok) {
+      return snapshotResult;
+    }
+
+    const tick = snapshotResult.value.tick;
+    const result = currentEngine.enqueue({ commandVersion: 1, id: `lab-command-${nextCommandNumber}`, targetTick: tick, payload });
+
+    if (!result.ok) {
+      return result;
+    }
+
+    nextCommandNumber += 1;
+    return { ok: true, value: { appliesAtTick: tick } };
+  }
+
   function queueRunEdit(payload: CommandPayload): EngineResult<{ readonly appliesAtTick: number }> {
     // A run can only change while paused, like every other edit.
     const status = pausedAuthoringStatus();
@@ -514,25 +608,80 @@ export function createLabController(options: LabControllerOptions): EngineResult
       return snapshotResult;
     }
 
-    const tick = snapshotResult.value.tick;
-
     // At tick zero an edit belongs to the starting scene, which Reset must keep.
-    if (tick === 0) {
+    if (snapshotResult.value.tick === 0) {
       return {
         ok: false,
         diagnostics: [{ code: "OUT_OF_RANGE", path: "playback.tick", message: "Press Step or Run first: before the run starts, edits change the starting scene." }],
       };
     }
 
-    // The engine validates the command and checks that the body exists before accepting it.
-    const result = currentEngine.enqueue({ commandVersion: 1, id: `run-edit-${nextRunEditNumber}`, targetTick: tick, payload });
+    return enqueueAtCurrentTick(payload);
+  }
+
+  // Only a playing run can be pulled, so the starting scene is never changed.
+  function startPull(bodyId: string, localAnchorMeters: Vector2, targetPositionMeters: Vector2): EngineStatus {
+    const status = activeStatus();
+
+    if (!status.ok) {
+      return status;
+    }
+
+    if (!playing) {
+      return { ok: false, diagnostics: [{ code: "OUT_OF_RANGE", path: "pull", message: PULL_NEEDS_RUN }] };
+    }
+
+    const ball = currentScene.bodies.find((body) => body.id === bodyId);
+
+    if (ball === undefined) {
+      return { ok: false, diagnostics: [{ code: "UNKNOWN_ENTITY_ID", path: "pull.bodyId", message: `Body "${bodyId}" does not exist.`, entityId: bodyId }] };
+    }
+
+    if (ball.kind !== "dynamic") {
+      return { ok: false, diagnostics: [{ code: "INVALID_BODY_KIND", path: "pull.bodyId", message: "Only a ball can be pulled.", entityId: bodyId }] };
+    }
+
+    const omega = PULL_ANGULAR_FREQUENCY_RADIANS_PER_SECOND;
+    const pull: PullSettings = {
+      bodyId,
+      localAnchorMeters: { ...localAnchorMeters },
+      stiffnessNewtonsPerMeter: ball.massKilograms * omega * omega,
+      dampingKilogramsPerSecond: 2 * ball.massKilograms * omega,
+      maximumForceNewtons: ball.massKilograms * PULL_MAXIMUM_ACCELERATION_METERS_PER_SECOND_SQUARED,
+    };
+    const result = enqueueAtCurrentTick({ kind: "setForceInteraction", interactionId: POINTER_PULL_INTERACTION_ID, ...pull, targetPositionMeters: { ...targetPositionMeters } });
 
     if (!result.ok) {
       return result;
     }
 
-    nextRunEditNumber += 1;
-    return { ok: true, value: { appliesAtTick: tick } };
+    activePull = pull;
+    return { ok: true };
+  }
+
+  // Sending the same interaction ID again replaces the old target.
+  function movePull(targetPositionMeters: Vector2): EngineStatus {
+    const status = activeStatus();
+
+    if (!status.ok || activePull === null) {
+      return status;
+    }
+
+    const result = enqueueAtCurrentTick({ kind: "setForceInteraction", interactionId: POINTER_PULL_INTERACTION_ID, ...activePull, targetPositionMeters: { ...targetPositionMeters } });
+    return result.ok ? { ok: true } : result;
+  }
+
+  // Letting go removes the force; the ball keeps its velocity.
+  function endPull(): EngineStatus {
+    const status = activeStatus();
+
+    if (!status.ok || activePull === null) {
+      return status;
+    }
+
+    activePull = null;
+    const result = enqueueAtCurrentTick({ kind: "endForceInteraction", interactionId: POINTER_PULL_INTERACTION_ID });
+    return result.ok ? { ok: true } : result;
   }
 
   // Accept environment starting conditions without changing the active engine.
@@ -952,12 +1101,16 @@ export function createLabController(options: LabControllerOptions): EngineResult
   const removeVisibilityListener = playbackBrowser?.subscribeVisibilityChange(handleVisibilityChange);
   // Prime retained measurements before making the controller available to the toolbar.
   publishReadout(true);
+  publishRunEvents();
   reportPlaybackChange();
 
   return {
     ok: true,
     value: {
       queueRunEdit,
+      startPull,
+      movePull,
+      endPull,
       play,
       pause,
       setSpeed,

@@ -36,7 +36,7 @@ import { PLAYBACK_SPEEDS, type LabController, type PlaybackState } from "./lab/c
 // Describe operation results displayed by the playback controls.
 import type { EngineStatus } from "@eureka/engine";
 import { LabCanvas } from "./lab/LabCanvas";
-import type { ChallengeDefinition, Snapshot, SceneDefinition } from "@eureka/contracts";
+import type { ChallengeDefinition, Snapshot, SnapshotEvent, SceneDefinition } from "@eureka/contracts";
 import "./App.css";
 import { CanvasTools } from "./lab/CanvasTools.js";
 import { SceneInspector } from "./lab/SceneInspector.js";
@@ -263,6 +263,8 @@ export function App() {
 
   // Hold the last reported playback metadata for HTML rendering.
   const [playbackState, setPlaybackState] = useState<PlaybackState | null>(null);
+  // The current run's events; changes only when an event arrives or Reset clears them.
+  const [runEvents, setRunEvents] = useState<readonly SnapshotEvent[]>([]);
   const [labError, setLabError] = useState<string | null>(null);
 
   // Any mounted controller can run its scene on the real engine.
@@ -583,7 +585,17 @@ export function App() {
         <a className="brand" href="#/lab" aria-label="Eureka laboratory" title="Eureka laboratory" onClick={(event) => {
           event.preventDefault();
           navigateTo("laboratory");
-        }}><Atom size={25} /><span>Eureka<small>The physics workspace</small></span></a>
+        }}>
+          {/* Eureka mark: the king's crown sinking into the bath water. */}
+          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M5.2 15L4 7.5l4.5 3.5L12 5.5l3.5 5.5L20 7.5 18.8 15" />
+            <circle cx="4" cy="5.3" r=".9" /><circle cx="12" cy="3.3" r=".9" /><circle cx="20" cy="5.3" r=".9" />
+            <path d="M12 10.6l1.3 1.6-1.3 1.6-1.3-1.6Z" strokeWidth="1.4" />
+            <path d="M2 17c1.7-1.2 3.3-1.2 5 0s3.3 1.2 5 0 3.3-1.2 5 0 3.3 1.2 5 0" />
+            <path d="M2 21c1.7-1.2 3.3-1.2 5 0s3.3 1.2 5 0 3.3-1.2 5 0 3.3 1.2 5 0" />
+          </svg>
+          <span>Eureka</span>
+        </a>
         <button className="rail-close" type="button" aria-label="Close main navigation" onClick={() => setNavigationOpen(false)}><X size={17} /></button>
         <nav aria-label="Main navigation">
           {WORKSPACE_NAVIGATION.map((section) => (
@@ -755,7 +767,7 @@ export function App() {
                     {labVisible ? (
                       <LabCanvas
                         scene={editableScene}
-                        setDisplayedSnapshot={setDisplayedSnapshot} setActiveController={setActiveController}
+                        setDisplayedSnapshot={setDisplayedSnapshot} setActiveController={setActiveController} setRunEvents={setRunEvents}
                         onPlaybackChange={setPlaybackState}
                         onTick={challenge.onTick}
                         onOperationResult={reportLabResult}
@@ -786,7 +798,7 @@ export function App() {
               </section>
               <section className="measurement-dock" aria-label="Measurement dock">
                 <button className="measurement-toggle" type="button" aria-expanded={measurementsOpen} aria-controls="measurement-content" onClick={() => setMeasurementsOpen((open) => !open)}><Activity size={15} /><span>Measurements & events</span><ChevronDown size={14} /></button>
-                <div id="measurement-content" className="measurement-content" hidden={!measurementsOpen}><ObservationNotebook key={sceneGeneration} snapshot={displayedSnapshot} selectedEntityId={selectedEntityId} /></div>
+                <div id="measurement-content" className="measurement-content" hidden={!measurementsOpen}><ObservationNotebook key={sceneGeneration} snapshot={displayedSnapshot} selectedEntityId={selectedEntityId} runEvents={runEvents} /></div>
               </section>
             </div>
             <div id="inspector-dock" className="inspector-dock" hidden={!inspectorOpen}>

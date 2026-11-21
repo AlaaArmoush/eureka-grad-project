@@ -639,7 +639,7 @@ it.each([
 // Zero coordinates are valid when the proposed object does not penetrate a static surface.
 it.each([
   { entityId: "projectile", position: { x: 0, y: 1 } },
-  { entityId: "projectile", position: { x: 25, y: 0 } },
+  { entityId: "projectile", position: { x: 700, y: 0 } },
   { entityId: "ramp", position: { x: 0, y: 0 } },
   { entityId: "target", position: { x: 0, y: 0 } },
 ])("accepts paused coordinate editing for $entityId at $position without replacing its identity or other properties", ({ entityId, position }) => {
@@ -668,7 +668,7 @@ it.each([
   expect(h.controller.getPlaybackState().playing).toBe(false);
 });
 
-// Ground occupies x=[-10,20], y=[-0.5,0]; a radius-0.1 ball centred at the origin penetrates it.
+// Ground occupies x=[-600,600], y=[-0.5,0]; a radius-0.1 ball centred at the origin penetrates it.
 it("rejects a coordinate edit that embeds the projectile in the ground and preserves the accepted scene", () => {
   const h = createPlaybackHarness();
   const accepted = h.controller.copyScene();
