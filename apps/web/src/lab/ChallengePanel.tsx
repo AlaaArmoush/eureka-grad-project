@@ -149,7 +149,7 @@ export function ChallengePanel({ session, playing, canLaunch, onSetValue, onLaun
         </section>
         {samples.length > 0 && <details className="challenge-samples">
           <summary>Review sample verdicts</summary>
-          <p>Each sample is a reviewed attempt calculated from formulas. Choose one to see how the evaluator judges and explains it.</p>
+          <p>Each sample is a reviewed attempt calculated from formulas. Choose one to see how it would be judged, and why.</p>
           <ul>
             {samples.map((sample) => (
               <li key={sample.id}><button className="tool-btn" type="button" onClick={() => onShowSample(sample)}>{sample.label}</button></li>

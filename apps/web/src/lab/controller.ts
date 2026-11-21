@@ -1,6 +1,6 @@
 // Supplies commands and portable renderer snapshots.
 import type {
-  Command,
+  CommandPayload,
   SceneDefinition,
   Snapshot,
   Vector2,
@@ -9,7 +9,6 @@ import type {
 import {
   validateScene,
   type AdvanceReceipt,
-  type CommandAcceptance,
   type Engine,
   type EngineResult,
   type EngineStatus,
@@ -55,8 +54,7 @@ export interface PlaybackBrowser {
 }
 
 export interface LabController {
-  enqueue(command: Command): EngineResult<CommandAcceptance>;
-
+  queueRunEdit(payload: CommandPayload): EngineResult<{ readonly appliesAtTick: number }>;
   play(): EngineStatus;
   pause(): void;
   setSpeed(speed: PlaybackSpeed): EngineStatus;
@@ -163,7 +161,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
         diagnostics: [{
           code: "DISPOSED_ENGINE",
           path: "controller",
-          message: "This lab controller has been disposed.",
+          message: "The lab was closed. Open it again to continue.",
         }],
       };
     }
@@ -184,7 +182,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
       diagnostics: [{
         code: "OUT_OF_RANGE",
         path: "playback.playing",
-        message: "Pause playback before changing the starting scene.",
+        message: "Pause the run before changing the scene.",
       }],
     };
   }
@@ -274,7 +272,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
         diagnostics: [{
           code: "OUT_OF_RANGE",
           path: "playback.visibility",
-          message: "Return to this page before starting playback.",
+          message: "Come back to this tab to start the run.",
         }],
       };
     }
@@ -302,7 +300,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
         diagnostics: [{
           code: "OUT_OF_RANGE",
           path: "playback.speed",
-          message: "Playback speed must be 0.25, 0.5, 1, 2 or 4.",
+          message: "Choose a speed of 0.25×, 0.5×, 1×, 2× or 4×.",
         }],
       };
     }
@@ -386,7 +384,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
         diagnostics: [{
           code: "OUT_OF_RANGE",
           path: "playback.playing",
-          message: "Pause playback before stepping.",
+          message: "Pause the run before stepping.",
         }],
       };
     }
@@ -498,6 +496,43 @@ export function createLabController(options: LabControllerOptions): EngineResult
     }
 
     return currentEngine.dispose();
+  }
+
+  // Command IDs must be unique per engine run; a counter never repeats even after Reset.
+  let nextRunEditNumber = 1;
+  function queueRunEdit(payload: CommandPayload): EngineResult<{ readonly appliesAtTick: number }> {
+    // A run can only change while paused, like every other edit.
+    const status = pausedAuthoringStatus();
+
+    if (!status.ok) {
+      return status;
+    }
+
+    const snapshotResult = currentEngine.getSnapshot();
+
+    if (!snapshotResult.ok) {
+      return snapshotResult;
+    }
+
+    const tick = snapshotResult.value.tick;
+
+    // At tick zero an edit belongs to the starting scene, which Reset must keep.
+    if (tick === 0) {
+      return {
+        ok: false,
+        diagnostics: [{ code: "OUT_OF_RANGE", path: "playback.tick", message: "Press Step or Run first: before the run starts, edits change the starting scene." }],
+      };
+    }
+
+    // The engine validates the command and checks that the body exists before accepting it.
+    const result = currentEngine.enqueue({ commandVersion: 1, id: `run-edit-${nextRunEditNumber}`, targetTick: tick, payload });
+
+    if (!result.ok) {
+      return result;
+    }
+
+    nextRunEditNumber += 1;
+    return { ok: true, value: { appliesAtTick: tick } };
   }
 
   // Accept environment starting conditions without changing the active engine.
@@ -678,7 +713,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
           {
             code: "INVALID_BODY_KIND",
             path: "projectileId",
-            message: "Only a dynamic projectile can use these properties.",
+            message: "These settings only apply to a ball.",
             entityId: projectileId,
           },
         ],
@@ -695,7 +730,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
           {
             code: "OUT_OF_RANGE",
             path: "properties.launchSpeedMetersPerSecond",
-            message: "Launch speed must be finite and nonnegative.",
+            message: "Launch speed must be a number of 0 or more.",
             entityId: projectileId,
           },
         ],
@@ -755,7 +790,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
           {
             code: "INVALID_BODY_KIND",
             path: "bodyId",
-            message: "Only a static body can use these properties.",
+            message: "These settings only apply to a platform, ramp or ground.",
             entityId: bodyId,
           },
         ],
@@ -922,7 +957,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
   return {
     ok: true,
     value: {
-      enqueue: (command) => engine.enqueue(command),
+      queueRunEdit,
       play,
       pause,
       setSpeed,

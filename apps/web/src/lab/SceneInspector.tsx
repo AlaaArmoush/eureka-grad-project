@@ -4,6 +4,8 @@ import { useStore } from "zustand";
 import { NumberField } from "./NumberField.js";
 import { PropertiesPanel } from "./PropertiesPanel.js";
 import { labStore } from "./store.js";
+// Supplies learner-facing wording for rejected settings.
+import { describeProblem, LAB_NOT_READY } from "./lab-messages.js";
 
 const OVERLAY_OPTIONS = [
   { key: "trail", label: "Recorded trail", description: "The projectile's recorded positions." },
@@ -17,7 +19,9 @@ const OVERLAY_OPTIONS = [
 
 // Keep selected-object properties and identity in one stable inspector.
 export function SceneInspector({ onClose, ...props }: ComponentProps<typeof PropertiesPanel> & { onClose(): void }) {
-  const [activeTab, setActiveTab] = useState<"properties" | "environment" | "display">("properties");
+  // The store owns the active panel, so selecting an object elsewhere can switch it to Object.
+  const activeTab = useStore(labStore, (state) => state.inspectorTab);
+  const setActiveTab = labStore.getState().setInspectorTab;
   const overlayVisibility = useStore(labStore, (state) => state.overlayVisibility);
   const environmentScope = JSON.stringify([props.editableScene.id, props.editableScene.revision]);
   // Present gravity as strength, while retaining the scene's stored direction.
@@ -51,14 +55,14 @@ export function SceneInspector({ onClose, ...props }: ComponentProps<typeof Prop
     const drag = Number(dragText);
 
     if (![strength, direction, drag].every(Number.isFinite) || strength < 0 || drag < 0) {
-      reject("Enter finite values. Gravity strength and drag cannot be negative.");
+      reject("Enter a number in every field. Gravity and drag can't be negative.");
       return;
     }
 
     const controller = props.controllerRef.current;
 
     if (controller === null) {
-      reject("The laboratory is not available.");
+      reject(LAB_NOT_READY);
       return;
     }
 
@@ -85,11 +89,7 @@ export function SceneInspector({ onClose, ...props }: ComponentProps<typeof Prop
     });
 
     if (!result.ok) {
-      const details = result.diagnostics
-        .map((diagnostic) => diagnostic.message || diagnostic.code)
-        .join(" ");
-
-      reject(`Settings rejected: ${details}`);
+      reject(describeProblem(result.diagnostics, "Those settings couldn't be used."));
       return;
     }
 
@@ -124,7 +124,8 @@ export function SceneInspector({ onClose, ...props }: ComponentProps<typeof Prop
         <button id="inspector-tab-display" type="button" role="tab" aria-selected={activeTab === "display"} aria-controls="inspector-display" tabIndex={activeTab === "display" ? 0 : -1} onClick={() => setActiveTab("display")}><Eye size={13} />Display</button>
       </div>
       <div id="inspector-properties" role="tabpanel" aria-labelledby="inspector-tab-properties" hidden={activeTab !== "properties"}>
-        <PropertiesPanel {...props} />
+        {/* start: tick 0 / run: tick greater than 0 */}
+        <PropertiesPanel key={props.displayedSnapshot.tick === 0 ? "start" : "run"} {...props} />
         <footer className="inspector-footer"><span>Object ID</span><code>{props.selectedEntityId ?? "—"}</code></footer>
       </div>
       <div id="inspector-environment" role="tabpanel" aria-labelledby="inspector-tab-environment" hidden={activeTab !== "environment"}>

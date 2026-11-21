@@ -89,11 +89,12 @@ const scene = {
       },
     },
     {
+      // As wide as the Curriculum questions' ground, so the lab treats it as the ground plane and every landing stays on it.
       id: "default-ground",
       kind: "static",
       shape: {
         kind: "box",
-        widthMeters: 30,
+        widthMeters: 1200,
         heightMeters: 0.5,
       },
       material: {
@@ -101,7 +102,7 @@ const scene = {
       },
       pose: {
         positionMeters: {
-          x: 5,
+          x: 0,
           y: -0.25,
         },
         angleRadians: 0,

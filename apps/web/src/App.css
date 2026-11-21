@@ -207,9 +207,12 @@ svg { flex-shrink: 0; stroke-width: 1.6; }
 [data-pixi-host].is-panning canvas { cursor: grabbing !important; }
 .closed-lab { display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--text-3); font: 14px var(--font-sans); }
 .closed-lab .tool-btn { border-color: var(--accent-line); color: var(--accent); }
-.viewport-status { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px 12px; min-height: 30px; padding: 8px 12px; border-top: 1px solid var(--line); color: var(--text-3); font-size: 9px; }
-.viewport-status .status-dot { width: 4px; height: 4px; }
-.viewport-error { margin: 0; padding: 10px 12px; color: var(--red); font-size: 11px; line-height: 1.6; }
+/* Lab messages float over the canvas paper, so showing one never resizes the canvas. */
+.canvas-notices { position: absolute; left: 12px; right: 12px; bottom: 12px; z-index: 2; display: flex; flex-direction: column; align-items: flex-start; gap: 6px; pointer-events: none; }
+.canvas-notice { display: inline-flex; align-items: flex-start; gap: 8px; max-width: min(520px, 100%); margin: 0; padding: 8px 10px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg-1); color: var(--text); font-size: 11px; line-height: 1.5; box-shadow: 0 4px 14px rgb(0 0 0 / 0.18); pointer-events: auto; }
+.canvas-notice.is-error { border-color: var(--red); }
+.canvas-notice button { flex: none; display: inline-flex; padding: 2px; border: 0; border-radius: 3px; background: transparent; color: var(--text-3); cursor: pointer; }
+.canvas-notice button:hover { color: var(--text); background: var(--bg-3); }
 .lab-layout:fullscreen { --canvas-height: max(340px, calc(100dvh - 170px)); width: 100%; height: 100%; padding: 12px; overflow-y: auto; background: var(--bg-1); }
 .lab-layout:fullscreen .scene-dock { height: calc(100dvh - 24px); }
 .lab-layout:fullscreen .inspector-dock { max-height: calc(100dvh - 24px); overflow-y: auto; }
@@ -293,14 +296,11 @@ svg { flex-shrink: 0; stroke-width: 1.6; }
 .measurement-toggle > svg:first-child { color: var(--accent); }
 .measurement-toggle > svg:last-child { margin-left: auto; transition: transform 140ms; }
 .measurement-toggle[aria-expanded="false"] > svg:last-child { transform: rotate(-90deg); }
-.measurement-source { margin-left: auto; color: var(--text-3); font-size: 9px; }
-.measurement-toggle .measurement-source + svg { margin-left: 4px; }
 .measurement-content { border-top: 1px solid var(--line); }
 .observation-notebook .panel-heading { min-height: 33px; padding: 9px 12px 0; border: 0; background: transparent; }
 .observation-notebook .panel-heading h2 { font-size: 10px; color: var(--text-3); }
 .observation-notebook .panel-heading > span { font: 9px var(--font-mono); }
 .notebook-values { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 16px 0; margin: 0; padding: 16px 0; }
-.notebook-values.is-time-only { grid-template-columns: 1fr; }
 .notebook-values > div { min-width: 0; padding: 0 12px; border-right: 1px solid var(--line); }
 .notebook-values > div:last-child { border: 0; }
 .notebook-values dt { margin-bottom: 10px; color: var(--text-3); font-size: 10px; }
@@ -325,7 +325,6 @@ svg { flex-shrink: 0; stroke-width: 1.6; }
   .lab-header { min-height: 56px; }
   .canvas > .panel-heading { min-height: 36px; padding: 3px 12px; }
   .playback-bar { min-height: 42px; padding: 5px 10px; }
-  .viewport-status { min-height: 22px; padding: 4px 12px; }
   .measurement-dock { margin-top: 8px; }
   .measurement-toggle { padding: 9px 12px; }
   .measurement-dock .observation-notebook .panel-heading { min-height: 29px; padding-top: 5px; }
@@ -344,7 +343,7 @@ svg { flex-shrink: 0; stroke-width: 1.6; }
   .toolbar-divider { display: none; }
 }
 @container (max-width: 700px) {
-  .measurement-dock .notebook-values:not(.is-time-only) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .measurement-dock .notebook-values { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .measurement-dock .notebook-values > div:nth-child(3n) { border: 0; }
   .measurement-dock .notebook-values dd { font-size: 16px; }
 }
@@ -416,12 +415,9 @@ svg { flex-shrink: 0; stroke-width: 1.6; }
   .playback-bar { padding: 8px; }
   .transport-readouts { width: 100%; margin-left: 0; justify-content: space-between; }
   .playback-status { margin-left: auto; }
-  .viewport-status { font-size: 8px; }
   .notebook-values { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .notebook-values > div:nth-child(3n) { border: 0; }
   .notebook-values dd { font-size: 14px; }
-  .measurement-source { display: none; }
-  .measurement-toggle .measurement-source + svg { margin-left: auto; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }

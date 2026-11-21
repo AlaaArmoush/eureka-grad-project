@@ -50,6 +50,8 @@ import { CurriculumPage } from "./pages/CurriculumPage.js";
 import { useDemonstrationCatalogue } from "./lab/demonstration-client.js";
 import { ChallengesPage } from "./pages/ChallengesPage.js";
 import { createWorkspaceNavigation, type WorkspacePage } from "./navigation.js";
+// Supplies learner-facing wording for engine and controller problems.
+import { describeProblem, LAB_NOT_READY, RUN_STOPPED } from "./lab/lab-messages.js";
 
 const WORKSPACE_NAVIGATION = [
   {
@@ -284,15 +286,12 @@ export function App() {
     }
 
     // A failed tick during a challenge attempt makes that attempt unjudgeable.
-    if (context === "Physics failed to complete a tick") {
+    if (context === RUN_STOPPED) {
       reportEngineFailure();
     }
 
-    const details = result.diagnostics
-      .map((diagnostic) => diagnostic.message || `${diagnostic.code} (${diagnostic.path})`)
-      .join(" ");
-
-    setLabError(`${context}: ${details || "No diagnostic details were supplied."}`);
+    // A short lead-in names what failed; the sentence after it says what to do.
+    setLabError(`${context}. ${describeProblem(result.diagnostics, "Please try again.")}`);
   }, [reportEngineFailure]);
 
   function handleDemonstrationOpen(selection: DemonstrationSelection): void {
@@ -403,13 +402,13 @@ export function App() {
     const controller = controllerRef.current;
 
     if (controller === null) {
-      setLabError("Command rejected: the laboratory is not available.");
+      setLabError(LAB_NOT_READY);
       return;
     }
 
     const context = action === "stepOnce"
-      ? "Physics failed to complete a tick"
-      : "Command rejected";
+      ? RUN_STOPPED
+      : "Couldn't do that";
 
     // A finished attempt is retried before Run, and a reset ends the attempt in progress.
     if (challengeActive && action === "play" && !challenge.beforeRun()) {
@@ -429,11 +428,11 @@ export function App() {
     const selectedSpeed = PLAYBACK_SPEEDS.find((candidate) => String(candidate) === value);
 
     if (controller === null || selectedSpeed === undefined) {
-      setLabError("Command rejected: the laboratory or requested speed is unavailable.");
+      setLabError("That speed isn't available.");
       return;
     }
 
-    reportLabResult("Command rejected", controller.setSpeed(selectedSpeed));
+    reportLabResult("Couldn't change the speed", controller.setSpeed(selectedSpeed));
   }
 
   useEffect(() => {
@@ -486,7 +485,7 @@ export function App() {
     const controller = controllerRef.current;
 
     if (controller === null) {
-      setLabError("Command rejected: the laboratory is not available.");
+      setLabError(LAB_NOT_READY);
       return;
     }
 
@@ -514,11 +513,11 @@ export function App() {
       );
     }
     if (!placementResult.ok) {
-      reportLabResult("Command rejected — placement", placementResult);
+      reportLabResult("Couldn't place that", placementResult);
       return;
     }
 
-    reportLabResult("Command rejected — placement", placementResult);
+    reportLabResult("Couldn't place that", placementResult);
     setEditableScene(placementResult.value.scene);
     labStore.getState().selectEntity(placementResult.value.entityId);
   }, [reportLabResult, challengeActive]);
@@ -532,7 +531,7 @@ export function App() {
       const controller = controllerRef.current;
 
       if (controller === null) {
-        setLabError("Command rejected: the laboratory is not available.");
+        setLabError(LAB_NOT_READY);
         return false;
       }
 
@@ -542,11 +541,11 @@ export function App() {
       );
 
       if (!moveResult.ok) {
-        reportLabResult("Command rejected — movement", moveResult);
+        reportLabResult("Couldn't move that", moveResult);
         return false;
       }
 
-      reportLabResult("Command rejected — movement", moveResult);
+      reportLabResult("Couldn't move that", moveResult);
       setEditableScene(moveResult.value.scene);
       labStore.getState().selectEntity(moveResult.value.entityId);
       return true;
@@ -562,18 +561,18 @@ export function App() {
     const controller = controllerRef.current;
 
     if (controller === null) {
-      setLabError("Command rejected: the laboratory is not available.");
+      setLabError(LAB_NOT_READY);
       return false;
     }
 
     const deleteResult = controller.deleteEntity(entityId);
 
     if (!deleteResult.ok) {
-      reportLabResult("Command rejected — deletion", deleteResult);
+      reportLabResult("Couldn't delete that", deleteResult);
       return false;
     }
 
-    reportLabResult("Command rejected — deletion", deleteResult);
+    reportLabResult("Couldn't delete that", deleteResult);
     setEditableScene(deleteResult.value.scene);
     labStore.getState().selectEntity(null);
     return true;
@@ -643,7 +642,7 @@ export function App() {
         <ChallengesPage visible={activePage === "challenges"} error={labError} onPlay={handleChallengeOpen} />
         <main id="laboratory" className="lab-shell" hidden={activePage !== "laboratory"}>
           <header className="lab-header">
-            <div className="experiment-heading"><span className="experiment-mark"><Atom size={21} /></span><div><h1 ref={labHeadingRef} tabIndex={-1}>Projectile laboratory</h1><p>Build a scene. Follow the physics.</p></div><span className="scene-badge">{challengeActive ? "Challenge" : "Authored scene"}</span></div>
+            <div className="experiment-heading"><span className="experiment-mark"><Atom size={21} /></span><div><h1 ref={labHeadingRef} tabIndex={-1}>Projectile laboratory</h1><p>Build a scene. Follow the physics.</p></div><span className="scene-badge">{challengeActive ? "Challenge" : "Your scene"}</span></div>
             <div className="header-actions">
               <button className="tool-btn lab-power" onClick={() => setLabVisible((visible) => !visible)} type="button"><Power size={14} />{labVisible ? "Leave lab" : "Enter lab"}</button>
             </div>
@@ -764,19 +763,29 @@ export function App() {
                         onMoveRequested={handleMoveRequested} onDeleteRequested={handleDeleteRequested}
                       />
                     ) : <div className="closed-lab"><Atom size={32} /><p>Your laboratory is closed.</p><button type="button" className="tool-btn" onClick={() => setLabVisible(true)}>Enter lab</button></div>}
+                    {/* Messages float over the paper so the canvas never changes size; the next successful action or the close button clears them. */}
+                    {(selectionNotice !== null || labError !== null || viewportError !== null) && (
+                      <div className="canvas-notices">
+                        {selectionNotice !== null && <p className="canvas-notice" role="status">{selectionNotice}</p>}
+                        {labError !== null && (
+                          <p className="canvas-notice is-error" role="alert">
+                            <span>{labError}</span>
+                            <button type="button" aria-label="Dismiss message" title="Dismiss" onClick={() => setLabError(null)}><X size={12} /></button>
+                          </p>
+                        )}
+                        {viewportError !== null && (
+                          <p className="canvas-notice is-error" role="alert">
+                            <span>{viewportError}</span>
+                            <button type="button" aria-label="Dismiss message" title="Dismiss" onClick={() => setViewportError(null)}><X size={12} /></button>
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="viewport-status"><span><span className="status-dot" />Real engine</span><span>Metres · Seconds · Kilograms</span></div>
-                {selectionNotice !== null && (
-                  <p className="viewport-error" role="status">{selectionNotice}</p>
-                )}
-                {labError !== null && (
-                  <p className="viewport-error" role="alert">{labError}</p>
-                )}
-                {viewportError !== null && <p className="viewport-error" role="alert">{viewportError}</p>}
               </section>
               <section className="measurement-dock" aria-label="Measurement dock">
-                <button className="measurement-toggle" type="button" aria-expanded={measurementsOpen} aria-controls="measurement-content" onClick={() => setMeasurementsOpen((open) => !open)}><Activity size={15} /><span>Measurements & events</span><span className="measurement-source">Engine {displayedSnapshot.engineVersion} · {displayedSnapshot.engineBuild}</span><ChevronDown size={14} /></button>
+                <button className="measurement-toggle" type="button" aria-expanded={measurementsOpen} aria-controls="measurement-content" onClick={() => setMeasurementsOpen((open) => !open)}><Activity size={15} /><span>Measurements & events</span><ChevronDown size={14} /></button>
                 <div id="measurement-content" className="measurement-content" hidden={!measurementsOpen}><ObservationNotebook key={sceneGeneration} snapshot={displayedSnapshot} selectedEntityId={selectedEntityId} /></div>
               </section>
             </div>

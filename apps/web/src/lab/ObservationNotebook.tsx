@@ -1,7 +1,14 @@
 import type { Snapshot } from "@eureka/contracts";
+// Supplies learner-facing wording for the engine's notes about a tick.
+import { describeDiagnostic, objectName } from "./lab-messages.js";
 
 function formatMeasurement(value: number | undefined): string {
-  if (value === undefined || !Number.isFinite(value)) {
+  // A body without readouts (a target, or nothing selected) shows a short dash, so every cell keeps its height.
+  if (value === undefined) {
+    return "—";
+  }
+
+  if (!Number.isFinite(value)) {
     return "Unavailable";
   }
 
@@ -33,10 +40,14 @@ export function ObservationNotebook({ snapshot, selectedEntityId }: {
       <section className="observation-notebook" aria-labelledby="notebook-title">
         <header className="panel-heading">
           <h2 id="notebook-title">Observation notebook</h2>
-          <span>{selectedEntityId ?? "No selection"} · tick {snapshot.tick}</span>
+          {/* The heading explains missing readouts, so no extra row changes the notebook's height. */}
+          <span>
+            {selectedEntityId === null ? "No object selected" : body === undefined ? `${objectName(selectedEntityId)} · Measurement unavailable` : objectName(selectedEntityId)} · tick {snapshot.tick}
+          </span>
         </header>
-        <dl className={`notebook-values${body === undefined ? " is-time-only" : ""}`}>
-          {values.filter((value) => body !== undefined || value.symbol === "t").map((value) => {
+        {/* Always the same six cells, so the notebook and the canvas above it keep their size for every selection. */}
+        <dl className="notebook-values">
+          {values.map((value) => {
             const available = value.value !== undefined && Number.isFinite(value.value);
 
             return (
@@ -52,11 +63,6 @@ export function ObservationNotebook({ snapshot, selectedEntityId }: {
             );
           })}
         </dl>
-        {body === undefined && (
-          <p className="panel-empty" role="status">
-            {selectedEntityId === null ? "No object selected." : "Measurement unavailable for this selection."}
-          </p>
-        )}
       </section>
       {/* Opens only when the learner opens it; new events update the count without expanding the list. */}
       <details className="event-notebook">
@@ -65,7 +71,7 @@ export function ObservationNotebook({ snapshot, selectedEntityId }: {
           <ul className="event-list">
             {events.map((event) => (
               <li key={event.id}>
-                <div><strong>{event.kind === "targetEntered" ? "Target entry" : "Surface contact"}</strong><span>{event.bodyId} · {event.kind === "targetEntered" ? event.targetId : event.surfaceBodyId}</span></div>
+                <div><strong>{event.kind === "targetEntered" ? "Target entry" : "Surface contact"}</strong><span>{objectName(event.bodyId)} · {objectName(event.kind === "targetEntered" ? event.targetId : event.surfaceBodyId)}</span></div>
                 <time>{event.timeSeconds.toFixed(3)} s</time>
               </li>
             ))}
@@ -73,9 +79,9 @@ export function ObservationNotebook({ snapshot, selectedEntityId }: {
         )}
       </details>
       {snapshot.diagnostics.length > 0 && (
-        <section className="lab-diagnostics" aria-label="Diagnostics">
-          <h2>Diagnostics</h2>
-          <ul>{snapshot.diagnostics.map((item, index) => <li key={index}>{item.message}</li>)}</ul>
+        <section className="lab-diagnostics" aria-label="Simulation notes">
+          <h2>Simulation notes</h2>
+          <ul>{snapshot.diagnostics.map((item, index) => <li key={index}>{describeDiagnostic(item)}</li>)}</ul>
         </section>
       )}
     </>

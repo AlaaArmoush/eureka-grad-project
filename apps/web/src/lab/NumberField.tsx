@@ -20,15 +20,15 @@ export function NumberField(props: {
     const value = Number(text);
 
     if (!Number.isFinite(value)) {
-      return `${props.label} must be a finite number.`;
+      return `${props.label} must be a number.`;
     }
 
     if (props.rule === "positive" && value <= 0) {
-      return `${props.label} must be greater than zero.`;
+      return `${props.label} must be more than 0.`;
     }
 
     if (props.rule === "nonnegative" && value < 0) {
-      return `${props.label} cannot be negative.`;
+      return `${props.label} can't be negative.`;
     }
 
     if (props.rule === "unitInterval" && (value < 0 || value > 1)) {

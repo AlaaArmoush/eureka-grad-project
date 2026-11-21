@@ -9,6 +9,8 @@ import type { MoveEntityRequest, PlacementRequest } from "./authoring.js";
 import { createLabController, type LabController, type PlaybackBrowser, type PlaybackState } from "./controller.js";
 // Owns the mounted renderer.
 import { mountLabRenderer, type LabRenderer } from "./renderer.js";
+// Names a failed tick so App can tell it apart from other rejected actions.
+import { RUN_STOPPED } from "./lab-messages.js";
 
 // Supply browser facilities and forward failures from scheduled playback.
 function createPlaybackBrowser(
@@ -28,7 +30,7 @@ function createPlaybackBrowser(
     // The controller has already paused before reporting a failed tick.
     onFrameResult: (result) => {
       if (!result.ok) {
-        onOperationResult("Physics failed to complete a tick", result);
+        onOperationResult(RUN_STOPPED, result);
       }
     },
   };
@@ -68,7 +70,7 @@ export function LabCanvas(props: {
 
     setActiveController(null);
     function failSetup(result: EngineStatus): void {
-      onOperationResult("Laboratory unavailable", result);
+      onOperationResult("The lab couldn't open this scene", result);
       rendererRef.current?.dispose();
       rendererRef.current = null;
     }

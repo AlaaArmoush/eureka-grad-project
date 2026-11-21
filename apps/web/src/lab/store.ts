@@ -43,6 +43,9 @@ export interface ChallengeOverlay {
   readonly ghosts: readonly (readonly Vector2[])[];
 }
 
+// The inspector's three panels; the store owns which one is showing so selection can bring the Object panel forward.
+export type InspectorTab = "properties" | "environment" | "display";
+
 export interface LabEditorState {
   readonly cameraCenterWorldMeters: Vector2;
   readonly pixelsPerMeter: number;
@@ -53,6 +56,8 @@ export interface LabEditorState {
   readonly selectedEntityId: string | null;
   readonly selectionNotice: string | null;
   selectEntity(entityId: string | null, notice?: string): void;
+  readonly inspectorTab: InspectorTab;
+  setInspectorTab(tab: InspectorTab): void;
   readonly overlayVisibility: OverlayVisibility;
   readonly challengeOverlay: ChallengeOverlay;
   setChallengeOverlay(overlay: ChallengeOverlay): void;
@@ -92,6 +97,10 @@ export const labStore = createStore<LabEditorState>()((set) => ({
   fitCamera: () => set((state) => ({ cameraFitRequest: state.cameraFitRequest + 1, pendingCameraView: null })),
   selectedEntityId: "projectile",
   selectionNotice: null,
+  inspectorTab: "properties",
+  setInspectorTab: (inspectorTab) => {
+    set({ inspectorTab });
+  },
   overlayVisibility: {
     trail: true,
     velocity: true,
@@ -137,11 +146,13 @@ export const labStore = createStore<LabEditorState>()((set) => ({
     });
   },
 
+  // Choosing a different object shows its properties; deselecting or re-selecting the same object keeps the current panel.
   selectEntity: (selectedEntityId, notice) => {
-    set({
+    set((state) => ({
       selectedEntityId,
       selectionNotice: notice ?? null,
-    });
+      ...(selectedEntityId !== null && selectedEntityId !== state.selectedEntityId ? { inspectorTab: "properties" as const } : {}),
+    }));
   },
 
   activeTool: { kind: "select" },
