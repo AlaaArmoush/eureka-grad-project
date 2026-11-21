@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "angle-sweep",
-  "revision": 1,
+  "revision": 2,
   "topic": "projectiles",
   "order": 4,
   "title": "Best angle",
@@ -74,10 +74,10 @@
     "trail": true,
     "velocity": true,
     "components": true,
-    "prediction": true,
+    "prediction": false,
     "events": true,
     "grid": true,
-    "labels": true
+    "labels": false
   },
   "scene": {
     "id": "angle-sweep-a{angle}-v{speed}",

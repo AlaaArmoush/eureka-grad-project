@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "linear-drag",
-  "revision": 1,
+  "revision": 2,
   "topic": "projectiles",
   "order": 2,
   "title": "Air resistance",
@@ -66,10 +66,10 @@
     "trail": true,
     "velocity": true,
     "components": true,
-    "prediction": true,
+    "prediction": false,
     "events": true,
     "grid": true,
-    "labels": true
+    "labels": false
   },
   "scene": {
     "id": "linear-drag-b{drag}-m{mass}",

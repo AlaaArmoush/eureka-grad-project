@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "complementary-angles",
-  "revision": 1,
+  "revision": 2,
   "topic": "projectiles",
   "order": 5,
   "title": "Same landing spot",
@@ -62,10 +62,10 @@
     "trail": true,
     "velocity": true,
     "components": true,
-    "prediction": true,
+    "prediction": false,
     "events": true,
     "grid": true,
-    "labels": true
+    "labels": false
   },
   "scene": {
     "id": "complementary-a{angle}-v{speed}",

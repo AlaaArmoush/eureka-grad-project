@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "cliff-launch",
-  "revision": 1,
+  "revision": 2,
   "topic": "projectiles",
   "order": 3,
   "title": "Off a cliff",
@@ -45,10 +45,10 @@
     "trail": true,
     "velocity": true,
     "components": true,
-    "prediction": true,
+    "prediction": false,
     "events": true,
     "grid": true,
-    "labels": true
+    "labels": false
   },
   "scene": {
     "id": "cliff-launch-v{speed}",
