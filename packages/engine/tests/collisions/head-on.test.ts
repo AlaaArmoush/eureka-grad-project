@@ -73,6 +73,120 @@ function makeHeadOnScene(
   };
   return scene;
 }
+describe("resting and separating circle contacts", () => {
+  it.each([
+    // Catch an unwanted kick when both circles are still.
+    {
+      name: "keeps touching circles at rest",
+      strikerVelocityX: 0,
+      momentumX: 0,
+      energyJoules: 0,
+    },
+    // Catch an unwanted impulse when the striker is already moving away.
+    {
+      name: "lets touching circles separate freely",
+      strikerVelocityX: -2,
+      momentumX: -4,
+      energyJoules: 4,
+    },
+  ])("$name", (row) => {
+    const receiverXMeters = 1;
+    const scene = makeHeadOnScene(1, {
+      receiverXMeters,
+      strikerVelocityXMetersPerSecond: row.strikerVelocityX,
+    });
+    const engine = unwrap(createEngine(unwrap(validateScene(scene))));
+    const stepSeconds = scene.numericalProfile.fixedTimeStepSeconds;
+
+    try {
+      for (let tick = 1; tick <= 60; tick += 1) {
+        unwrap(engine.advance(1));
+        const snapshot = unwrap(engine.getSnapshot());
+        expect(snapshot.tick).toBe(tick);
+
+        const striker = snapshot.bodies.find((body) => body.id === "striker");
+        const receiver = snapshot.bodies.find((body) => body.id === "receiver");
+
+        if (striker === undefined || receiver === undefined) {
+          throw new Error("Expected both original circles in the snapshot.");
+        }
+
+        const elapsedSeconds = tick * stepSeconds;
+        const circles = [
+          {
+            body: striker,
+            massKilograms: strikerMassKilograms,
+            expectedX: row.strikerVelocityX * elapsedSeconds,
+            expectedVelocityX: row.strikerVelocityX,
+          },
+          {
+            body: receiver,
+            massKilograms: receiverMassKilograms,
+            expectedX: receiverXMeters,
+            expectedVelocityX: 0,
+          },
+        ];
+
+        let momentumX = 0;
+        let momentumY = 0;
+        let kineticEnergyJoules = 0;
+
+        // Check each circle first, then add up the pair's momentum and energy.
+        for (const {
+          body,
+          massKilograms,
+          expectedX,
+          expectedVelocityX,
+        } of circles) {
+          const position = body.pose.positionMeters;
+          const velocity = body.velocity.linearMetersPerSecond;
+          const velocityBound =
+            1e-10 + 1e-8 * Math.max(1, Math.abs(expectedVelocityX));
+
+          expectNear(Math.hypot(position.x - expectedX, position.y), 0, 1e-7);
+          expectNear(
+            Math.hypot(velocity.x - expectedVelocityX, velocity.y),
+            0,
+            velocityBound,
+          );
+          expectNear(body.velocity.angularRadiansPerSecond, 0, 1.01e-8);
+
+          momentumX += massKilograms * velocity.x;
+          momentumY += massKilograms * velocity.y;
+          kineticEnergyJoules +=
+            0.5 * massKilograms * (velocity.x ** 2 + velocity.y ** 2);
+        }
+
+        expectNear(
+          momentumX,
+          row.momentumX,
+          1e-12 + 1e-10 * Math.max(1, Math.abs(row.momentumX)),
+        );
+        expectNear(momentumY, 0, 1.01e-10);
+        expectNear(
+          kineticEnergyJoules,
+          row.energyJoules,
+          1e-10 + 1e-8 * Math.max(1, row.energyJoules),
+        );
+
+        // The engine may report no contact, or report touching with zero impulse.
+        const contacts = snapshot.contacts;
+        if (contacts === undefined) {
+          throw new Error(
+            `Expected contact observations to be available at tick ${tick}.`,
+          );
+        }
+
+        for (const contact of contacts) {
+          expectNear(contact.normalImpulseNewtonSeconds, 0, 1e-10);
+          expectNear(contact.tangentImpulseNewtonSeconds, 0, 1e-10);
+        }
+      }
+    } finally {
+      expect(engine.dispose().ok).toBe(true);
+    }
+  });
+});
 describe("elastic head-on collisions", () => {
   // Catch incorrect momentum
   it("slows a 2 kg striker and accelerates a stationary 1 kg receiver", () => {
