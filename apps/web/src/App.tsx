@@ -339,7 +339,9 @@ export function App() {
 
     setDisplayedSnapshot(loaded.initialSnapshot);
     labStore.setState({
-      selectedEntityId: loaded.selectedEntityId,
+      // A loaded scene opens with nothing selected, on the Environment panel; the learner picks what to inspect.
+      selectedEntityId: null,
+      inspectorTab: "environment",
       selectionNotice: null,
       activeTool: { kind: "select" },
       // The canvas fits the new scene itself once it has drawn it, the same way the Fit button does.

@@ -73,8 +73,8 @@ export interface RampPlacementProperties {
 }
 
 export const DEFAULT_RAMP_PROPERTIES: RampPlacementProperties = {
-  widthMeters: 3,
-  heightMeters: 0.25,
+  widthMeters: 6,
+  heightMeters: 0.5,
   angleDegrees: 30,
   restitution: 0,
 };
@@ -171,7 +171,7 @@ export interface ProjectilePlacementProperties {
 
 export const DEFAULT_PROJECTILE_PROPERTIES: ProjectilePlacementProperties = {
   massKilograms: 1,
-  radiusMeters: 0.1,
+  radiusMeters: 0.5,
   launchSpeedMetersPerSecond: 20,
   launchAngleDegrees: 30,
   restitution: 0,
@@ -303,8 +303,8 @@ export interface PlatformPlacementProperties {
 }
 
 export const DEFAULT_PLATFORM_PROPERTIES: PlatformPlacementProperties = {
-  widthMeters: 2,
-  heightMeters: 0.5,
+  widthMeters: 4,
+  heightMeters: 1,
   restitution: 0,
 };
 function createPlatform(
@@ -354,7 +354,7 @@ export interface TargetPlacementProperties {
 }
 
 export const DEFAULT_TARGET_PROPERTIES: TargetPlacementProperties = {
-  radiusMeters: 0.25,
+  radiusMeters: 0.75,
 };
 function createTarget(
   id: string,

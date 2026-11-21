@@ -95,9 +95,9 @@ export const labStore = createStore<LabEditorState>()((set) => ({
   cameraFitRequest: 0,
   pendingCameraView: null,
   fitCamera: () => set((state) => ({ cameraFitRequest: state.cameraFitRequest + 1, pendingCameraView: null })),
-  selectedEntityId: "projectile",
+  selectedEntityId: null,
   selectionNotice: null,
-  inspectorTab: "properties",
+  inspectorTab: "environment",
   setInspectorTab: (inspectorTab) => {
     set({ inspectorTab });
   },
@@ -105,10 +105,10 @@ export const labStore = createStore<LabEditorState>()((set) => ({
     trail: true,
     velocity: true,
     components: true,
-    prediction: true,
+    prediction: false,
     events: true,
     grid: true,
-    labels: true,
+    labels: false,
   },
 
   challengeOverlay: { zones: [], live: [], ghosts: [] },
@@ -146,12 +146,14 @@ export const labStore = createStore<LabEditorState>()((set) => ({
     });
   },
 
-  // Choosing a different object shows its properties; deselecting or re-selecting the same object keeps the current panel.
+  // Choosing a different object shows its properties; deselecting moves an empty Object panel to Environment.
   selectEntity: (selectedEntityId, notice) => {
     set((state) => ({
       selectedEntityId,
       selectionNotice: notice ?? null,
       ...(selectedEntityId !== null && selectedEntityId !== state.selectedEntityId ? { inspectorTab: "properties" as const } : {}),
+      // With nothing selected the Object panel is empty, so show the scene's environment instead.
+      ...(selectedEntityId === null && state.inspectorTab === "properties" ? { inspectorTab: "environment" as const } : {}),
     }));
   },
 

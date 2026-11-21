@@ -51,11 +51,12 @@ const scene = {
       kind: "dynamic",
       shape: {
         kind: "circle",
-        radiusMeters: 0.1,
+        radiusMeters: 0.5,
       },
       massKilograms: 1,
+      // Bouncy, so the starting run can show ramp → platform → target. Each bounce uses the smaller of the two restitutions.
       material: {
-        restitution: 0,
+        restitution: 0.9,
       },
       pose: {
         positionMeters: {
@@ -74,16 +75,17 @@ const scene = {
       kind: "static",
       shape: {
         kind: "box",
-        widthMeters: 2,
-        heightMeters: 0.5,
+        widthMeters: 4,
+        heightMeters: 1,
       },
       material: {
-        restitution: 0,
+        restitution: 0.9,
       },
+      // Catches the ball coming back from the ramp (ideal landing x ≈ 15.2 m at t ≈ 4.29 s).
       pose: {
         positionMeters: {
-          x: 10,
-          y: 1.4,
+          x: 15,
+          y: 3,
         },
         angleRadians: 0,
       },
@@ -97,8 +99,9 @@ const scene = {
         widthMeters: 1200,
         heightMeters: 0.5,
       },
+      // A bouncy floor: a ball bounces as much as its own restitution allows (the engine uses the smaller of the two).
       material: {
-        restitution: 0,
+        restitution: 0.8,
       },
       pose: {
         positionMeters: {
@@ -113,18 +116,19 @@ const scene = {
       kind: "static",
       shape: {
         kind: "box",
-        widthMeters: 3,
-        heightMeters: 0.25,
+        widthMeters: 6,
+        heightMeters: 0.5,
       },
       material: {
-        restitution: 0,
+        restitution: 0.7,
       },
+      // A steep 50° face across the launch's path: the ball hits it near (25.1, 5.94) at t ≈ 1.45 s and bounces back up-left.
       pose: {
         positionMeters: {
-          x: 3,
-          y: 1,
+          x: 25.6,
+          y: 5.365,
         },
-        angleRadians: Math.PI / 6,
+        angleRadians: (50 * Math.PI) / 180,
       },
     },
   ],
@@ -134,12 +138,13 @@ const scene = {
       kind: "target",
       shape: {
         kind: "circle",
-        radiusMeters: 0.25,
+        radiusMeters: 0.75,
       },
+      // On the rise after the platform bounce; the ball enters it at t ≈ 4.75 s and never passes it earlier.
       pose: {
         positionMeters: {
-          x: 10,
-          y: INITIAL_HEIGHT_METERS,
+          x: 13.1,
+          y: 10.1,
         },
         angleRadians: 0,
       },

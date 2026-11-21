@@ -11,7 +11,12 @@ export function SceneOutline(props: {
   selectedEntityId: string | null;
   onClose(): void;
 }) {
-  const entities = [...props.scene.bodies, ...props.scene.triggers];
+  // Group by kind so related objects sit together: balls, then surfaces, then targets.
+  const entities = [
+    ...props.scene.bodies.filter((body) => body.kind === "dynamic"),
+    ...props.scene.bodies.filter((body) => body.kind === "static"),
+    ...props.scene.triggers,
+  ];
   const [search, setSearch] = useState("");
   const visibleEntities = entities.filter((entity) => entity.id.replaceAll("-", " ").toLowerCase().includes(search.trim().toLowerCase()));
   const outlineRef = useRef<HTMLElement>(null);
@@ -55,7 +60,8 @@ export function SceneOutline(props: {
                 title={entity.id}
                 aria-pressed={entity.id === props.selectedEntityId}
                 onClick={() => {
-                  labStore.getState().selectEntity(entity.id);
+                  // Clicking the selected object again clears the selection.
+                  labStore.getState().selectEntity(entity.id === props.selectedEntityId ? null : entity.id);
                   if (window.matchMedia("(max-width: 1100px)").matches) {
                     props.onClose();
                   }
