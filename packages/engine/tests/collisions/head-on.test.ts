@@ -11,6 +11,7 @@ function makeHeadOnScene(
     receiverXMeters?: number;
     strikerMassKilograms?: number;
     receiverMassKilograms?: number;
+    receiverRestitution?: number;
     strikerVelocityXMetersPerSecond?: number;
   } = {},
 ): SceneDefinition {
@@ -55,7 +56,7 @@ function makeHeadOnScene(
         shape: { kind: "circle", radiusMeters: 0.5 },
         massKilograms: options.receiverMassKilograms ?? receiverMassKilograms,
         material: {
-          restitution: restitution,
+          restitution: options.receiverRestitution ?? restitution,
           staticFrictionCoefficient: 0,
           kineticFrictionCoefficient: 0,
         },
@@ -376,88 +377,114 @@ describe("head-on collision impulse", () => {
   it.each([
     {
       restitution: 1,
+      receiverRestitution: 1,
       expectedNormalImpulse: 16 / 3,
       expectedStrikerVelocityX: 4 / 3,
       expectedReceiverVelocityX: 16 / 3,
     },
     {
       restitution: 0.5,
+      receiverRestitution: 0.5,
       expectedNormalImpulse: 4,
       expectedStrikerVelocityX: 2,
       expectedReceiverVelocityX: 4,
     },
-  ])("reports the delivered impulse at restitution $restitution", (row) => {
-    const scene = makeHeadOnScene(row.restitution, { receiverXMeters: 3.04 });
-    const engine = unwrap(createEngine(unwrap(validateScene(scene))));
+    // Either body can supply the lower restitution that controls the bounce.
+    {
+      restitution: 1,
+      receiverRestitution: 0.5,
+      expectedNormalImpulse: 4,
+      expectedStrikerVelocityX: 2,
+      expectedReceiverVelocityX: 4,
+    },
+    {
+      restitution: 0.5,
+      receiverRestitution: 1,
+      expectedNormalImpulse: 4,
+      expectedStrikerVelocityX: 2,
+      expectedReceiverVelocityX: 4,
+    },
+  ])(
+    "reports the delivered impulse for restitution $restitution and $receiverRestitution",
+    (row) => {
+      const scene = makeHeadOnScene(row.restitution, {
+        receiverXMeters: 3.04,
+        receiverRestitution: row.receiverRestitution,
+      });
+      const engine = unwrap(createEngine(unwrap(validateScene(scene))));
 
-    try {
-      unwrap(engine.advance(31));
-      const snapshot = unwrap(engine.getSnapshot());
+      try {
+        unwrap(engine.advance(31));
+        const snapshot = unwrap(engine.getSnapshot());
 
-      const contact = snapshot.contacts?.find(
-        (entry) => entry.bodyAId === "receiver" && entry.bodyBId === "striker",
-      );
-      if (contact === undefined) {
-        throw new Error("Expected the receiver–striker contact at tick 31.");
+        const contact = snapshot.contacts?.find(
+          (entry) =>
+            entry.bodyAId === "receiver" && entry.bodyBId === "striker",
+        );
+        if (contact === undefined) {
+          throw new Error("Expected the receiver–striker contact at tick 31.");
+        }
+
+        // Check the contact tick and time. Use 0.51 s with a 2.5e-8 s bound.
+        expect(contact.tick).toBe(31);
+        expectNear(contact.timeSeconds, 0.51, 2.5e-8);
+
+        const impulseTolerance = 1e-12 + 1e-10 * row.expectedNormalImpulse;
+        expectNear(
+          contact.normalImpulseNewtonSeconds,
+          row.expectedNormalImpulse,
+          impulseTolerance,
+        );
+
+        // The normal points left from the receiver to the striker
+        expectNear(contact.normal.x, -1, 1e-10);
+        expectNear(contact.normal.y, 0, 1e-10);
+        expectNear(contact.tangentImpulseNewtonSeconds, 0, 1.01e-10);
+
+        // Read the actual x velocities immediately before and after contact
+        const receiverBeforeX =
+          contact.bodyAVelocityBefore.linearMetersPerSecond.x;
+        const receiverAfterX =
+          contact.bodyAVelocityAfter.linearMetersPerSecond.x;
+        const strikerBeforeX =
+          contact.bodyBVelocityBefore.linearMetersPerSecond.x;
+        const strikerAfterX =
+          contact.bodyBVelocityAfter.linearMetersPerSecond.x;
+
+        expectNear(receiverBeforeX, 0, 1.01e-8);
+        expectNear(strikerBeforeX, 4, 4.01e-8);
+        expectNear(
+          receiverAfterX,
+          row.expectedReceiverVelocityX,
+          1e-10 + 1e-8 * row.expectedReceiverVelocityX,
+        );
+        expectNear(
+          strikerAfterX,
+          row.expectedStrikerVelocityX,
+          1e-10 + 1e-8 * row.expectedStrikerVelocityX,
+        );
+
+        // The receiver gains the momentum that the striker loses
+        const receiverMomentumChangeX =
+          receiverMassKilograms * (receiverAfterX - receiverBeforeX);
+        const strikerMomentumChangeX =
+          strikerMassKilograms * (strikerAfterX - strikerBeforeX);
+
+        expectNear(
+          receiverMomentumChangeX,
+          row.expectedNormalImpulse,
+          impulseTolerance,
+        );
+        expectNear(
+          strikerMomentumChangeX,
+          -row.expectedNormalImpulse,
+          impulseTolerance,
+        );
+      } finally {
+        expect(engine.dispose().ok).toBe(true);
       }
-
-      // Check the contact tick and time. Use 0.51 s with a 2.5e-8 s bound.
-      expect(contact.tick).toBe(31);
-      expectNear(contact.timeSeconds, 0.51, 2.5e-8);
-
-      const impulseTolerance = 1e-12 + 1e-10 * row.expectedNormalImpulse;
-      expectNear(
-        contact.normalImpulseNewtonSeconds,
-        row.expectedNormalImpulse,
-        impulseTolerance,
-      );
-
-      // The normal points left from the receiver to the striker
-      expectNear(contact.normal.x, -1, 1e-10);
-      expectNear(contact.normal.y, 0, 1e-10);
-      expectNear(contact.tangentImpulseNewtonSeconds, 0, 1.01e-10);
-
-      // Read the actual x velocities immediately before and after contact
-      const receiverBeforeX =
-        contact.bodyAVelocityBefore.linearMetersPerSecond.x;
-      const receiverAfterX = contact.bodyAVelocityAfter.linearMetersPerSecond.x;
-      const strikerBeforeX =
-        contact.bodyBVelocityBefore.linearMetersPerSecond.x;
-      const strikerAfterX = contact.bodyBVelocityAfter.linearMetersPerSecond.x;
-
-      expectNear(receiverBeforeX, 0, 1.01e-8);
-      expectNear(strikerBeforeX, 4, 4.01e-8);
-      expectNear(
-        receiverAfterX,
-        row.expectedReceiverVelocityX,
-        1e-10 + 1e-8 * row.expectedReceiverVelocityX,
-      );
-      expectNear(
-        strikerAfterX,
-        row.expectedStrikerVelocityX,
-        1e-10 + 1e-8 * row.expectedStrikerVelocityX,
-      );
-
-      // The receiver gains the momentum that the striker loses
-      const receiverMomentumChangeX =
-        receiverMassKilograms * (receiverAfterX - receiverBeforeX);
-      const strikerMomentumChangeX =
-        strikerMassKilograms * (strikerAfterX - strikerBeforeX);
-
-      expectNear(
-        receiverMomentumChangeX,
-        row.expectedNormalImpulse,
-        impulseTolerance,
-      );
-      expectNear(
-        strikerMomentumChangeX,
-        -row.expectedNormalImpulse,
-        impulseTolerance,
-      );
-    } finally {
-      expect(engine.dispose().ok).toBe(true);
-    }
-  });
+    },
+  );
 });
 describe("head-on collisions across masses, speeds, and restitution", () => {
   const massRatios = [

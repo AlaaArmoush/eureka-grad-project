@@ -106,7 +106,139 @@ it("refines the driven sliding-box motion at one second", () => {
   const firstOrder = positionRatios.every((ratio) => ratio >= 1.5 && ratio <= 2.5);
   const fasterOrder = positionRatios.every((ratio) => ratio > 2.5);
   expect(firstOrder || fasterOrder).toBe(true);
-});// Measure contact timing, impulse, and final velocity at one resolution.
+});
+
+// Check both sides of the mixed static limit and the slowdown from mixed kinetic friction.
+it.each([
+  {
+    name: "holds a stationary block below the mixed static friction limit",
+    driveNewtons: 3.4335,
+    initialVelocityX: 0,
+    motion: "sticking",
+  },
+  {
+    name: "starts a stationary block sliding above the mixed static friction limit",
+    driveNewtons: 4.4145,
+    initialVelocityX: 0,
+    motion: "breaking away",
+  },
+  {
+    name: "slows a moving block by the mixed kinetic friction force",
+    driveNewtons: 0,
+    initialVelocityX: 4,
+    motion: "slowing",
+  },
+] as const)("$name", (row) => {
+  const baseScene = makeSlidingBoxScene(false);
+  const stepSeconds = 1 / 240;
+  const observationTicks = 60;
+  const observationSeconds = 0.25;
+  const scene: SceneDefinition = {
+    ...baseScene,
+    id: "mixed-friction-block",
+    numericalProfile: {
+      ...baseScene.numericalProfile,
+      fixedTimeStepSeconds: stepSeconds,
+    },
+    bodies: baseScene.bodies.map((body) => {
+      if (body.kind === "static") {
+        return {
+          ...body,
+          material: {
+            ...body.material,
+            staticFrictionCoefficient: 0.8,
+            kineticFrictionCoefficient: 0.4,
+          },
+        };
+      }
+
+      return {
+        ...body,
+        material: {
+          ...body.material,
+          staticFrictionCoefficient: 0.2,
+          kineticFrictionCoefficient: 0.1,
+        },
+        velocity: {
+          ...body.velocity,
+          linearMetersPerSecond: { x: row.initialVelocityX, y: 0 },
+        },
+      };
+    }),
+    // Zero angular frequency makes the cosine force a constant push.
+    sinusoidalForces:
+      row.driveNewtons === 0
+        ? []
+        : [
+            {
+              forceVersion: 1,
+              id: "friction-threshold-push",
+              bodyId: "sliding-block",
+              amplitudeNewtons: { x: row.driveNewtons, y: 0 },
+              angularFrequencyRadiansPerSecond: 0,
+              startTimeSeconds: 0,
+              endTimeSeconds: observationSeconds,
+            },
+          ],
+  };
+  const engine = unwrap(createEngine(scene));
+
+  try {
+    unwrap(engine.advance(observationTicks));
+    const snapshot = unwrap(engine.getSnapshot());
+    const block = snapshot.bodies.find((body) => body.id === "sliding-block");
+    if (block === undefined) {
+      throw new Error("Expected the mixed-friction block in the snapshot.");
+    }
+
+    expect(snapshot.tick).toBe(observationTicks);
+    expectNear(snapshot.simulationTimeSeconds, observationSeconds, 1e-12);
+    expectNear(block.pose.positionMeters.y, 0.5, 1e-4);
+
+    const positionX = block.pose.positionMeters.x;
+    const velocityX = block.velocity.linearMetersPerSecond.x;
+    const slipSpeedBound = 1e-5;
+    const slipDistanceBound = slipSpeedBound * observationSeconds;
+
+    // sqrt(0.2 * 0.8) = 0.4, so the 1 kg block can resist up to 3.924 N.
+    if (row.motion === "sticking") {
+      expectNear(velocityX, 0, slipSpeedBound);
+      expectNear(positionX, 0, slipDistanceBound);
+      return;
+    }
+
+    if (row.motion === "breaking away") {
+      expect(Number.isFinite(velocityX)).toBe(true);
+      expect(Number.isFinite(positionX)).toBe(true);
+      expect(velocityX).toBeGreaterThan(slipSpeedBound);
+      expect(positionX).toBeGreaterThan(slipDistanceBound);
+      return;
+    }
+
+    // sqrt(0.1 * 0.4) = 0.2. With no push, a = -0.2g and x = v0t + at²/2.
+    const expectedAccelerationX = -0.2 * gravity;
+    const expectedPositionX =
+      row.initialVelocityX * observationSeconds +
+      0.5 * expectedAccelerationX * observationSeconds ** 2;
+    const accelerationX =
+      (velocityX - row.initialVelocityX) / observationSeconds;
+
+    expectNear(
+      accelerationX,
+      expectedAccelerationX,
+      0.005 * Math.abs(expectedAccelerationX),
+    );
+    expectNear(
+      positionX,
+      expectedPositionX,
+      1e-6 + 0.005 * Math.max(Math.abs(expectedPositionX), 1),
+    );
+  } finally {
+    expect(engine.dispose().ok).toBe(true);
+  }
+});
+
+// Measure contact timing, impulse, and final velocity at one resolution.
 function measureWallImpactErrors(ticksPerSecond: number) {
   const scene: SceneDefinition = {
     schemaVersion: 1,
