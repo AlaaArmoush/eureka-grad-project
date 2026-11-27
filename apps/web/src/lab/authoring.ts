@@ -37,11 +37,13 @@ export interface MoveEntityRequest {
   readonly entityId: string;
   readonly positionMeters: Vector2;
 }
+// reservedIds holds IDs used earlier in this run, so a removed object's ID is never given to a new one.
 export function createUniqueEntityId(
   prefix: PlaceableEntityKind,
   scene: SceneDefinition,
+  reservedIds: ReadonlySet<string> = new Set(),
 ): string {
-  const existingIds = new Set<string>();
+  const existingIds = new Set<string>(reservedIds);
 
   for (const sceneBody of scene.bodies) {
     existingIds.add(sceneBody.id);
@@ -323,8 +325,8 @@ function createTarget(
     },
   };
 }
-export function placeEntityInScene(scene: SceneDefinition, request: PlacementRequest): SceneDraftChange {
-  const id = createUniqueEntityId(request.entityKind, scene);
+export function placeEntityInScene(scene: SceneDefinition, request: PlacementRequest, reservedIds?: ReadonlySet<string>): SceneDraftChange {
+  const id = createUniqueEntityId(request.entityKind, scene, reservedIds);
   let bodies = scene.bodies;
   let triggers = scene.triggers;
 

@@ -36,7 +36,8 @@ export function PropertiesPanel(props: {
   displayedSnapshot: Snapshot;
   editableScene: SceneDefinition;
   selectedEntityId: string | null;
-  setEditableScene(scene: SceneDefinition): void;
+  // The tick whose boundary will apply queued edits, or null when nothing is queued.
+  queuedForTick: number | null;
   playing?: boolean;
 }) {
   const {
@@ -44,7 +45,7 @@ export function PropertiesPanel(props: {
     displayedSnapshot,
     editableScene,
     selectedEntityId,
-    setEditableScene,
+    queuedForTick,
   } = props;
 
   const selectedBody = displayedSnapshot.bodies.find(
@@ -56,9 +57,10 @@ export function PropertiesPanel(props: {
   const selectedDefinition =
     editableScene.bodies.find((body) => body.id === selectedEntityId) ??
     selectedTrigger;
+  // A paused edit shows where the object was put, not where the last tick left it.
   const selectedPose = selectedDefinition === undefined
     ? undefined
-    : selectedBody?.pose ?? selectedTrigger?.pose;
+    : queuedForTick !== null ? selectedDefinition.pose : selectedBody?.pose ?? selectedTrigger?.pose;
 
   const selectedProjectile =
     selectedDefinition?.kind === "dynamic" ? selectedDefinition : undefined;
@@ -98,8 +100,6 @@ export function PropertiesPanel(props: {
   const [targetEditError, setTargetEditError] = usePropertyError(errorScope);
   const [positionEditError, setPositionEditError] = usePropertyError(errorScope);
   const panelRef = useRef<HTMLElement>(null);
-  // The most recently queued edit, discarded when Reset remounts SceneInspector.
-  const [runEdit, setRunEdit] = useState<{ readonly entityId: string; readonly appliesAtTick: number } | null>(null);
 
 
   // Keep accepted launch text across renders and selection changes.
@@ -164,7 +164,6 @@ export function PropertiesPanel(props: {
     }
 
     setPositionEditError(null);
-    setEditableScene(result.value.scene);
   }
 
   return (
@@ -243,13 +242,6 @@ export function PropertiesPanel(props: {
         </dl>
       )}
       {positionEditError !== null && <p className="coordinate-error" role="alert">{positionEditError}</p>}
-      {runEdit !== null && runEdit.entityId === selectedEntityId && (
-        <p role="status">
-          {displayedSnapshot.tick === runEdit.appliesAtTick
-            ? `Queued for tick ${runEdit.appliesAtTick}: applies on the next Step or Run. Reset returns to the starting scene.`
-            : `Applied at tick ${runEdit.appliesAtTick}. Reset returns to the starting scene.`}
-        </p>
-      )}
       {selectedProjectile !== undefined && (
         <form
           className="property-editor-inline"
@@ -321,47 +313,6 @@ export function PropertiesPanel(props: {
               return;
             }
 
-            // Partway through a run, mass, bounce and launch become engine commands; a radius change restarts from the starting scene.
-            if (displayedSnapshot.tick > 0 && radius === selectedProjectile.shape.radiusMeters) {
-              const currentPosition = selectedBody?.pose.positionMeters;
-
-              if (currentPosition === undefined) {
-                rejectEdit("The ball isn't in the scene right now. Select it again.");
-                return;
-              }
-
-              const bodyResult = controller.queueRunEdit({
-                kind: "editBody",
-                bodyId: selectedProjectile.id,
-                changes: { massKilograms: mass, material: { ...selectedProjectile.material, restitution } },
-              });
-
-              if (!bodyResult.ok) {
-                rejectEdit(describeProblem(bodyResult.diagnostics, "That change couldn't be made."));
-                return;
-              }
-
-              // Relaunch only when the launch inputs changed, from where the ball is now.
-              if (speedText !== launchSpeedInput || angleText !== launchAngleInput) {
-                const angleRadians = (angle * Math.PI) / 180;
-                const launchResult = controller.queueRunEdit({
-                  kind: "launchBody",
-                  bodyId: selectedProjectile.id,
-                  positionMeters: { ...currentPosition },
-                  velocity: { linearMetersPerSecond: { x: speed * Math.cos(angleRadians), y: speed * Math.sin(angleRadians) }, angularRadiansPerSecond: 0 },
-                });
-
-                if (!launchResult.ok) {
-                  rejectEdit(describeProblem(launchResult.diagnostics, "That launch couldn't be made."));
-                  return;
-                }
-              }
-
-              setProjectileEditError(null);
-              setRunEdit({ entityId: selectedProjectile.id, appliesAtTick: bodyResult.value.appliesAtTick });
-              return;
-            }
-
             const editResult = controller.updateProjectileProperties(
               selectedProjectile.id,
               {
@@ -371,6 +322,8 @@ export function PropertiesPanel(props: {
                 launchAngleDegrees: angle,
                 restitution,
               },
+              // Mid-run, a ball is relaunched from where it is only when its launch values were changed.
+              { relaunch: speedText !== launchSpeedInput || angleText !== launchAngleInput },
             );
 
             if (!editResult.ok) {
@@ -403,7 +356,6 @@ export function PropertiesPanel(props: {
               }
             }
 
-            setEditableScene(acceptedScene);
             setProjectileEditError(null);
           }}
         >
@@ -515,7 +467,6 @@ export function PropertiesPanel(props: {
                 return;
               }
 
-              setEditableScene(editResult.value.scene);
               setStaticBodyEditError(null);
             }}
           >
@@ -603,7 +554,6 @@ export function PropertiesPanel(props: {
                 return;
               }
 
-              setEditableScene(editResult.value.scene);
               setTargetEditError(null);
             }}
           >

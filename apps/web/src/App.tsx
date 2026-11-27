@@ -5,6 +5,8 @@ import type { MoveEntityRequest, PlacementRequest } from "./lab/authoring";
 import { ObjectLibrary } from "./lab/ObjectLibrary";
 import {
   Atom,
+  Moon,
+  Sun,
   Activity,
   ArrowLeft,
   ChevronDown,
@@ -28,11 +30,10 @@ import {
   PanelLeft,
   Expand,
   Shrink,
-  Power,
 } from "lucide-react";
 import { useStore } from "zustand";
 import { labStore } from "./lab/store";
-import { PLAYBACK_SPEEDS, type LabController, type PlaybackState } from "./lab/controller.js";
+import { PLAYBACK_SPEEDS, type LabController, type LabSceneView, type PlaybackState } from "./lab/controller.js";
 // Describe operation results displayed by the playback controls.
 import type { EngineStatus } from "@eureka/engine";
 import { LabCanvas } from "./lab/LabCanvas";
@@ -76,7 +77,42 @@ const WORKSPACE_NAVIGATION = [
   },
 ] as const;
 
+const THEME_KEY = "eureka-theme";
+
+// A saved choice wins; otherwise follow the system setting.
+function initialTheme(): "light" | "dark" {
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+
+    if (saved === "light" || saved === "dark") {
+      return saved;
+    }
+  } catch {
+    // Storage can be blocked; fall back to the system setting.
+  }
+
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
 export function App() {
+  const [theme, setTheme] = useState(initialTheme);
+
+  useLayoutEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
+  // Only an explicit choice is saved, so an unset theme keeps following the system.
+  function toggleTheme(): void {
+    const next = theme === "dark" ? "light" : "dark";
+    setTheme(next);
+
+    try {
+      localStorage.setItem(THEME_KEY, next);
+    } catch {
+      // The theme still applies for this visit.
+    }
+  }
+
   // The first readout is the engine's own tick-zero state of the starting scene.
   const [displayedSnapshot, setDisplayedSnapshot] = useState<Snapshot>(() => {
     const result = copyInitialSnapshot(PROJECTILE_LAB_MOCK.scene);
@@ -87,10 +123,11 @@ export function App() {
 
     return result.value;
   });
-  const [editableScene, setEditableScene] = useState<SceneDefinition>(() =>
-    structuredClone(PROJECTILE_LAB_MOCK.scene),
-  );
-  const [labVisible, setLabVisible] = useState(true);
+  // The simulation source: only loading a question or challenge replaces it, and with it the engine.
+  const [labSource, setLabSource] = useState<SceneDefinition>(() => structuredClone(PROJECTILE_LAB_MOCK.scene));
+  // What the editor shows: queued edits when there are any, otherwise the authoritative world.
+  const [editableScene, setEditableScene] = useState<SceneDefinition>(labSource);
+  const [queuedForTick, setQueuedForTick] = useState<number | null>(null);
   const [navigation] = useState(() => createWorkspaceNavigation(window));
   const activePage = useSyncExternalStore(navigation.subscribe, navigation.getSnapshot, navigation.getSnapshot);
 
@@ -110,10 +147,19 @@ export function App() {
   // The Curriculum questions, loaded from the server once; the lab works without them.
   const demonstrationCatalogue = useDemonstrationCatalogue();
   const [pendingLoad, setPendingLoad] = useState<{ readonly title: string; apply(): void } | null>(null);
-  const pristineSceneRef = useRef(editableScene);
+  // Whether the start was edited since this source was loaded, so loading another needs confirmation.
+  const startEditedRef = useRef(false);
   const [sceneGeneration, setSceneGeneration] = useState(0);
   const controllerRef = useRef<LabController | null>(null);
-  const challenge = useChallengeSession(setEditableScene, controllerRef);
+  const applyChallengeScene = useCallback((scene: SceneDefinition): void => {
+    controllerRef.current?.setStartingScene(scene);
+  }, []);
+  const challenge = useChallengeSession(applyChallengeScene, controllerRef);
+  const handleSceneView = useCallback((view: LabSceneView): void => {
+    startEditedRef.current = view.startEdited;
+    setEditableScene(view.preview ?? view.scene);
+    setQueuedForTick(view.queuedForTick);
+  }, []);
   const reportEngineFailure = challenge.onEngineFailure;
   const challengeActive = challenge.session !== null;
   // The open Curriculum question's title, shown in the breadcrumb; none for the learner's own scene or a challenge.
@@ -320,7 +366,7 @@ export function App() {
     }
 
     // Nothing to lose when the lab still holds the scene it loaded; otherwise ask inside the site.
-    if (editableScene === pristineSceneRef.current) {
+    if (!startEditedRef.current) {
       applyDemonstration(result.value);
       return;
     }
@@ -337,7 +383,7 @@ export function App() {
     }
 
     // Same rule as a demonstration: ask only when the lab holds changes.
-    if (editableScene === pristineSceneRef.current) {
+    if (!startEditedRef.current) {
       applyChallenge(result.value);
       return;
     }
@@ -366,10 +412,11 @@ export function App() {
 
     setSceneGeneration((generation) => generation + 1);
     setDockTab("scene");
-    setLabVisible(true);
     setLabError(null);
-    pristineSceneRef.current = loaded.scene;
+    startEditedRef.current = false;
+    setLabSource(loaded.scene);
     setEditableScene(loaded.scene);
+    setQueuedForTick(null);
     navigateTo("laboratory");
   }
 
@@ -484,7 +531,7 @@ export function App() {
   }
 
   useEffect(() => {
-    if (!labVisible || activePage !== "laboratory") {
+    if (activePage !== "laboratory") {
       return;
     }
     function handleEscKey(event: KeyboardEvent) {
@@ -507,7 +554,7 @@ export function App() {
     return () => {
       window.removeEventListener("keydown", handleEscKey);
     };
-  }, [labVisible, activePage]);
+  }, [activePage]);
   useEffect(() => {
     if (selectedEntityId === null) {
       return;
@@ -545,7 +592,6 @@ export function App() {
     }
 
     reportLabResult("Couldn't place that", placementResult);
-    setEditableScene(placementResult.value.scene);
     labStore.getState().selectEntity(placementResult.value.entityId);
   }, [reportLabResult, challengeActive]);
   const handleMoveRequested = useCallback(
@@ -573,7 +619,6 @@ export function App() {
       }
 
       reportLabResult("Couldn't move that", moveResult);
-      setEditableScene(moveResult.value.scene);
       labStore.getState().selectEntity(moveResult.value.entityId);
       return true;
     },
@@ -600,7 +645,6 @@ export function App() {
     }
 
     reportLabResult("Couldn't delete that", deleteResult);
-    setEditableScene(deleteResult.value.scene);
     labStore.getState().selectEntity(null);
     return true;
   }, [reportLabResult, challengeActive]);
@@ -612,7 +656,7 @@ export function App() {
           navigateTo("laboratory");
         }}>
           {/* Eureka mark: the king's crown sinking into the bath water. */}
-          <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M5.2 15L4 7.5l4.5 3.5L12 5.5l3.5 5.5L20 7.5 18.8 15" />
             <circle cx="4" cy="5.3" r=".9" /><circle cx="12" cy="3.3" r=".9" /><circle cx="20" cy="5.3" r=".9" />
             <path d="M12 10.6l1.3 1.6-1.3 1.6-1.3-1.6Z" strokeWidth="1.4" />
@@ -644,6 +688,7 @@ export function App() {
           ))}
         </nav>
         <div className="rail-bottom">
+          <button className="rail-link" type="button" aria-label={theme === "dark" ? "Light mode" : "Dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"} onClick={toggleTheme}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}<span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button>
           <button className="rail-link" type="button" aria-label="Help & guides" title="Help & guides" disabled><CircleHelp size={18} /><span>Help & guides</span></button>
           <button className="rail-link" type="button" aria-label="Settings" title="Settings" disabled><Settings2 size={18} /><span>Settings</span></button>
           <div className="rail-footer"><span className="guest-avatar"><UserRound size={17} /></span><span>Guest workspace<small>Local session</small></span></div>
@@ -672,7 +717,6 @@ export function App() {
               {activeDemonstration !== null && !challengeActive && (
                 <button className="tool-btn" type="button" onClick={() => navigateTo("projectiles")}><ArrowLeft size={14} />Back to question</button>
               )}
-              <button className="tool-btn lab-power" onClick={() => setLabVisible((visible) => !visible)} type="button"><Power size={14} />{labVisible ? "Leave lab" : "Enter lab"}</button>
             </div>
           )}
         </div>
@@ -794,19 +838,18 @@ export function App() {
                     <div className="canvas-heading">
                       <CanvasTools />
                     </div>
-                    {labVisible ? (
-                      <LabCanvas
-                        scene={editableScene}
-                        setDisplayedSnapshot={setDisplayedSnapshot} setActiveController={setActiveController} setRunEvents={setRunEvents}
-                        onPlaybackChange={setPlaybackState}
-                        onTick={challenge.onTick}
-                        onOperationResult={reportLabResult}
-                        onPlacementRequested={handlePlacementRequested}
-                        onMoveRequested={handleMoveRequested} onDeleteRequested={handleDeleteRequested}
-                      />
-                    ) : <div className="closed-lab"><Atom size={32} /><p>Your laboratory is closed.</p><button type="button" className="tool-btn" onClick={() => setLabVisible(true)}>Enter lab</button></div>}
+                    <LabCanvas
+                      source={labSource}
+                      onSceneView={handleSceneView}
+                      setDisplayedSnapshot={setDisplayedSnapshot} setActiveController={setActiveController} setRunEvents={setRunEvents}
+                      onPlaybackChange={setPlaybackState}
+                      onTick={challenge.onTick}
+                      onOperationResult={reportLabResult}
+                      onPlacementRequested={handlePlacementRequested}
+                      onMoveRequested={handleMoveRequested} onDeleteRequested={handleDeleteRequested}
+                    />
                     {/* An empty scene says what to do next instead of showing blank paper. */}
-                    {labVisible && editableScene.bodies.length + editableScene.triggers.length === 0 && (
+                    {editableScene.bodies.length + editableScene.triggers.length === 0 && (
                       <div className="canvas-empty">
                         <p>{EMPTY_SCENE_HINT}</p>
                         <button type="button" className="tool-btn" onClick={openObjectLibrary}><Plus size={14} />Add an object</button>
@@ -840,7 +883,7 @@ export function App() {
             </div>
             <div id="inspector-dock" className="inspector-dock" hidden={!inspectorOpen}>
               {challenge.session === null
-                ? <SceneInspector key={sceneGeneration} onClose={closeInspector} controllerRef={controllerRef} displayedSnapshot={displayedSnapshot} editableScene={editableScene} selectedEntityId={selectedEntityId} setEditableScene={setEditableScene} playing={playbackState?.playing ?? false} />
+                ? <SceneInspector key={sceneGeneration} onClose={closeInspector} controllerRef={controllerRef} displayedSnapshot={displayedSnapshot} editableScene={editableScene} queuedForTick={queuedForTick} selectedEntityId={selectedEntityId} playing={playbackState?.playing ?? false} />
                 : <ChallengePanel session={challenge.session} playing={playbackState?.playing ?? false} canLaunch={playbackState !== null} onSetValue={challenge.setValue} onLaunch={() => handlePlaybackAction("play")} onRetry={challenge.retry} onShowSample={challenge.showSample} onExit={challenge.end} />}
             </div>
           </div>

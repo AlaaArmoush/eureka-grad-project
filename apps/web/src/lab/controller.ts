@@ -1,6 +1,10 @@
 // Supplies commands and portable renderer snapshots.
 import type {
+  BoxShape,
+  CircleShape,
   CommandPayload,
+  Material,
+  Pose,
   SceneDefinition,
   Snapshot,
   SnapshotEvent,
@@ -8,7 +12,6 @@ import type {
 } from "@eureka/contracts";
 // Supplies the headless engine boundary and typed results.
 import {
-  validateScene,
   type AdvanceReceipt,
   type Engine,
   type EngineResult,
@@ -73,6 +76,18 @@ export interface PlaybackBrowser {
   onFrameResult(result: EngineStatus): void;
 }
 
+// What the editor shows of the world. Never sent per frame: only after an accepted edit, an applied boundary or Reset.
+export interface LabSceneView {
+  // Authoritative world: the start at tick 0, the run's world after that.
+  readonly scene: SceneDefinition;
+  // What Reset restores.
+  readonly start: SceneDefinition;
+  // The world once this pause's queued edits apply, or null when nothing is queued.
+  readonly preview: SceneDefinition | null;
+  readonly queuedForTick: number | null;
+  readonly startEdited: boolean;
+}
+
 export interface LabController {
   queueRunEdit(payload: CommandPayload): EngineResult<{ readonly appliesAtTick: number }>;
   // Pull a ball toward the pointer with a spring while the run plays.
@@ -93,12 +108,16 @@ export interface LabController {
   dispose(options?: { readonly preserveView?: boolean }): EngineStatus;
 
   copyScene(): SceneDefinition;
+  // An explicit change of the start, such as a challenge value: ends the current run first.
+  setStartingScene(scene: SceneDefinition): EngineResult<SceneDefinition>;
   updateEnvironment(environment: SceneDefinition["environment"]): EngineResult<SceneDefinition>;
 
   placeEntity(request: PlacementRequest): EngineResult<SceneDraftChange>;
   updateProjectileProperties(
     projectileId: string,
     properties: ProjectilePlacementProperties,
+    // Mid-run only: also relaunch the ball from where it is with the new launch velocity.
+    options?: { readonly relaunch?: boolean },
   ): EngineResult<SceneDraftChange>;
   updateStaticBodyProperties(
     bodyId: string,
@@ -126,6 +145,8 @@ export interface LabControllerOptions {
   // Receive owned snapshots for retained HTML measurements.
   readonly consumeReadout?: SnapshotConsumer | undefined;
   readonly consumeTick?: SnapshotConsumer | undefined;
+  // Receives the scene view before the snapshot that matches it.
+  readonly consumeScene?: ((view: LabSceneView, snapshot: Snapshot) => void) | undefined;
   // Receives this run's events whenever the list changes.
   readonly consumeRunEvents?: ((events: readonly SnapshotEvent[]) => void) | undefined;
   readonly releaseView: () => void;
@@ -134,19 +155,120 @@ export interface LabControllerOptions {
   readonly onPlaybackChange?: ((state: PlaybackState) => void) | undefined;
 }
 
+function same(left: unknown, right: unknown): boolean {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+// Turn one authoring edit into engine run commands. A ball's velocity changes only through an explicit relaunch.
+function runCommandsFor(before: SceneDefinition, after: SceneDefinition, relaunchBodyId: string | undefined): CommandPayload[] {
+  const payloads: CommandPayload[] = [];
+  const previousEntities = new Map([...before.bodies, ...before.triggers].map((entity) => [entity.id, entity]));
+  const nextEntities = [...after.bodies, ...after.triggers];
+  const nextIds = new Set(nextEntities.map((entity) => entity.id));
+
+  if (!same(before.environment, after.environment)) {
+    payloads.push({ kind: "setEnvironment", environment: structuredClone(after.environment) });
+  }
+
+  for (const id of previousEntities.keys()) {
+    if (!nextIds.has(id)) {
+      payloads.push({ kind: "removeEntity", entityId: id });
+    }
+  }
+
+  for (const entity of nextEntities) {
+    const previous = previousEntities.get(entity.id);
+
+    if (previous === undefined) {
+      payloads.push({ kind: "addEntity", entity: structuredClone(entity) });
+      continue;
+    }
+
+    if (entity.kind === "target" && previous.kind === "target") {
+      const changes: { pose?: Pose; shape?: CircleShape } = {};
+
+      if (!same(previous.pose, entity.pose)) {
+        changes.pose = structuredClone(entity.pose);
+      }
+
+      if (!same(previous.shape, entity.shape)) {
+        changes.shape = { ...entity.shape };
+      }
+
+      if (Object.keys(changes).length > 0) {
+        payloads.push({ kind: "editTarget", targetId: entity.id, changes });
+      }
+
+      continue;
+    }
+
+    if (entity.kind === "target" || previous.kind === "target") {
+      continue;
+    }
+
+    const changes: { massKilograms?: number; material?: Material; pose?: Pose; shape?: CircleShape | BoxShape } = {};
+
+    if (entity.kind === "dynamic" && previous.kind === "dynamic" && entity.massKilograms !== previous.massKilograms) {
+      changes.massKilograms = entity.massKilograms;
+    }
+
+    if (!same(previous.material, entity.material)) {
+      changes.material = { ...entity.material };
+    }
+
+    if (!same(previous.pose, entity.pose)) {
+      changes.pose = structuredClone(entity.pose);
+    }
+
+    if (!same(previous.shape, entity.shape)) {
+      changes.shape = { ...entity.shape };
+    }
+
+    if (Object.keys(changes).length > 0) {
+      payloads.push({ kind: "editBody", bodyId: entity.id, changes });
+    }
+
+    if (entity.kind === "dynamic" && entity.id === relaunchBodyId) {
+      payloads.push({ kind: "launchBody", bodyId: entity.id, positionMeters: { ...entity.pose.positionMeters }, velocity: structuredClone(entity.velocity) });
+    }
+  }
+
+  return payloads;
+}
+
 export function createLabController(options: LabControllerOptions): EngineResult<LabController> {
   const {
-    engine, initialScene, consumeSnapshot, consumeReadout, consumeTick, consumeRunEvents, releaseView,
+    engine, initialScene, consumeSnapshot, consumeReadout, consumeTick, consumeScene, consumeRunEvents, releaseView,
     nowMilliseconds = () => performance.now(),
     playbackBrowser, onPlaybackChange,
   } = options;
   const currentEngine = engine;
-  let currentScene = structuredClone(initialScene);
+  let start = structuredClone(initialScene);
+  let world = structuredClone(initialScene);
+  let preview: SceneDefinition | null = null;
+  let queuedForTick: number | null = null;
+  let startEdited = false;
+  let scenePublishDue = false;
+  // Every ID this engine has held, so a new object never takes a removed object's ID.
+  const usedIds = new Set<string>();
+  rememberIds(initialScene);
+
+  function rememberIds(scene: SceneDefinition): void {
+    for (const entity of [...scene.bodies, ...scene.triggers]) {
+      usedIds.add(entity.id);
+    }
+  }
+
+  function sceneView(): LabSceneView {
+    return structuredClone({ scene: world, start, preview, queuedForTick, startEdited });
+  }
+
   const initialSnapshot = currentEngine.getSnapshot();
   if (!initialSnapshot.ok) {
     return initialSnapshot;
   }
 
+  consumeScene?.(sceneView(), initialSnapshot.value);
   consumeSnapshot(initialSnapshot.value);
 
   const fixedTimeStepSeconds = initialScene.numericalProfile.fixedTimeStepSeconds;
@@ -375,6 +497,24 @@ export function createLabController(options: LabControllerOptions): EngineResult
       return snapshotResult;
     }
 
+    // Queued edits were applied at their boundary, so the authoritative world changed.
+    if (queuedForTick !== null && snapshotResult.value.tick > queuedForTick) {
+      const sceneResult = currentEngine.copyScene();
+
+      if (sceneResult.ok) {
+        world = sceneResult.value;
+      }
+
+      preview = null;
+      queuedForTick = null;
+      scenePublishDue = true;
+    }
+
+    if (scenePublishDue) {
+      scenePublishDue = false;
+      consumeScene?.(sceneView(), snapshotResult.value);
+    }
+
     recordRunEvents(snapshotResult.value);
     consumeSnapshot(snapshotResult.value);
     consumeTick?.(snapshotResult.value);
@@ -516,8 +656,12 @@ export function createLabController(options: LabControllerOptions): EngineResult
       return resetResult;
     }
 
-    // The engine's reset also removed the pull.
+    // The engine's reset also removed the pull, the run's edits and its queued commands.
     activePull = null;
+    world = structuredClone(start);
+    preview = null;
+    queuedForTick = null;
+    scenePublishDue = true;
     runEvents = [];
     lastContactTimes = new Map();
     publishRunEvents();
@@ -613,7 +757,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
       return { ok: false, diagnostics: [{ code: "OUT_OF_RANGE", path: "pull", message: PULL_NEEDS_RUN }] };
     }
 
-    const ball = currentScene.bodies.find((body) => body.id === bodyId);
+    const ball = world.bodies.find((body) => body.id === bodyId);
 
     if (ball === undefined) {
       return { ok: false, diagnostics: [{ code: "UNKNOWN_ENTITY_ID", path: "pull.bodyId", message: `Body "${bodyId}" does not exist.`, entityId: bodyId }] };
@@ -666,269 +810,197 @@ export function createLabController(options: LabControllerOptions): EngineResult
     return result.ok ? { ok: true } : result;
   }
 
-  // Accept environment starting conditions without changing the active engine.
-  function updateEnvironment(environment: SceneDefinition["environment"]): EngineResult<SceneDefinition> {
+  function missingEntity(path: string, entityId: string): EngineResult<never> {
+    return { ok: false, diagnostics: [{ code: "UNKNOWN_ENTITY_ID", path, message: `"${entityId}" does not exist.`, entityId }] };
+  }
+
+  function wrongKind(path: string, entityId: string, message: string): EngineResult<never> {
+    return { ok: false, diagnostics: [{ code: "INVALID_BODY_KIND", path, message, entityId }] };
+  }
+
+  // At tick 0 an edit replaces the start in the same engine; while paused mid-run it is queued for the next boundary.
+  function applySceneEdit<T extends { readonly scene: SceneDefinition }>(
+    build: (base: SceneDefinition) => EngineResult<T>,
+    relaunchBodyId?: string,
+  ): EngineResult<T> {
     const status = pausedAuthoringStatus();
 
     if (!status.ok) {
       return status;
     }
 
-    const nextScene = updateEnvironmentInScene(currentScene, environment);
-    const validationResult = validateScene(nextScene);
+    const snapshotResult = currentEngine.getSnapshot();
 
-    if (!validationResult.ok) {
-      return validationResult;
+    if (!snapshotResult.ok) {
+      return snapshotResult;
     }
 
-    currentScene = structuredClone(nextScene);
+    const tick = snapshotResult.value.tick;
+    let base = world;
 
-    return {
-      ok: true,
-      value: structuredClone(currentScene),
-    };
+    // Mid-run edits start from the paused state itself, or from the edits already queued at this pause.
+    if (tick > 0) {
+      const sceneResult = preview === null ? currentEngine.copyScene() : { ok: true as const, value: preview };
+
+      if (!sceneResult.ok) {
+        return sceneResult;
+      }
+
+      base = sceneResult.value;
+    }
+
+    const built = build(base);
+
+    if (!built.ok) {
+      return built;
+    }
+
+    const nextScene = built.value.scene;
+
+    if (tick === 0) {
+      const result = currentEngine.setInitialScene(nextScene);
+
+      if (!result.ok) {
+        return result;
+      }
+
+      start = structuredClone(nextScene);
+      world = structuredClone(nextScene);
+      startEdited = true;
+      rememberIds(nextScene);
+      scenePublishDue = true;
+      const publishStatus = publishCurrentSnapshot();
+
+      if (!publishStatus.ok) {
+        return publishStatus;
+      }
+
+      publishReadout(true);
+      return { ok: true, value: structuredClone(built.value) };
+    }
+
+    const payloads = runCommandsFor(base, nextScene, relaunchBodyId);
+
+    for (const payload of payloads) {
+      const result = queueRunEdit(payload);
+
+      if (!result.ok) {
+        return result;
+      }
+
+      // Even a partly queued edit changes the world at the boundary, so refresh it then.
+      queuedForTick = tick;
+    }
+
+    if (payloads.length > 0) {
+      preview = structuredClone(nextScene);
+      rememberIds(nextScene);
+      consumeScene?.(sceneView(), snapshotResult.value);
+    }
+
+    return { ok: true, value: structuredClone(built.value) };
   }
 
-  // Validate, then keep one copy and return another.
-  function acceptSceneChange(sceneChange: SceneDraftChange): EngineResult<SceneDraftChange> {
-    const validationResult = validateScene(sceneChange.scene);
+  function setStartingScene(scene: SceneDefinition): EngineResult<SceneDefinition> {
+    const status = pausedAuthoringStatus();
 
-    if (!validationResult.ok) {
-      return validationResult;
+    if (!status.ok) {
+      return status;
     }
 
-    currentScene = structuredClone(sceneChange.scene);
+    const snapshotResult = currentEngine.getSnapshot();
 
-    return {
-      ok: true,
-      value: structuredClone(sceneChange),
-    };
+    if (snapshotResult.ok && snapshotResult.value.tick > 0) {
+      const resetStatus = reset();
+
+      if (!resetStatus.ok) {
+        return resetStatus;
+      }
+    }
+
+    const result = applySceneEdit(() => ({ ok: true, value: { scene } }));
+    return result.ok ? { ok: true, value: result.value.scene } : result;
+  }
+
+  function updateEnvironment(environment: SceneDefinition["environment"]): EngineResult<SceneDefinition> {
+    const result = applySceneEdit((base) => ({ ok: true, value: { scene: updateEnvironmentInScene(base, environment) } }));
+    return result.ok ? { ok: true, value: result.value.scene } : result;
   }
 
   function placeEntity(request: PlacementRequest): EngineResult<SceneDraftChange> {
-    const status = pausedAuthoringStatus();
-
-    if (!status.ok) {
-      return status;
-    }
-
-    return acceptSceneChange(placeEntityInScene(currentScene, request));
+    return applySceneEdit((base) => ({ ok: true, value: placeEntityInScene(base, request, usedIds) }));
   }
+
   function updateProjectileProperties(
     projectileId: string,
     properties: ProjectilePlacementProperties,
+    options: { readonly relaunch?: boolean } = {},
   ): EngineResult<SceneDraftChange> {
-    // Accept starting-scene changes only while this controller is active and paused.
-    const status = pausedAuthoringStatus();
-
-    if (!status.ok) {
-      return status;
-    }
-
-    const selectedBody = currentScene.bodies.find(
-      (body) => body.id === projectileId,
-    );
-
-    if (selectedBody === undefined) {
+    if (!Number.isFinite(properties.launchSpeedMetersPerSecond) || properties.launchSpeedMetersPerSecond < 0) {
       return {
         ok: false,
-        diagnostics: [
-          {
-            code: "UNKNOWN_ENTITY_ID",
-            path: "projectileId",
-            message: `Body "${projectileId}" does not exist.`,
-            entityId: projectileId,
-          },
-        ],
+        diagnostics: [{ code: "OUT_OF_RANGE", path: "properties.launchSpeedMetersPerSecond", message: "Launch speed must be a number of 0 or more.", entityId: projectileId }],
       };
     }
 
-    if (selectedBody.kind !== "dynamic") {
-      return {
-        ok: false,
-        diagnostics: [
-          {
-            code: "INVALID_BODY_KIND",
-            path: "projectileId",
-            message: "These settings only apply to a ball.",
-            entityId: projectileId,
-          },
-        ],
-      };
-    }
+    return applySceneEdit<SceneDraftChange>((base) => {
+      const selectedBody = base.bodies.find((body) => body.id === projectileId);
 
-    if (
-      !Number.isFinite(properties.launchSpeedMetersPerSecond) ||
-      properties.launchSpeedMetersPerSecond < 0
-    ) {
-      return {
-        ok: false,
-        diagnostics: [
-          {
-            code: "OUT_OF_RANGE",
-            path: "properties.launchSpeedMetersPerSecond",
-            message: "Launch speed must be a number of 0 or more.",
-            entityId: projectileId,
-          },
-        ],
-      };
-    }
+      if (selectedBody === undefined) {
+        return missingEntity("projectileId", projectileId);
+      }
 
-    const sceneChange = updateProjectileInScene(
-      currentScene,
-      projectileId,
-      properties,
-    );
+      if (selectedBody.kind !== "dynamic") {
+        return wrongKind("projectileId", projectileId, "These settings only apply to a ball.");
+      }
 
-    return acceptSceneChange(sceneChange);
+      return { ok: true, value: updateProjectileInScene(base, projectileId, properties) };
+    }, options.relaunch === true ? projectileId : undefined);
   }
-  function updateStaticBodyProperties(
-    bodyId: string,
-    properties: RampPlacementProperties,
-  ): EngineResult<SceneDraftChange> {
-    // Accept starting-scene changes only while this controller is active and paused.
-    const status = pausedAuthoringStatus();
 
-    if (!status.ok) {
-      return status;
-    }
+  function updateStaticBodyProperties(bodyId: string, properties: RampPlacementProperties): EngineResult<SceneDraftChange> {
+    return applySceneEdit<SceneDraftChange>((base) => {
+      const selectedBody = base.bodies.find((body) => body.id === bodyId);
 
-    const selectedBody = currentScene.bodies.find((body) => body.id === bodyId);
+      if (selectedBody === undefined) {
+        return missingEntity("bodyId", bodyId);
+      }
 
-    if (selectedBody === undefined) {
-      return {
-        ok: false,
-        diagnostics: [
-          {
-            code: "UNKNOWN_ENTITY_ID",
-            path: "bodyId",
-            message: `Body "${bodyId}" does not exist.`,
-            entityId: bodyId,
-          },
-        ],
-      };
-    }
+      if (selectedBody.kind !== "static") {
+        return wrongKind("bodyId", bodyId, "These settings only apply to a platform, ramp or ground.");
+      }
 
-    if (selectedBody.kind !== "static") {
-      return {
-        ok: false,
-        diagnostics: [
-          {
-            code: "INVALID_BODY_KIND",
-            path: "bodyId",
-            message: "These settings only apply to a platform, ramp or ground.",
-            entityId: bodyId,
-          },
-        ],
-      };
-    }
-
-    const sceneChange = updateStaticBodyInScene(
-      currentScene,
-      bodyId,
-      properties,
-    );
-
-    return acceptSceneChange(sceneChange);
+      return { ok: true, value: updateStaticBodyInScene(base, bodyId, properties) };
+    });
   }
-  function updateTargetProperties(
-    targetId: string,
-    properties: TargetPlacementProperties,
-  ): EngineResult<SceneDraftChange> {
-    // Accept starting-scene changes only while this controller is active and paused.
-    const status = pausedAuthoringStatus();
 
-    if (!status.ok) {
-      return status;
-    }
-
-    const selectedTarget = currentScene.triggers.find(
-      (trigger) => trigger.id === targetId,
-    );
-
-    if (selectedTarget === undefined) {
-      return {
-        ok: false,
-        diagnostics: [
-          {
-            code: "UNKNOWN_ENTITY_ID",
-            path: "targetId",
-            message: `Target "${targetId}" does not exist.`,
-            entityId: targetId,
-          },
-        ],
-      };
-    }
-
-    const sceneChange = updateTargetInScene(currentScene, targetId, properties);
-
-    return acceptSceneChange(sceneChange);
+  function updateTargetProperties(targetId: string, properties: TargetPlacementProperties): EngineResult<SceneDraftChange> {
+    return applySceneEdit<SceneDraftChange>((base) => base.triggers.some((trigger) => trigger.id === targetId)
+      ? { ok: true, value: updateTargetInScene(base, targetId, properties) }
+      : missingEntity("targetId", targetId));
   }
-  function moveEntityWhilePaused(
-    entityId: string,
-    positionMeters: Vector2,
-  ): EngineResult<SceneDraftChange> {
-    // Accept starting-scene changes only while this controller is active and paused.
-    const status = pausedAuthoringStatus();
 
-    if (!status.ok) {
-      return status;
-    }
-
-    const entityExists =
-      currentScene.bodies.some((body) => body.id === entityId) ||
-      currentScene.triggers.some((trigger) => trigger.id === entityId);
-
-    if (!entityExists) {
-      return {
-        ok: false,
-        diagnostics: [
-          {
-            code: "UNKNOWN_ENTITY_ID",
-            path: "entityId",
-            message: `Entity "${entityId}" does not exist.`,
-            entityId,
-          },
-        ],
-      };
-    }
-
-    const sceneChange = moveEntityInScene(
-      currentScene,
-      entityId,
-      positionMeters,
-    );
-
-    return acceptSceneChange(sceneChange);
+  function hasEntity(scene: SceneDefinition, entityId: string): boolean {
+    return scene.bodies.some((body) => body.id === entityId) || scene.triggers.some((trigger) => trigger.id === entityId);
   }
+
+  function moveEntityWhilePaused(entityId: string, positionMeters: Vector2): EngineResult<SceneDraftChange> {
+    return applySceneEdit<SceneDraftChange>((base) => hasEntity(base, entityId)
+      ? { ok: true, value: moveEntityInScene(base, entityId, positionMeters) }
+      : missingEntity("entityId", entityId));
+  }
+
   function deleteEntity(entityId: string): EngineResult<SceneDraftChange> {
-    // Accept starting-scene changes only while this controller is active and paused.
-    const status = pausedAuthoringStatus();
+    const result = applySceneEdit<SceneDraftChange>((base) => hasEntity(base, entityId)
+      ? { ok: true, value: deleteEntityFromScene(base, entityId) }
+      : missingEntity("entityId", entityId));
 
-    if (!status.ok) {
-      return status;
+    // The engine ends a removed ball's pull; forget it here too.
+    if (result.ok && activePull?.bodyId === entityId) {
+      activePull = null;
     }
 
-    const entityExists =
-      currentScene.bodies.some((body) => body.id === entityId) ||
-      currentScene.triggers.some((trigger) => trigger.id === entityId);
-
-    if (!entityExists) {
-      return {
-        ok: false,
-        diagnostics: [
-          {
-            code: "UNKNOWN_ENTITY_ID",
-            path: "entityId",
-            message: `Entity "${entityId}" does not exist.`,
-            entityId,
-          },
-        ],
-      };
-    }
-
-    const sceneChange = deleteEntityFromScene(currentScene, entityId);
-    return acceptSceneChange(sceneChange);
+    return result;
   }
 
   const removeVisibilityListener = playbackBrowser?.subscribeVisibilityChange(handleVisibilityChange);
@@ -953,7 +1025,8 @@ export function createLabController(options: LabControllerOptions): EngineResult
       copySnapshot: () => engine.copySnapshot(),
       reset,
       dispose,
-      copyScene: () => structuredClone(currentScene),
+      copyScene: () => structuredClone(world),
+      setStartingScene,
       updateEnvironment,
       placeEntity,
       updateProjectileProperties,

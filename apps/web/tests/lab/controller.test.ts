@@ -1,6 +1,6 @@
 import { expect, it, vi } from "vitest";
 import type { Snapshot } from "@eureka/contracts";
-import type { Engine, EngineResult } from "@eureka/engine";
+import { validateScene, type Engine, type EngineResult } from "@eureka/engine";
 import { createLabController, type LabController, type PlaybackBrowser, type PlaybackState } from "../../src/lab/controller.js";
 import { PROJECTILE_LAB_MOCK } from "../../src/lab/mocks.js";
 import {
@@ -48,6 +48,12 @@ function createPlaybackHarness(playbackBrowser?: PlaybackBrowser) {
       return { ok: true };
     }),
     dispose: vi.fn<Engine["dispose"]>(() => ({ ok: true })),
+    copyScene: vi.fn<Engine["copyScene"]>(() => ({ ok: true, value: structuredClone(scene) })),
+    // Accept a start edit exactly when the real engine would.
+    setInitialScene: vi.fn<Engine["setInitialScene"]>((next) => {
+      const validation = validateScene(next);
+      return validation.ok ? { ok: true } : validation;
+    }),
   } satisfies Engine;
 
   const releaseView = vi.fn();

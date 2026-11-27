@@ -1,4 +1,4 @@
-import type { DynamicBody, SceneDefinition, Snapshot, SnapshotEvent, StaticBody, Vector2 } from "@eureka/contracts";
+import type { Body, DynamicBody, SceneDefinition, Snapshot, SnapshotEvent, StaticBody, TargetTrigger, Vector2 } from "@eureka/contracts";
 
 import {
   Application,
@@ -47,6 +47,8 @@ const MAXIMUM_TRAIL_SAMPLES = 3600;
 
 interface RenderItem {
   readonly kind: "body" | "target";
+  // Changes only when the object must be redrawn from scratch.
+  readonly visualKey: string;
   readonly graphic: Container;
   positionMeters: Vector2;
   angleRadians: number;
@@ -87,7 +89,10 @@ export interface LabRenderer {
   updateSnapshot(snapshot: Snapshot): void;
   updateRunEvents(events: readonly SnapshotEvent[]): void;
   // Replace an authored scene without replacing the mounted canvas.
+  // A new simulation source: redraw everything and fit the view.
   updateScene(scene: SceneDefinition, snapshot: Snapshot): void;
+  // The same source after an edit, boundary or Reset: keep unchanged graphics and the trail.
+  updateWorld(scene: SceneDefinition, preview: SceneDefinition | null, start: SceneDefinition, snapshot: Snapshot): void;
   dispose(): void;
 }
 
@@ -96,29 +101,23 @@ interface TrailSample {
   readonly tick: number;
   readonly positionsMeters: ReadonlyMap<string, Vector2>;
 }
-function createRenderItems(
-  scene: SceneDefinition,
-  snapshot: Snapshot,
-): readonly RenderItem[] {
-  const ballIds = scene.bodies.filter((body) => body.kind === "dynamic").map((body) => body.id);
+function visualKey(entity: Body | TargetTrigger, colourIndex: number): string {
+  return JSON.stringify(entity.kind === "dynamic"
+    ? [entity.kind, entity.shape, entity.massKilograms, entity.material, colourIndex]
+    : entity.kind === "static" ? [entity.kind, entity.shape, entity.material] : [entity.kind, entity.shape]);
+}
 
-  return [...scene.triggers, ...scene.bodies].map((entity) => {
-    const pose = entity.kind === "target"
-      ? entity.pose
-      : snapshot.bodies.find((body) => body.id === entity.id)?.pose;
-    if (pose === undefined) {
-      throw new Error(`Snapshot omitted scene body "${entity.id}".`);
-    }
-    const visual = createEntityVisual(entity, ballIds.indexOf(entity.id));
-    return {
-      kind: entity.kind === "target" ? "target" : "body",
-      graphic: visual.graphic,
-      positionMeters: pose.positionMeters,
-      angleRadians: pose.angleRadians,
-      entityId: entity.id,
-      updateAppearance: visual.update,
-    };
-  });
+function createRenderItem(entity: Body | TargetTrigger, pose: Body["pose"], colourIndex: number): RenderItem {
+  const visual = createEntityVisual(entity, colourIndex);
+  return {
+    kind: entity.kind === "target" ? "target" : "body",
+    visualKey: visualKey(entity, colourIndex),
+    graphic: visual.graphic,
+    positionMeters: { ...pose.positionMeters },
+    angleRadians: pose.angleRadians,
+    entityId: entity.id,
+    updateAppearance: visual.update,
+  };
 }
 
 function isGroundPlane(body: SceneDefinition["bodies"][number]): body is StaticBody {
@@ -215,7 +214,13 @@ export function mountLabRenderer(
   // Keep an owned snapshot for later camera and selection redraws.
   // Keep the accepted scene available to drawing and selection.
   let currentScene = structuredClone(scene);
+  // What Reset restores; the ideal prediction starts from here.
+  let startScene = currentScene;
+  // The world once queued edits apply; while paused it is drawn in place of the run's world.
+  let previewScene: SceneDefinition | null = null;
   let currentSnapshot = structuredClone(snapshot);
+  // A ball keeps its colour for the whole source, even when other balls are removed.
+  const ballColours = new Map<string, number>();
   const application = new Application();
   let disposed = false;
   let initialized = false;
@@ -370,10 +375,28 @@ export function mountLabRenderer(
   }
 
   // Use the same selected dynamic body for every projectile-only overlay.
+  function colourIndex(entityId: string): number {
+    let index = ballColours.get(entityId);
+
+    if (index === undefined) {
+      index = ballColours.size;
+      ballColours.set(entityId, index);
+    }
+
+    return index;
+  }
+
+  function shownScene(): SceneDefinition {
+    return previewScene ?? currentScene;
+  }
+
+  // Bodies stand where the snapshot puts them, unless a paused edit moved them.
+  function shownPose(entity: Body | TargetTrigger): Body["pose"] | undefined {
+    return previewScene !== null || entity.kind === "target" ? entity.pose : currentSnapshot.bodies.find((body) => body.id === entity.id)?.pose;
+  }
+
   function getSelectedProjectile(selectedEntityId: string | null) {
-    return currentScene.bodies.find(
-      (body) => body.id === selectedEntityId && body.kind === "dynamic",
-    );
+    return shownScene().bodies.find((body): body is DynamicBody => body.id === selectedEntityId && body.kind === "dynamic");
   }
 
   // Ideal flight from the starting conditions, up to the formula landing time.
@@ -383,18 +406,22 @@ export function mountLabRenderer(
   ): void {
     predictionGraphic.clear();
 
-    if (!predictionGraphic.visible || selectedProjectile === undefined || selectedProjectile.kind !== "dynamic") {
+    if (!predictionGraphic.visible || selectedProjectile === undefined) {
       return;
     }
 
     const screenPoints: Vector2[] = [];
     const intervalCount = 100;
-    const flightTimeSeconds = idealLandingTimeSeconds(currentScene, selectedProjectile);
+    // The reference flight starts from the start's launch; a ball added during the run has only its current state.
+    const startBall = startScene.bodies.find((body): body is DynamicBody => body.id === selectedProjectile.id && body.kind === "dynamic");
+    const referenceScene = startBall === undefined ? currentScene : startScene;
+    const referenceBall = startBall ?? selectedProjectile;
+    const flightTimeSeconds = idealLandingTimeSeconds(referenceScene, referenceBall);
 
     // Calculate 101 independent positions, including both endpoints.
     for (let index = 0; index <= intervalCount; index += 1) {
       const timeSeconds = flightTimeSeconds * index / intervalCount;
-      const point = worldToScreen(idealPositionMeters(currentScene, selectedProjectile, timeSeconds), viewport);
+      const point = worldToScreen(idealPositionMeters(referenceScene, referenceBall, timeSeconds), viewport);
       screenPoints.push(point);
 
       if (index === 0) {
@@ -445,7 +472,7 @@ export function mountLabRenderer(
     const waitTicks = Math.round(TRAIL_AFTER_CONTACT_SECONDS / currentScene.numericalProfile.fixedTimeStepSeconds);
     const firstTick = trailSamples[0]?.tick ?? 0;
 
-    for (const [ballIndex, ball] of balls.entries()) {
+    for (const ball of balls) {
       const trailPoints: Vector2[] = [];
       // Erasing starts a few seconds after the first touch and moves forward one tick per tick.
       const contactTick = runEvents.find((event) => event.kind === "groundContact" && event.bodyId === ball.id)?.tick;
@@ -473,7 +500,7 @@ export function mountLabRenderer(
         trailGraphic.lineTo(point.x, point.y);
       }
 
-      trailGraphic.stroke({ color: ballPigment(ballIndex).edge, width: 1.7, alpha: 0.86, cap: "round", join: "round" });
+      trailGraphic.stroke({ color: ballPigment(colourIndex(ball.id)).edge, width: 1.7, alpha: 0.86, cap: "round", join: "round" });
     }
   }
 
@@ -523,14 +550,7 @@ export function mountLabRenderer(
       return;
     }
 
-    let snapshotBody;
-
-    for (const body of currentSnapshot.bodies) {
-      if (body.id === selectedProjectile.id) {
-        snapshotBody = body;
-        break;
-      }
-    }
+    const snapshotBody = previewScene !== null ? selectedProjectile : currentSnapshot.bodies.find((body) => body.id === selectedProjectile.id);
 
     if (snapshotBody === undefined) {
       return;
@@ -616,7 +636,7 @@ export function mountLabRenderer(
 
     const balls = currentScene.bodies.filter((body) => body.kind === "dynamic");
 
-    for (const [ballIndex, ball] of balls.entries()) {
+    for (const ball of balls) {
       const velocity = ball.velocity.linearMetersPerSecond;
       const speed = Math.hypot(velocity.x, velocity.y);
 
@@ -628,7 +648,7 @@ export function mountLabRenderer(
       const start = worldToScreen(ball.pose.positionMeters, viewport);
       // Screen y points down, so the velocity's y is flipped.
       const tip = { x: start.x + velocity.x / speed * lengthPixels, y: start.y - velocity.y / speed * lengthPixels };
-      drawVelocityArrow(launchGraphic, start, tip, 1.5, ballPigment(ballIndex).edge);
+      drawVelocityArrow(launchGraphic, start, tip, 1.5, ballPigment(colourIndex(ball.id)).edge);
     }
   }
 
@@ -751,21 +771,18 @@ export function mountLabRenderer(
     }
   }
 
-  // Apply an authored revision without another asynchronous Pixi initialization.
+  // A new simulation source replaces every graphic and is fitted to the view.
   function updateScene(nextScene: SceneDefinition, nextSnapshot: Snapshot): void {
     if (disposed) {
       return;
     }
 
-    // A different or reloaded scene (a question, challenge or restored setup) is fitted; an edit keeps the view.
-    // Edits only raise the revision, so a lower one means the scene was loaded again.
-    if (nextScene.id !== currentScene.id || nextScene.revision < currentScene.revision) {
-      fitPending = true;
-    }
-
+    fitPending = true;
     currentScene = structuredClone(nextScene);
+    startScene = currentScene;
+    previewScene = null;
+    ballColours.clear();
     currentSnapshot = structuredClone(nextSnapshot);
-    // A new starting scene begins a new path at its own tick zero.
     trailSamples = [];
     recordTrailSample(currentSnapshot);
 
@@ -779,7 +796,39 @@ export function mountLabRenderer(
       return;
     }
 
-    rebuildRenderItems();
+    for (const item of renderItems.values()) {
+      item.graphic.destroy({ children: true });
+    }
+
+    renderItems.clear();
+    syncRenderItems();
+    resizeAndRender();
+  }
+
+  // Same source, changed world: the trail, camera and unchanged graphics stay.
+  function updateWorld(nextScene: SceneDefinition, nextPreview: SceneDefinition | null, nextStart: SceneDefinition, nextSnapshot: Snapshot): void {
+    if (disposed) {
+      return;
+    }
+
+    currentScene = structuredClone(nextScene);
+    previewScene = nextPreview === null ? null : structuredClone(nextPreview);
+    startScene = structuredClone(nextStart);
+    currentSnapshot = structuredClone(nextSnapshot);
+
+    if (dragState !== null && !hasEntity(currentScene, dragState.entityId)) {
+      dragState = null;
+    }
+
+    if (pullState !== null && !hasEntity(currentScene, pullState.entityId)) {
+      pullState = null;
+    }
+
+    if (!initialized) {
+      return;
+    }
+
+    syncRenderItems();
     resizeAndRender();
   }
 
@@ -794,7 +843,9 @@ export function mountLabRenderer(
     if (!initialized) {
       return;
     }
-    for (const item of renderItems.values()) {
+
+    // Paused edits stay where the learner put them until their tick runs.
+    for (const item of previewScene === null ? renderItems.values() : []) {
       if (item.kind === "body") {
         const body = nextSnapshot.bodies.find(
           (candidate) => candidate.id === item.entityId,
@@ -1047,37 +1098,69 @@ export function mountLabRenderer(
     application.stage.setChildIndex(item.graphic, overlayIndex - 1);
   }
 
-  // Replace authoring graphics synchronously inside the existing application.
-  function rebuildRenderItems(): void {
-    const nextItems = createRenderItems(
-      currentScene,
-      currentSnapshot,
-    );
+  function hasEntity(scene: SceneDefinition, entityId: string): boolean {
+    return scene.bodies.some((body) => body.id === entityId) || scene.triggers.some((trigger) => trigger.id === entityId);
+  }
+
+  // Add, redraw or remove only the objects whose drawing changed; move the rest.
+  function syncRenderItems(): void {
+    const scene = shownScene();
+    const entities = [...scene.triggers, ...scene.bodies];
+    const keptIds = new Set(entities.map((entity) => entity.id));
 
     for (const item of renderItems.values()) {
-      item.graphic.destroy({ children: true });
+      if (!keptIds.has(item.entityId)) {
+        removeItem(item);
+      }
     }
 
-    renderItems.clear();
+    for (const entity of entities) {
+      const existing = renderItems.get(entity.id);
+      const colour = entity.kind === "dynamic" ? colourIndex(entity.id) : 0;
+      const pose = shownPose(entity);
 
-    for (const item of nextItems) {
-      renderItems.set(item.entityId, item);
-      item.graphic.cursor = "pointer";
+      if (pose === undefined) {
+        throw new Error(`Snapshot omitted scene body "${entity.id}".`);
+      }
 
-      item.graphic.on("pointerdown", (event: FederatedPointerEvent) => {
-        handleItemPointerDown(item, event);
-      });
+      if (existing !== undefined && existing.visualKey === visualKey(entity, colour)) {
+        existing.positionMeters = { ...pose.positionMeters };
+        existing.angleRadians = pose.angleRadians;
+        continue;
+      }
 
-      item.graphic.on("pointerup", finishDrag);
-      item.graphic.on("pointerupoutside", finishDrag);
-      item.graphic.on("pointercancel", cancelPointerDrag);
+      if (existing !== undefined) {
+        removeItem(existing);
+      }
 
-      // Keep rebuilt bodies beneath both velocity overlays.
-      const overlayIndex = application.stage.getChildIndex(horizontalVelocityGraphic);
-      application.stage.addChildAt(item.graphic, overlayIndex);
+      addItem(createRenderItem(entity, pose, colour));
     }
 
     raiseSelected();
+  }
+
+  function addItem(item: RenderItem): void {
+    renderItems.set(item.entityId, item);
+    item.graphic.cursor = "pointer";
+
+    item.graphic.on("pointerdown", (event: FederatedPointerEvent) => {
+      handleItemPointerDown(item, event);
+    });
+
+    item.graphic.on("pointerup", finishDrag);
+    item.graphic.on("pointerupoutside", finishDrag);
+    item.graphic.on("pointercancel", cancelPointerDrag);
+
+    // Keep bodies beneath both velocity overlays.
+    const overlayIndex = application.stage.getChildIndex(horizontalVelocityGraphic);
+    application.stage.addChildAt(item.graphic, overlayIndex);
+  }
+
+  // The removal may come from this item's own pointer handler, so destroy it after the event finishes.
+  function removeItem(item: RenderItem): void {
+    renderItems.delete(item.entityId);
+    item.graphic.removeFromParent();
+    queueMicrotask(() => item.graphic.destroy({ children: true }));
   }
 
   function fitScene(): void {
@@ -1200,7 +1283,7 @@ export function mountLabRenderer(
       horizontalVelocityGraphic, verticalVelocityGraphic, velocityGraphic, pullGraphic,
     );
     application.stage.addChildAt(background, 0);
-    rebuildRenderItems();
+    syncRenderItems();
     application.stage.eventMode = "static";
     application.stage.on("globalpointermove", previewDrag);
     application.stage.on("pointerdowncapture", (event) => {
@@ -1355,6 +1438,7 @@ export function mountLabRenderer(
     updateSnapshot,
     updateRunEvents,
     updateScene,
+    updateWorld,
     dispose,
   };
 }

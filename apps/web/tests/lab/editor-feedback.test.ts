@@ -15,7 +15,7 @@ it.each([
     displayedSnapshot: PROJECTILE_LAB_MOCK.snapshot,
     editableScene: PROJECTILE_LAB_MOCK.scene,
     selectedEntityId: entityId,
-    setEditableScene: () => {},
+    queuedForTick: null,
   }));
 
   expect(html).toContain('aria-label="Edit X position"');
@@ -37,7 +37,7 @@ it("keeps coordinate controls unavailable while playback is running", () => {
     editableScene: PROJECTILE_LAB_MOCK.scene,
     selectedEntityId: "projectile",
     playing: true,
-    setEditableScene: () => {},
+    queuedForTick: null,
   }));
 
   expect(html).not.toContain('name="edit-position-x"');
@@ -53,7 +53,7 @@ it("explains how to select an object when the inspector has no selection", () =>
     displayedSnapshot: PROJECTILE_LAB_MOCK.snapshot,
     editableScene: PROJECTILE_LAB_MOCK.scene,
     selectedEntityId: null,
-    setEditableScene: () => {},
+    queuedForTick: null,
   }));
 
   expect(html).toContain("No object selected");
@@ -68,7 +68,7 @@ it("identifies a missing selected object without offering a property edit", () =
     displayedSnapshot: PROJECTILE_LAB_MOCK.snapshot,
     editableScene: PROJECTILE_LAB_MOCK.scene,
     selectedEntityId: "removed-projectile",
-    setEditableScene: () => {},
+    queuedForTick: null,
   }));
 
   expect(html).toContain("Object no longer exists");
