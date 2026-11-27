@@ -82,8 +82,8 @@ export function surfaceContactGeometry(circle: MovingCircleState, surface: Stati
   };
 }
 
-// Find the first projectile whose starting position overlaps a static body.
-export function findInitialSurfaceOverlap(bodies: readonly Body[]): InitialSurfaceOverlap | undefined {
+// Find the first projectile whose starting position overlaps a static body; with changedIds, only pairs involving a changed body.
+export function findInitialSurfaceOverlap(bodies: readonly Body[], changedIds?: ReadonlySet<string>): InitialSurfaceOverlap | undefined {
   const surfaces = bodies
     .filter((body): body is StaticBody => body.kind === "static")
     .sort((left, right) => left.id.localeCompare(right.id));
@@ -102,6 +102,10 @@ export function findInitialSurfaceOverlap(bodies: readonly Body[]): InitialSurfa
     };
 
     for (const surface of surfaces) {
+      if (changedIds !== undefined && !changedIds.has(body.id) && !changedIds.has(surface.id)) {
+        continue;
+      }
+
       const geometry = surfaceContactGeometry(circle, surface);
 
       if (geometry.clearanceMeters < -CONTACT_TOLERANCE_METERS) {

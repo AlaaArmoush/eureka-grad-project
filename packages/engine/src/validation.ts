@@ -1,4 +1,4 @@
-import type { Body, Command, Material, SceneDefinition, Vector2 } from "@eureka/contracts";
+import type { Body, BoxShape, CircleShape, Command, Material, SceneDefinition, TargetTrigger, Vector2 } from "@eureka/contracts";
 import { failure, type EngineFailure, type EngineResult } from "./diagnostics.js";
 
 // Contact geometry owns cross-body circle/static-box overlap checks.
@@ -71,9 +71,46 @@ function validateMaterial(material: Material, path: string): EngineFailure | und
       : undefined);
 }
 
+function validateShape(shape: CircleShape | BoxShape, path: string): EngineFailure | undefined {
+  return shape.kind === "circle"
+    ? checkPositive(shape.radiusMeters, `${path}.radiusMeters`)
+    : checkPositive(shape.widthMeters, `${path}.widthMeters`) ?? checkPositive(shape.heightMeters, `${path}.heightMeters`);
+}
+
+// Checks every body needs before its ID is compared with the others.
+function validateBodyCommon(body: Body, path: string): EngineFailure | undefined {
+  return checkId(body.id, `${path}.id`) ??
+    validateMaterial(body.material, `${path}.material`) ??
+    validateVector(body.pose.positionMeters, `${path}.pose.positionMeters`) ??
+    checkFinite(body.pose.angleRadians, `${path}.pose.angleRadians`);
+}
+
+function validateBodyKind(body: Body, path: string): EngineFailure | undefined {
+  if (body.kind === "static") {
+    return validateShape(body.shape, `${path}.shape`);
+  }
+
+  return validateShape(body.shape, `${path}.shape`) ??
+    checkPositive(body.massKilograms, `${path}.massKilograms`) ??
+    validateVector(body.velocity.linearMetersPerSecond, `${path}.velocity.linearMetersPerSecond`) ??
+    checkFinite(body.velocity.angularRadiansPerSecond, `${path}.velocity.angularRadiansPerSecond`);
+}
+
+function validateTarget(target: TargetTrigger, path: string): EngineFailure | undefined {
+  return checkId(target.id, `${path}.id`) ??
+    checkPositive(target.shape.radiusMeters, `${path}.shape.radiusMeters`) ??
+    validateVector(target.pose.positionMeters, `${path}.pose.positionMeters`) ??
+    checkFinite(target.pose.angleRadians, `${path}.pose.angleRadians`);
+}
+
+function validateEnvironment(environment: SceneDefinition["environment"], path: string): EngineFailure | undefined {
+  return validateVector(environment.gravityMetersPerSecondSquared, `${path}.gravityMetersPerSecondSquared`) ??
+    checkNonnegative(environment.linearDragKilogramsPerSecond, `${path}.linearDragKilogramsPerSecond`);
+}
+
 // Reject a proposed placement that starts a projectile inside a static body.
-export function validateBodyPlacements(bodies: readonly Body[]): EngineFailure | undefined {
-  const initialOverlap = findInitialSurfaceOverlap(bodies);
+export function validateBodyPlacements(bodies: readonly Body[], changedIds?: ReadonlySet<string>): EngineFailure | undefined {
+  const initialOverlap = findInitialSurfaceOverlap(bodies, changedIds);
 
   if (initialOverlap === undefined) {
     return undefined;
@@ -112,14 +149,7 @@ export function validateScene(scene: SceneDefinition): EngineResult<SceneDefinit
       scene.numericalProfile.scales.timeSeconds,
       "numericalProfile.scales.timeSeconds"
     ) ??
-    validateVector(
-      scene.environment.gravityMetersPerSecondSquared,
-      "environment.gravityMetersPerSecondSquared"
-    ) ??
-    checkNonnegative(
-      scene.environment.linearDragKilogramsPerSecond,
-      "environment.linearDragKilogramsPerSecond"
-    );
+    validateEnvironment(scene.environment, "environment");
 
   if (sceneFailure !== undefined) {
     return sceneFailure;
@@ -129,11 +159,7 @@ export function validateScene(scene: SceneDefinition): EngineResult<SceneDefinit
 
   for (const [bodyIndex, body] of scene.bodies.entries()) {
     const bodyPath = `bodies[${bodyIndex}]`;
-    const bodyFailure =
-      checkId(body.id, `${bodyPath}.id`) ??
-      validateMaterial(body.material, `${bodyPath}.material`) ??
-      validateVector(body.pose.positionMeters, `${bodyPath}.pose.positionMeters`) ??
-      checkFinite(body.pose.angleRadians, `${bodyPath}.pose.angleRadians`);
+    const bodyFailure = validateBodyCommon(body, bodyPath);
 
     if (bodyFailure !== undefined) {
       return bodyFailure;
@@ -150,19 +176,7 @@ export function validateScene(scene: SceneDefinition): EngineResult<SceneDefinit
 
     entityIds.add(body.id);
 
-    const kindFailure = body.kind === "dynamic"
-      ? checkPositive(body.shape.radiusMeters, `${bodyPath}.shape.radiusMeters`) ??
-      checkPositive(body.massKilograms, `${bodyPath}.massKilograms`) ??
-      validateVector(
-        body.velocity.linearMetersPerSecond,
-        `${bodyPath}.velocity.linearMetersPerSecond`
-      ) ??
-      checkFinite(
-        body.velocity.angularRadiansPerSecond,
-        `${bodyPath}.velocity.angularRadiansPerSecond`
-      )
-      : checkPositive(body.shape.widthMeters, `${bodyPath}.shape.widthMeters`) ??
-      checkPositive(body.shape.heightMeters, `${bodyPath}.shape.heightMeters`);
+    const kindFailure = validateBodyKind(body, bodyPath);
 
     if (kindFailure !== undefined) {
       return kindFailure;
@@ -171,14 +185,7 @@ export function validateScene(scene: SceneDefinition): EngineResult<SceneDefinit
 
   for (const [triggerIndex, trigger] of scene.triggers.entries()) {
     const triggerPath = `triggers[${triggerIndex}]`;
-    const triggerFailure =
-      checkId(trigger.id, `${triggerPath}.id`) ??
-      checkPositive(trigger.shape.radiusMeters, `${triggerPath}.shape.radiusMeters`) ??
-      validateVector(
-        trigger.pose.positionMeters,
-        `${triggerPath}.pose.positionMeters`
-      ) ??
-      checkFinite(trigger.pose.angleRadians, `${triggerPath}.pose.angleRadians`);
+    const triggerFailure = validateTarget(trigger, triggerPath);
 
     if (triggerFailure !== undefined) {
       return triggerFailure;
@@ -265,6 +272,10 @@ export function validateCommand(command: Command): EngineFailure | undefined {
         }
       }
 
+      if (changes.shape !== undefined) {
+        return validateShape(changes.shape, "payload.changes.shape");
+      }
+
       return undefined;
     }
 
@@ -308,5 +319,24 @@ export function validateCommand(command: Command): EngineFailure | undefined {
 
     case "endForceInteraction":
       return checkId(payload.interactionId, "payload.interactionId");
+
+    case "addEntity":
+      return payload.entity.kind === "target"
+        ? validateTarget(payload.entity, "payload.entity")
+        : validateBodyCommon(payload.entity, "payload.entity") ?? validateBodyKind(payload.entity, "payload.entity");
+
+    case "removeEntity":
+      return checkId(payload.entityId, "payload.entityId");
+
+    case "editTarget":
+      return checkId(payload.targetId, "payload.targetId") ??
+        (payload.changes.pose === undefined
+          ? undefined
+          : validateVector(payload.changes.pose.positionMeters, "payload.changes.pose.positionMeters") ??
+            checkFinite(payload.changes.pose.angleRadians, "payload.changes.pose.angleRadians")) ??
+        (payload.changes.shape === undefined ? undefined : validateShape(payload.changes.shape, "payload.changes.shape"));
+
+    case "setEnvironment":
+      return validateEnvironment(payload.environment, "payload.environment");
   }
 }

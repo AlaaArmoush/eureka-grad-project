@@ -77,6 +77,33 @@ export function collectInsideTargetPairs(bodies: readonly MutableBodyState[], ta
   return pairs;
 }
 
+// Recompute membership for pairs involving changed bodies or targets without emitting entry events, as at creation.
+export function refreshTargetMembership(
+  pairs: Set<string>, bodies: readonly MutableBodyState[], targets: readonly TargetTrigger[], changedIds: ReadonlySet<string>
+): void {
+  for (const pairKey of Array.from(pairs)) {
+    const [bodyId, targetId] = JSON.parse(pairKey) as [string, string];
+
+    if (changedIds.has(bodyId) || changedIds.has(targetId)) {
+      pairs.delete(pairKey);
+    }
+  }
+
+  for (const body of bodies) {
+    if (body.kind !== "dynamic") {
+      continue;
+    }
+
+    const circle = movingCircleState(body);
+
+    for (const target of targets) {
+      if ((changedIds.has(body.id) || changedIds.has(target.id)) && isCircleInsideTarget(circle, target)) {
+        pairs.add(targetPairKey(body.id, target.id));
+      }
+    }
+  }
+}
+
 // Translate a draft body's fields into the existing smooth-motion solver input.
 function smoothMotion(body: MutableDynamicBody, timeStepSeconds: number, settings: StepSettings, interactions: readonly ForceInteraction[]) {
   return integrateSmoothMotion({
