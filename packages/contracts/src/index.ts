@@ -145,6 +145,7 @@ export interface EditBodyCommand {
     readonly material?: Material;
     readonly pose?: Pose;
     readonly velocity?: Velocity;
+    readonly shape?: CircleShape | BoxShape;
   };
 }
 
@@ -163,7 +164,6 @@ export interface SetForceInteractionCommand {
   readonly targetPositionMeters: Vector2;
   readonly stiffnessNewtonsPerMeter: number;
   readonly dampingKilogramsPerSecond: number;
-  // Positive finite magnitude limit; omission uses 100 M L / T² from the scene scales.
   readonly maximumForceNewtons?: number;
 }
 
@@ -172,11 +172,39 @@ export interface EndForceInteractionCommand {
   readonly interactionId: string;
 }
 
+export interface AddEntityCommand {
+  readonly kind: "addEntity";
+  readonly entity: Body | TargetTrigger;
+}
+
+export interface RemoveEntityCommand {
+  readonly kind: "removeEntity";
+  readonly entityId: string;
+}
+
+export interface EditTargetCommand {
+  readonly kind: "editTarget";
+  readonly targetId: string;
+  readonly changes: {
+    readonly pose?: Pose;
+    readonly shape?: CircleShape;
+  };
+}
+
+export interface SetEnvironmentCommand {
+  readonly kind: "setEnvironment";
+  readonly environment: SceneDefinition["environment"];
+}
+
 export type CommandPayload =
   | EditBodyCommand
   | LaunchBodyCommand
   | SetForceInteractionCommand
-  | EndForceInteractionCommand;
+  | EndForceInteractionCommand
+  | AddEntityCommand
+  | RemoveEntityCommand
+  | EditTargetCommand
+  | SetEnvironmentCommand;
 
 export interface Command {
   readonly commandVersion: 1;

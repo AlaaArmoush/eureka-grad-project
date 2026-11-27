@@ -105,7 +105,7 @@ export function describeDiagnostic(diagnostic: Diagnostic): string {
 
   switch (diagnostic.code) {
     case "INVALID_INITIAL_OVERLAP":
-      return "A ball can't start inside a solid object. Move it to an empty spot.";
+      return "A ball and a solid object can't overlap. Move it to an empty spot.";
     case "NONFINITE_NUMBER":
       return `${field ?? "Each value"} must be a number.`;
     case "OUT_OF_RANGE":
@@ -126,6 +126,10 @@ export function describeDiagnostic(diagnostic: Diagnostic): string {
       return "That change only works on a ball.";
     case "DUPLICATE_ENTITY_ID":
       return "Two objects ended up with the same name. Undo the last change and try again.";
+    case "RUN_IN_PROGRESS":
+      return "The run has started. Press Reset to change the starting scene.";
+    case "SOURCE_CHANGED":
+      return "That setup belongs to a different scene. Open it from Curriculum or Challenges instead.";
     case "DISPOSED_ENGINE":
       return "The lab was closed. Open it again to continue.";
     case "NONFINITE_STATE":

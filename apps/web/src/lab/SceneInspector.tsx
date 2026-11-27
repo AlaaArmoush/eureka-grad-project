@@ -32,7 +32,7 @@ export function SceneInspector({ onClose, ...props }: ComponentProps<typeof Prop
     : Math.atan2(gravity.y, gravity.x) * 180 / Math.PI;
   const [environmentError, setEnvironmentError] = useState<{ scope: string; message: string } | null>(null);
 
-  // Commit friendly environment inputs through the existing new-run boundary.
+  // At tick 0 this changes the start; while paused mid-run it is queued for the next tick.
   function applyEnvironment(formElement: HTMLFormElement): void {
     const form = new FormData(formElement);
     const read = (name: string) => String(form.get(name) ?? "").trim();
@@ -94,7 +94,6 @@ export function SceneInspector({ onClose, ...props }: ComponentProps<typeof Prop
     }
 
     setEnvironmentError(null);
-    props.setEditableScene(result.value);
   }
 
   return (
@@ -124,8 +123,7 @@ export function SceneInspector({ onClose, ...props }: ComponentProps<typeof Prop
         <button id="inspector-tab-display" type="button" role="tab" aria-selected={activeTab === "display"} aria-controls="inspector-display" tabIndex={activeTab === "display" ? 0 : -1} onClick={() => setActiveTab("display")}><Eye size={13} />Display</button>
       </div>
       <div id="inspector-properties" role="tabpanel" aria-labelledby="inspector-tab-properties" hidden={activeTab !== "properties"}>
-        {/* start: tick 0 / run: tick greater than 0 */}
-        <PropertiesPanel key={props.displayedSnapshot.tick === 0 ? "start" : "run"} {...props} />
+        <PropertiesPanel {...props} />
         <footer className="inspector-footer"><span>Object ID</span><code>{props.selectedEntityId ?? "—"}</code></footer>
       </div>
       <div id="inspector-environment" role="tabpanel" aria-labelledby="inspector-tab-environment" hidden={activeTab !== "environment"}>
@@ -150,7 +148,7 @@ export function SceneInspector({ onClose, ...props }: ComponentProps<typeof Prop
             )}
             <div className="property-editor-inline__actions">
               <button type="reset">Cancel</button>
-              <button type="submit" disabled={props.playing ?? false}>Apply as new run</button>
+              <button type="submit" disabled={props.playing ?? false}>Apply</button>
             </div>
           </form>
         </section>

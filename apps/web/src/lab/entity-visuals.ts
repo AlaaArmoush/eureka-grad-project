@@ -19,6 +19,8 @@ export function createEntityVisual(entity: Body | TargetTrigger, ballIndex = 0) 
   graphic.addChild(selection, geometry, caption);
   let paintKey = "";
   let lastCaptionColor: number = color;
+  let hitScale = Number.NaN;
+  let hitAngle = Number.NaN;
 
   // For a target used as a challenge zone, `entry` is the zone and its state; otherwise it says whether a ball has entered it this run.
   function update(scale: number, angle: number, selected: boolean, entry: boolean | ChallengeZoneView, labels: boolean, position: Vector2, viewportWidth: number, viewportHeight: number, moveMode: boolean): void {
@@ -66,19 +68,24 @@ export function createEntityVisual(entity: Body | TargetTrigger, ballIndex = 0) 
     // Only the geometry rotates. Labels and their pixel offsets remain upright.
     geometry.rotation = selection.rotation = -angle;
     graphic.position.set(position.x, position.y);
-    if (shape.kind === "circle") {
-      graphic.hitArea = new Circle(0, 0, shape.radiusMeters * scale);
-    } else {
-      const x = shape.widthMeters * scale / 2;
-      const y = shape.heightMeters * scale / 2;
-      const cosine = Math.cos(angle);
-      const sine = Math.sin(angle);
-      graphic.hitArea = new Polygon([
-        -x * cosine - y * sine, x * sine - y * cosine,
-        x * cosine - y * sine, -x * sine - y * cosine,
-        x * cosine + y * sine, -x * sine + y * cosine,
-        -x * cosine + y * sine, x * sine + y * cosine,
-      ]);
+    if (scale !== hitScale || angle !== hitAngle) {
+      hitScale = scale;
+      hitAngle = angle;
+
+      if (shape.kind === "circle") {
+        graphic.hitArea = new Circle(0, 0, shape.radiusMeters * scale);
+      } else {
+        const x = shape.widthMeters * scale / 2;
+        const y = shape.heightMeters * scale / 2;
+        const cosine = Math.cos(angle);
+        const sine = Math.sin(angle);
+        graphic.hitArea = new Polygon([
+          -x * cosine - y * sine, x * sine - y * cosine,
+          x * cosine - y * sine, -x * sine - y * cosine,
+          x * cosine + y * sine, -x * sine + y * cosine,
+          -x * cosine + y * sine, x * sine + y * cosine,
+        ]);
+      }
     }
     caption.text = zone !== undefined ? zone.zone.label + (entered ? " ✓" : "") : name;
     const captionColor = entity.kind === "target" ? targetPaint.ink : color;

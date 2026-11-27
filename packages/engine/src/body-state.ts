@@ -17,7 +17,7 @@ interface MutableBodyBase {
 // Keep each projectile's measurement reference with its engine-owned state.
 export interface MutableDynamicBody extends MutableBodyBase {
   readonly kind: "dynamic";
-  readonly shape: { readonly kind: "circle"; readonly radiusMeters: number; };
+  shape: { readonly kind: "circle"; readonly radiusMeters: number; };
   massKilograms: number;
   flight: {
     readonly launchTick: number;
@@ -28,13 +28,13 @@ export interface MutableDynamicBody extends MutableBodyBase {
 
 export interface MutableStaticBody extends MutableBodyBase {
   readonly kind: "static";
-  readonly shape: { readonly kind: "box"; readonly widthMeters: number; readonly heightMeters: number; };
+  shape: { readonly kind: "box"; readonly widthMeters: number; readonly heightMeters: number; };
 }
 
 export type MutableBodyState = MutableDynamicBody | MutableStaticBody;
 
 // Create engine-owned body data without retaining scene references.
-export function createMutableBody(body: Body): MutableBodyState {
+export function createMutableBody(body: Body, launchTick = 0): MutableBodyState {
   const sharedState = {
     id: body.id,
     material: { ...body.material },
@@ -51,7 +51,7 @@ export function createMutableBody(body: Body): MutableBodyState {
       shape: { ...body.shape },
       massKilograms: body.massKilograms,
       flight: {
-        launchTick: 0,
+        launchTick,
         launchPositionXMeters: body.pose.positionMeters.x,
         firstContactTimeSeconds: undefined
       },
@@ -105,4 +105,29 @@ export function cloneBodies(bodies: readonly MutableBodyState[]): MutableBodySta
       shape: { ...body.shape }
     };
   });
+}
+
+// Describe engine-owned state as a portable scene body.
+export function describeBody(body: MutableBodyState): Body {
+  const pose = {
+    positionMeters: { ...body.pose.positionMeters },
+    angleRadians: body.pose.angleRadians
+  };
+
+  if (body.kind === "dynamic") {
+    return {
+      id: body.id,
+      kind: "dynamic",
+      shape: { ...body.shape },
+      massKilograms: body.massKilograms,
+      material: { ...body.material },
+      pose,
+      velocity: {
+        linearMetersPerSecond: { ...body.velocity.linearMetersPerSecond },
+        angularRadiansPerSecond: body.velocity.angularRadiansPerSecond
+      }
+    };
+  }
+
+  return { id: body.id, kind: "static", shape: { ...body.shape }, material: { ...body.material }, pose };
 }

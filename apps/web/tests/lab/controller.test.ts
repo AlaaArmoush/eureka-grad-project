@@ -1,10 +1,10 @@
 import { expect, it, vi } from "vitest";
 import type { Snapshot } from "@eureka/contracts";
-import type { Engine, EngineResult } from "@eureka/engine";
+import { validateScene, type Engine, type EngineResult } from "@eureka/engine";
 import { createLabController, type LabController, type PlaybackBrowser, type PlaybackState } from "../../src/lab/controller.js";
 import { PROJECTILE_LAB_MOCK } from "../../src/lab/mocks.js";
 import {
-  DEFAULT_PROJECTILE_PROPERTIES, DEFAULT_RAMP_PROPERTIES, DEFAULT_TARGET_PROPERTIES,
+  DEFAULT_PLATFORM_PROPERTIES, DEFAULT_PROJECTILE_PROPERTIES, DEFAULT_RAMP_PROPERTIES, DEFAULT_TARGET_PROPERTIES,
 } from "../../src/lab/authoring.js";
 
 function createPlaybackHarness(playbackBrowser?: PlaybackBrowser) {
@@ -48,6 +48,12 @@ function createPlaybackHarness(playbackBrowser?: PlaybackBrowser) {
       return { ok: true };
     }),
     dispose: vi.fn<Engine["dispose"]>(() => ({ ok: true })),
+    copyScene: vi.fn<Engine["copyScene"]>(() => ({ ok: true, value: structuredClone(scene) })),
+    // Accept a start edit exactly when the real engine would.
+    setInitialScene: vi.fn<Engine["setInitialScene"]>((next) => {
+      const validation = validateScene(next);
+      return validation.ok ? { ok: true } : validation;
+    }),
   } satisfies Engine;
 
   const releaseView = vi.fn();
@@ -613,10 +619,10 @@ it("does not publish readouts during or after disposal", () => {
 
 // Physical authoring during playback must be rejected before any starting-scene mutation.
 it.each([
-  { name: "projectile placement", edit: (c: LabController) => c.placeProjectile({ x: 20, y: 20 }) },
-  { name: "platform placement", edit: (c: LabController) => c.placePlatform({ x: 20, y: 20 }) },
-  { name: "ramp placement", edit: (c: LabController) => c.placeRamp({ x: 20, y: 20 }) },
-  { name: "target placement", edit: (c: LabController) => c.placeTarget({ x: 20, y: 20 }) },
+  { name: "projectile placement", edit: (c: LabController) => c.placeEntity({ entityKind: "projectile", projectileProperties: DEFAULT_PROJECTILE_PROPERTIES, positionMeters: { x: 20, y: 20 } }) },
+  { name: "platform placement", edit: (c: LabController) => c.placeEntity({ entityKind: "platform", platformProperties: DEFAULT_PLATFORM_PROPERTIES, positionMeters: { x: 20, y: 20 } }) },
+  { name: "ramp placement", edit: (c: LabController) => c.placeEntity({ entityKind: "ramp", rampProperties: DEFAULT_RAMP_PROPERTIES, positionMeters: { x: 20, y: 20 } }) },
+  { name: "target placement", edit: (c: LabController) => c.placeEntity({ entityKind: "target", targetProperties: DEFAULT_TARGET_PROPERTIES, positionMeters: { x: 20, y: 20 } }) },
   { name: "projectile properties", edit: (c: LabController) => c.updateProjectileProperties("projectile", DEFAULT_PROJECTILE_PROPERTIES) },
   { name: "static body properties", edit: (c: LabController) => c.updateStaticBodyProperties("ramp", DEFAULT_RAMP_PROPERTIES) },
   { name: "target properties", edit: (c: LabController) => c.updateTargetProperties("target", DEFAULT_TARGET_PROPERTIES) },

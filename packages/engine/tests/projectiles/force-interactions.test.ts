@@ -353,14 +353,15 @@ describe("running force interactions", () => {
       const launch: Command = { commandVersion: 1, id: "launch", targetTick: 24, payload: launchPayload };
       unwrap(engine.enqueue(launch));
       unwrap(engine.enqueue({ commandVersion: 1, id: "end", targetTick: 24, payload: { kind: "endForceInteraction", interactionId: "pointer" } }));
-      unwrap(engine.advance(1));
-      const relaunched = unwrap(engine.copySnapshot());
-      expect(interactionWork(relaunched)).toBe(interactionWork(moving));
+      // Queued a tick early so the overlap is found only when tick 25 runs.
       unwrap(engine.enqueue(interactionCommand("restart-pull", 25)));
       unwrap(engine.enqueue({
         ...launch, id: "overlap", targetTick: 25,
         payload: { ...launchPayload, positionMeters: { x: 20, y: -0.01 } }
       }));
+      unwrap(engine.advance(1));
+      const relaunched = unwrap(engine.copySnapshot());
+      expect(interactionWork(relaunched)).toBe(interactionWork(moving));
       const rejected = engine.advance(1);
       expect(rejected.ok).toBe(false);
       expect(unwrap(engine.copySnapshot())).toEqual(relaunched);
