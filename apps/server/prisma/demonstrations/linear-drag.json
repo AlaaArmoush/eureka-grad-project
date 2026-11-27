@@ -1,0 +1,139 @@
+{
+  "schemaVersion": 1,
+  "id": "linear-drag",
+  "revision": 2,
+  "topic": "projectiles",
+  "order": 2,
+  "title": "Air resistance",
+  "question": "What changes when air resistance is added?",
+  "summary": "The same 20 m/s, 30° launch with and without a drag force that pushes against the motion, F = −b·v.",
+  "prediction": {
+    "prompt": "Compared with no drag, what will strong drag (b = 0.5 kg/s) do to the flight?",
+    "choices": [
+      "Longer range, higher peak",
+      "Shorter range, lower peak",
+      "No change"
+    ],
+    "answerIndex": 1,
+    "reason": "Drag opposes the velocity all the time, so the ball loses speed in both directions. It rises less and travels less far. The path is no longer a parabola."
+  },
+  "lookFor": "The drag path is shorter and steeper on the way down. Try mass 0.1 kg: acceleration from drag is (b/m)·v, so a light ball is slowed far more than a 10 kg one.",
+  "scenarioReference": "S01-02 / D01-02 / A01-02",
+  "primary": {
+    "key": "drag",
+    "label": "Drag coefficient b",
+    "options": [
+      {
+        "value": "0",
+        "label": "None"
+      },
+      {
+        "value": "0.1",
+        "label": "0.1 kg/s"
+      },
+      {
+        "value": "0.5",
+        "label": "0.5 kg/s"
+      }
+    ]
+  },
+  "reference": "0",
+  "comparison": "0.5",
+  "shared": [
+    {
+      "key": "mass",
+      "label": "Mass",
+      "options": [
+        {
+          "value": "0.1",
+          "label": "0.1 kg"
+        },
+        {
+          "value": "1",
+          "label": "1 kg"
+        },
+        {
+          "value": "10",
+          "label": "10 kg"
+        }
+      ]
+    }
+  ],
+  "sharedDefaults": {
+    "mass": "1"
+  },
+  "overlays": {
+    "trail": true,
+    "velocity": true,
+    "components": true,
+    "prediction": false,
+    "events": true,
+    "grid": true,
+    "labels": false
+  },
+  "scene": {
+    "id": "linear-drag-b{drag}-m{mass}",
+    "seed": 17,
+    "numericalProfile": {
+      "fixedTimeStepSeconds": 0.016666666666666666,
+      "substeps": 1,
+      "scales": {
+        "lengthMeters": 1,
+        "massKilograms": 1,
+        "timeSeconds": 1
+      }
+    },
+    "gravityStrengthMetersPerSecondSquared": 9.81,
+    "linearDragKilogramsPerSecond": {
+      "parameter": "drag",
+      "scale": 1,
+      "offset": 0
+    },
+    "bodies": [
+      {
+        "kind": "static",
+        "id": "default-ground",
+        "widthMeters": 1200,
+        "heightMeters": 0.5,
+        "restitution": 0,
+        "positionMeters": {
+          "x": 0,
+          "y": -0.75
+        },
+        "angleDegrees": 0
+      },
+      {
+        "kind": "dynamic",
+        "id": "projectile-1",
+        "radiusMeters": 0.5,
+        "massKilograms": {
+          "parameter": "mass",
+          "scale": 1,
+          "offset": 0
+        },
+        "restitution": 0,
+        "positionMeters": {
+          "x": 0,
+          "y": 0
+        },
+        "launchSpeedMetersPerSecond": 20,
+        "launchAngleDegrees": 30
+      }
+    ]
+  },
+  "framing": {
+    "flight": {
+      "kind": "level",
+      "speedMetersPerSecond": 20,
+      "angleDegrees": 30,
+      "gravityMetersPerSecondSquared": 9.81
+    },
+    "marginsMeters": {
+      "left": 2,
+      "right": 2,
+      "bottom": 1.5,
+      "top": 1.5
+    },
+    "pixelsPerMeter": 40
+  }
+}

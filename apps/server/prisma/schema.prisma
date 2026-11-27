@@ -71,3 +71,36 @@ model Verification {
   @@index([identifier])
   @@map("verification")
 }
+
+model Challenge {
+  id         String
+  revision   Int
+  topic      String
+  level      String
+  published  Boolean  @default(false)
+  definition Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@id([id, revision])
+  @@index([topic, published])
+  @@map("challenge")
+}
+
+// One stored Curriculum question per id and revision; the definition is plain data checked by the shared demonstration check.
+model Demonstration {
+  id         String
+  revision   Int
+  topic      String
+  // Position in its topic's question list, from 1.
+  position   Int
+  published  Boolean  @default(false)
+  definition Json
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@id([id, revision])
+  @@index([topic, published])
+  @@map("demonstration")
+}
+

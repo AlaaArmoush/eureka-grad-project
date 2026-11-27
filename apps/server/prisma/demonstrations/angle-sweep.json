@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 1,
+  "id": "angle-sweep",
+  "revision": 2,
+  "topic": "projectiles",
+  "order": 4,
+  "title": "Best angle",
+  "question": "Does aiming higher always send the ball farther?",
+  "summary": "Two launches at the same speed from the ground, at different angles.",
+  "prediction": {
+    "prompt": "Which launch angle gives the longer range, 30° or 45°?",
+    "choices": [
+      "30°",
+      "45°",
+      "They are equal"
+    ],
+    "answerIndex": 1,
+    "reason": "On level ground R = v²·sin(2θ)/g, which is greatest at 45°. A lower angle wastes speed sideways too early; a higher one spends it going up."
+  },
+  "lookFor": "Range peaks at 45°. Now try 75°: it goes much higher but lands nearer than 45°, and it takes longer.",
+  "scenarioReference": "S01-04 / D01-04 / A01-04",
+  "primary": {
+    "key": "angle",
+    "label": "Launch angle",
+    "options": [
+      {
+        "value": "15",
+        "label": "15°"
+      },
+      {
+        "value": "30",
+        "label": "30°"
+      },
+      {
+        "value": "45",
+        "label": "45°"
+      },
+      {
+        "value": "60",
+        "label": "60°"
+      },
+      {
+        "value": "75",
+        "label": "75°"
+      }
+    ]
+  },
+  "reference": "30",
+  "comparison": "45",
+  "shared": [
+    {
+      "key": "speed",
+      "label": "Launch speed",
+      "options": [
+        {
+          "value": "10",
+          "label": "10 m/s"
+        },
+        {
+          "value": "20",
+          "label": "20 m/s"
+        },
+        {
+          "value": "30",
+          "label": "30 m/s"
+        }
+      ]
+    }
+  ],
+  "sharedDefaults": {
+    "speed": "20"
+  },
+  "overlays": {
+    "trail": true,
+    "velocity": true,
+    "components": true,
+    "prediction": false,
+    "events": true,
+    "grid": true,
+    "labels": false
+  },
+  "scene": {
+    "id": "angle-sweep-a{angle}-v{speed}",
+    "seed": 17,
+    "numericalProfile": {
+      "fixedTimeStepSeconds": 0.016666666666666666,
+      "substeps": 1,
+      "scales": {
+        "lengthMeters": 1,
+        "massKilograms": 1,
+        "timeSeconds": 1
+      }
+    },
+    "gravityStrengthMetersPerSecondSquared": 9.81,
+    "linearDragKilogramsPerSecond": 0,
+    "bodies": [
+      {
+        "kind": "static",
+        "id": "default-ground",
+        "widthMeters": 1200,
+        "heightMeters": 0.5,
+        "restitution": 0,
+        "positionMeters": {
+          "x": 0,
+          "y": -0.75
+        },
+        "angleDegrees": 0
+      },
+      {
+        "kind": "dynamic",
+        "id": "projectile-1",
+        "radiusMeters": 0.5,
+        "massKilograms": 1,
+        "restitution": 0,
+        "positionMeters": {
+          "x": 0,
+          "y": 0
+        },
+        "launchSpeedMetersPerSecond": {
+          "parameter": "speed",
+          "scale": 1,
+          "offset": 0
+        },
+        "launchAngleDegrees": {
+          "parameter": "angle",
+          "scale": 1,
+          "offset": 0
+        }
+      }
+    ]
+  },
+  "framing": {
+    "flight": {
+      "kind": "level",
+      "speedMetersPerSecond": {
+        "parameter": "speed",
+        "scale": 1,
+        "offset": 0
+      },
+      "angleDegrees": {
+        "parameter": "angle",
+        "scale": 1,
+        "offset": 0
+      },
+      "gravityMetersPerSecondSquared": 9.81
+    },
+    "marginsMeters": {
+      "left": 2,
+      "right": 2,
+      "bottom": 1.5,
+      "top": 1.5
+    },
+    "pixelsPerMeter": 40
+  }
+}

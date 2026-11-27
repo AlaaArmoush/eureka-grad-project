@@ -1,0 +1,164 @@
+{
+  "schemaVersion": 1,
+  "id": "complementary-angles",
+  "revision": 2,
+  "topic": "projectiles",
+  "order": 5,
+  "title": "Same landing spot",
+  "question": "Can two different launch angles land in the same place?",
+  "summary": "Each setup fires two balls at the same speed. Their angles add up to 90°.",
+  "prediction": {
+    "prompt": "In each pair, how will the two balls land?",
+    "choices": [
+      "Same place, same time",
+      "Same place, different times",
+      "Different places"
+    ],
+    "answerIndex": 1,
+    "reason": "R = v²·sin(2θ)/g and sin(2θ) = sin(2(90° − θ)), so complementary angles share a range. The steeper ball rises higher and stays in the air longer."
+  },
+  "lookFor": "Within each pair the two balls land at the same distance, but the steeper one takes longer and goes higher. Compare 15°/75° with 30°/60°.",
+  "scenarioReference": "S01-05 / D01-05 / A01-05",
+  "primary": {
+    "key": "angle",
+    "label": "Shallow angle of the pair",
+    "options": [
+      {
+        "value": "15",
+        "label": "15° and 75°"
+      },
+      {
+        "value": "30",
+        "label": "30° and 60°"
+      }
+    ]
+  },
+  "reference": "15",
+  "comparison": "30",
+  "shared": [
+    {
+      "key": "speed",
+      "label": "Launch speed",
+      "options": [
+        {
+          "value": "10",
+          "label": "10 m/s"
+        },
+        {
+          "value": "20",
+          "label": "20 m/s"
+        },
+        {
+          "value": "30",
+          "label": "30 m/s"
+        }
+      ]
+    }
+  ],
+  "sharedDefaults": {
+    "speed": "20"
+  },
+  "overlays": {
+    "trail": true,
+    "velocity": true,
+    "components": true,
+    "prediction": false,
+    "events": true,
+    "grid": true,
+    "labels": false
+  },
+  "scene": {
+    "id": "complementary-a{angle}-v{speed}",
+    "seed": 17,
+    "numericalProfile": {
+      "fixedTimeStepSeconds": 0.016666666666666666,
+      "substeps": 1,
+      "scales": {
+        "lengthMeters": 1,
+        "massKilograms": 1,
+        "timeSeconds": 1
+      }
+    },
+    "gravityStrengthMetersPerSecondSquared": 9.81,
+    "linearDragKilogramsPerSecond": 0,
+    "bodies": [
+      {
+        "kind": "static",
+        "id": "default-ground",
+        "widthMeters": 1200,
+        "heightMeters": 0.5,
+        "restitution": 0,
+        "positionMeters": {
+          "x": 0,
+          "y": -0.75
+        },
+        "angleDegrees": 0
+      },
+      {
+        "kind": "dynamic",
+        "id": "projectile-1",
+        "radiusMeters": 0.5,
+        "massKilograms": 1,
+        "restitution": 0,
+        "positionMeters": {
+          "x": 0,
+          "y": 0
+        },
+        "launchSpeedMetersPerSecond": {
+          "parameter": "speed",
+          "scale": 1,
+          "offset": 0
+        },
+        "launchAngleDegrees": {
+          "parameter": "angle",
+          "scale": 1,
+          "offset": 0
+        }
+      },
+      {
+        "kind": "dynamic",
+        "id": "projectile-2",
+        "radiusMeters": 0.5,
+        "massKilograms": 1,
+        "restitution": 0,
+        "positionMeters": {
+          "x": 0,
+          "y": 0
+        },
+        "launchSpeedMetersPerSecond": {
+          "parameter": "speed",
+          "scale": 1,
+          "offset": 0
+        },
+        "launchAngleDegrees": {
+          "parameter": "angle",
+          "scale": -1,
+          "offset": 90
+        }
+      }
+    ]
+  },
+  "framing": {
+    "flight": {
+      "kind": "level",
+      "speedMetersPerSecond": {
+        "parameter": "speed",
+        "scale": 1,
+        "offset": 0
+      },
+      "angleDegrees": {
+        "parameter": "angle",
+        "scale": -1,
+        "offset": 90
+      },
+      "gravityMetersPerSecondSquared": 9.81
+    },
+    "marginsMeters": {
+      "left": 2,
+      "right": 2,
+      "bottom": 1.5,
+      "top": 1.5
+    },
+    "pixelsPerMeter": 40
+  }
+}

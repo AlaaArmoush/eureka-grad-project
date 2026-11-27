@@ -1,6 +1,8 @@
 import express from "express";
 import { toNodeHandler } from "better-auth/node";
 import { auth, prisma } from "./auth.ts";
+import { challengeRoutes } from "./challenges.ts";
+import { demonstrationRoutes } from "./demonstrations.ts";
 
 const host = "127.0.0.1";
 const port = 3000;
@@ -9,6 +11,9 @@ const app = express();
 app.all("/api/auth/*splat", toNodeHandler(auth));
 
 app.use(express.json());
+
+app.use("/api/v1/challenges", challengeRoutes);
+app.use("/api/v1/demos", demonstrationRoutes);
 
 app.get("/health", async (_request, response) => {
   await prisma.$queryRaw`SELECT 1`;

@@ -1,0 +1,616 @@
+{
+  "schemaVersion": 1,
+  "id": "thread-the-canyon",
+  "revision": 4,
+  "topic": "projectiles",
+  "level": "independent",
+  "title": "Thread the canyon",
+  "briefing": "Supplies must cross a canyon and land on the sloped platform. Only one kind of arc clears the near wall and stops short of the far wall.",
+  "scene": {
+    "schemaVersion": 1,
+    "id": "thread-the-canyon",
+    "revision": 1,
+    "seed": 17,
+    "numericalProfile": {
+      "fixedTimeStepSeconds": 0.016666666666666666,
+      "substeps": 1,
+      "scales": {
+        "lengthMeters": 1,
+        "massKilograms": 1,
+        "timeSeconds": 1
+      }
+    },
+    "environment": {
+      "gravityMetersPerSecondSquared": {
+        "x": 0,
+        "y": -9.81
+      },
+      "linearDragKilogramsPerSecond": 0
+    },
+    "bodies": [
+      {
+        "id": "launch-ledge",
+        "kind": "static",
+        "shape": {
+          "kind": "box",
+          "widthMeters": 4,
+          "heightMeters": 3.75
+        },
+        "material": {
+          "restitution": 0
+        },
+        "pose": {
+          "positionMeters": {
+            "x": -2,
+            "y": -2.125
+          },
+          "angleRadians": 0
+        }
+      },
+      {
+        "id": "canyon-floor",
+        "kind": "static",
+        "shape": {
+          "kind": "box",
+          "widthMeters": 16,
+          "heightMeters": 1
+        },
+        "material": {
+          "restitution": 0
+        },
+        "pose": {
+          "positionMeters": {
+            "x": 8,
+            "y": -4.5
+          },
+          "angleRadians": 0
+        }
+      },
+      {
+        "id": "near-wall",
+        "kind": "static",
+        "shape": {
+          "kind": "box",
+          "widthMeters": 0.5,
+          "heightMeters": 5
+        },
+        "material": {
+          "restitution": 0
+        },
+        "pose": {
+          "positionMeters": {
+            "x": 3.6,
+            "y": -1.5
+          },
+          "angleRadians": 0
+        }
+      },
+      {
+        "id": "landing-ramp",
+        "kind": "static",
+        "shape": {
+          "kind": "box",
+          "widthMeters": 3.312883777312265,
+          "heightMeters": 0.5
+        },
+        "material": {
+          "restitution": 0
+        },
+        "pose": {
+          "positionMeters": {
+            "x": 8.12940952255126,
+            "y": 1.6606306263044472
+          },
+          "angleRadians": 0.2617993877991494
+        }
+      },
+      {
+        "id": "far-wall",
+        "kind": "static",
+        "shape": {
+          "kind": "box",
+          "widthMeters": 0.5,
+          "heightMeters": 11
+        },
+        "material": {
+          "restitution": 0
+        },
+        "pose": {
+          "positionMeters": {
+            "x": 10,
+            "y": 1.5
+          },
+          "angleRadians": 0
+        }
+      },
+      {
+        "id": "capsule",
+        "kind": "dynamic",
+        "shape": {
+          "kind": "circle",
+          "radiusMeters": 0.25
+        },
+        "massKilograms": 1,
+        "material": {
+          "restitution": 0
+        },
+        "pose": {
+          "positionMeters": {
+            "x": 0,
+            "y": 0
+          },
+          "angleRadians": 0
+        },
+        "velocity": {
+          "linearMetersPerSecond": {
+            "x": 6.553216354311934,
+            "y": 4.588611490808368
+          },
+          "angularRadiansPerSecond": 0
+        }
+      }
+    ],
+    "triggers": [
+      {
+        "id": "gap",
+        "kind": "target",
+        "shape": {
+          "kind": "circle",
+          "radiusMeters": 0.6
+        },
+        "pose": {
+          "positionMeters": {
+            "x": 3.6,
+            "y": 2.4
+          },
+          "angleRadians": 0
+        }
+      },
+      {
+        "id": "landing-strip",
+        "kind": "target",
+        "shape": {
+          "kind": "circle",
+          "radiusMeters": 0.45
+        },
+        "pose": {
+          "positionMeters": {
+            "x": 7.398236190979496,
+            "y": 2.189406648869678
+          },
+          "angleRadians": 0
+        }
+      },
+      {
+        "id": "canyon-floor-target",
+        "kind": "target",
+        "shape": {
+          "kind": "circle",
+          "radiusMeters": 1
+        },
+        "pose": {
+          "positionMeters": {
+            "x": 5,
+            "y": -3.25
+          },
+          "angleRadians": 0
+        }
+      }
+    ]
+  },
+  "projectileId": "capsule",
+  "view": {
+    "centerWorldMeters": {
+      "x": 3.5,
+      "y": 0.6000000000000001
+    },
+    "widthMeters": 17.28,
+    "heightMeters": 10.8,
+    "pixelsPerMeter": 40
+  },
+  "overlays": {
+    "trail": true,
+    "velocity": false,
+    "components": false,
+    "prediction": false,
+    "events": true,
+    "grid": true,
+    "labels": true
+  },
+  "runLimitSeconds": 6,
+  "attemptEnds": "allZonesReached",
+  "editable": [
+    {
+      "property": "launchSpeed",
+      "bodyId": "capsule",
+      "label": "Launch speed",
+      "unit": "m/s",
+      "minimum": 8,
+      "maximum": 12,
+      "step": 0.1
+    },
+    {
+      "property": "launchAngle",
+      "bodyId": "capsule",
+      "label": "Launch angle",
+      "unit": "°",
+      "minimum": 35,
+      "maximum": 55,
+      "step": 0.1
+    }
+  ],
+  "locked": [
+    {
+      "property": "mass",
+      "bodyId": "capsule",
+      "label": "Capsule mass",
+      "unit": "kg",
+      "value": 1,
+      "reason": "Mass is fixed at 1 kg."
+    },
+    {
+      "property": "gravity",
+      "bodyId": null,
+      "label": "Gravity",
+      "unit": "m/s²",
+      "value": 9.81,
+      "reason": "Gravity is Earth's."
+    },
+    {
+      "property": "linearDrag",
+      "bodyId": null,
+      "label": "Air resistance b",
+      "unit": "kg/s",
+      "value": 0,
+      "reason": "There is no air resistance."
+    }
+  ],
+  "measurements": [
+    {
+      "id": "crossingDistance",
+      "label": "Distance at the ramp",
+      "unit": "m",
+      "decimals": 2,
+      "quantity": "contactDistance",
+      "onSurfaces": [
+        "landing-ramp"
+      ]
+    },
+    {
+      "id": "crossingTime",
+      "label": "Time at the ramp",
+      "unit": "s",
+      "decimals": 2,
+      "quantity": "contactTime",
+      "onSurfaces": [
+        "landing-ramp"
+      ]
+    }
+  ],
+  "objective": {
+    "summary": "Clear the near wall and come down on the lit part of the ramp, 7.0 to 7.9 m from the rail, within 0.8 to 1.3 s.",
+    "criteria": [
+      {
+        "id": "range",
+        "measurement": "crossingDistance",
+        "label": "Distance at the ramp",
+        "minimum": 7,
+        "maximum": 7.9,
+        "uncertainty": 0.02
+      },
+      {
+        "id": "time",
+        "measurement": "crossingTime",
+        "label": "Time at the ramp",
+        "minimum": 0.8,
+        "maximum": 1.3,
+        "uncertainty": 0.01
+      }
+    ],
+    "zones": [
+      {
+        "targetId": "gap",
+        "label": "Over the near wall",
+        "criterionId": null
+      },
+      {
+        "targetId": "landing-strip",
+        "label": "Landing strip",
+        "criterionId": "range"
+      },
+      {
+        "targetId": "canyon-floor-target",
+        "label": "Canyon floor",
+        "criterionId": null
+      }
+    ]
+  },
+  "explanations": {
+    "success": {
+      "title": "Route lit",
+      "message": "The capsule came down on the lit part of the ramp {crossingDistance} from the rail after {crossingTime}."
+    },
+    "borderline": {
+      "title": "Too close to call",
+      "message": "The capsule met the ramp {crossingDistance} from the rail after {crossingTime}, which is too close to the edge for the measurement uncertainty to decide. It waits for an authoritative check and does not count as a hit or a miss."
+    },
+    "invalid": {
+      "engineFailure": {
+        "title": "The run stopped",
+        "message": "The physics run reported a problem, so this attempt cannot be judged. Reset and launch again."
+      },
+      "nonFiniteValue": {
+        "title": "Unusable measurement",
+        "message": "A measured value was not a finite number, so this attempt cannot be judged. Reset and launch again."
+      },
+      "incompleteRun": {
+        "title": "The run did not finish",
+        "message": "The capsule never touched down before the run limit, so there is nothing to judge. Reset and launch again."
+      },
+      "forbiddenEdit": {
+        "title": "A locked value changed",
+        "message": "This challenge fixes some values. Reset restores them, and then you can launch again."
+      }
+    },
+    "misses": [
+      {
+        "id": "near-wall",
+        "title": "Hit the near wall",
+        "message": "The capsule struck the near wall before it cleared the top. It needs more height at that distance, which means more speed or a steeper angle.",
+        "when": [
+          {
+            "kind": "firstContact",
+            "surfaceId": "near-wall"
+          }
+        ]
+      },
+      {
+        "id": "far-wall",
+        "title": "Hit the far wall",
+        "message": "The capsule flew past the ramp and struck the far wall. It travelled too far: lower the speed or change the angle.",
+        "when": [
+          {
+            "kind": "firstContact",
+            "surfaceId": "far-wall"
+          }
+        ]
+      },
+      {
+        "id": "canyon-floor",
+        "title": "Fell into the canyon",
+        "message": "The capsule fell short of the ramp and landed on the canyon floor, a dead end. It needs more range.",
+        "when": [
+          {
+            "kind": "firstContact",
+            "surfaceId": "canyon-floor"
+          }
+        ]
+      },
+      {
+        "id": "ramp-too-early",
+        "title": "Landed on the ramp too early",
+        "message": "The capsule touched the ramp {crossingDistance} from the rail, {range.gap} before the lit zone. It needs a little more range.",
+        "when": [
+          {
+            "kind": "criterion",
+            "criterionId": "range",
+            "side": "below"
+          }
+        ]
+      },
+      {
+        "id": "ramp-too-late",
+        "title": "Landed on the ramp too late",
+        "message": "The capsule touched the ramp {crossingDistance} from the rail, {range.gap} beyond the lit zone. It needs a little less range.",
+        "when": [
+          {
+            "kind": "criterion",
+            "criterionId": "range",
+            "side": "above"
+          }
+        ]
+      },
+      {
+        "id": "arrived-too-soon",
+        "title": "Reached the ramp too soon",
+        "message": "The capsule reached the lit zone after {crossingTime}, {time.gap} earlier than the window. A higher, slower launch takes longer.",
+        "when": [
+          {
+            "kind": "criterion",
+            "criterionId": "time",
+            "side": "below"
+          }
+        ]
+      },
+      {
+        "id": "arrived-too-late",
+        "title": "Reached the ramp too late",
+        "message": "The capsule reached the lit zone after {crossingTime}, {time.gap} later than the window. A flatter, faster launch gets there sooner.",
+        "when": [
+          {
+            "kind": "criterion",
+            "criterionId": "time",
+            "side": "above"
+          }
+        ]
+      }
+    ],
+    "fallbackMiss": {
+      "title": "Missed the route",
+      "message": "The capsule did not come down on the lit part of the ramp."
+    }
+  },
+  "hints": [
+    {
+      "text": "Think about the arc before you launch. It must rise above the near wall, then come down onto the ramp before the far wall.",
+      "reveal": null
+    },
+    {
+      "text": "The marker shows where your current launch meets the ramp line: x = 2v²cos²θ(tanθ − tan 15°)/g.",
+      "reveal": "predictedCrossing"
+    }
+  ],
+  "reset": {
+    "editableValues": "keepLast",
+    "previousTrail": "ghost"
+  },
+  "comparison": "none",
+  "relatedDemonstrationIds": [
+    "cliff-launch"
+  ],
+  "samples": [
+    {
+      "id": "canyon-success",
+      "label": "Reference launch at 10 m/s, 45°",
+      "source": "v0 = 10, θ = 45°: x = 100·(1 − tan15°)/9.81",
+      "expectedStatus": "success",
+      "expectedReasonId": "success",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "crossingDistance": 7.462291616400381,
+          "crossingTime": 1.0553274010296465
+        },
+        "firstContact": "landing-ramp"
+      }
+    },
+    {
+      "id": "canyon-miss-near-wall",
+      "label": "Clear miss: weak flat launch clips the near wall",
+      "source": "v0 = 8, θ = 35°: at the wall's near face (x = 3.1 m for the ball centre) the centre is y = 1.07 m, only 0.07 m above the 1.0 m wall top, less than the 0.25 m ball radius",
+      "expectedStatus": "miss",
+      "expectedReasonId": "near-wall",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {},
+        "firstContact": "near-wall"
+      }
+    },
+    {
+      "id": "canyon-miss-floor",
+      "label": "Clear miss: a slow steep launch drops into the canyon",
+      "source": "v0 = 8, θ = 55°: the arc passes below the ramp's lower end and the ball centre reaches y = −3.75 m (floor top plus ball radius) at x ≈ 8.1 m",
+      "expectedStatus": "miss",
+      "expectedReasonId": "canyon-floor",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {},
+        "firstContact": "canyon-floor"
+      }
+    },
+    {
+      "id": "canyon-miss-far-wall",
+      "label": "Clear miss: a fast steep launch strikes the far wall",
+      "source": "v0 = 12, θ = 55°: the ball centre reaches x = 9.5 m (the far wall's face minus the ball radius) at y ≈ 4.2 m, above the ramp",
+      "expectedStatus": "miss",
+      "expectedReasonId": "far-wall",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {},
+        "firstContact": "far-wall"
+      }
+    },
+    {
+      "id": "canyon-miss-early",
+      "label": "Clear miss: lands on the ramp before the lit zone",
+      "source": "θ = 45°, v0 = sqrt(6.7·9.81/(1 − tan15°)) = 9.475481608580104, x = 6.7",
+      "expectedStatus": "miss",
+      "expectedReasonId": "ramp-too-early",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "crossingDistance": 6.7,
+          "crossingTime": 0.9999735379487054
+        },
+        "firstContact": "landing-ramp"
+      }
+    },
+    {
+      "id": "canyon-miss-late",
+      "label": "Clear miss: lands on the ramp beyond the lit zone",
+      "source": "θ = 45°, v0 = sqrt(9.0·9.81/(1 − tan15°)) = 10.98209373936173, x = 9.0",
+      "expectedStatus": "miss",
+      "expectedReasonId": "ramp-too-late",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "crossingDistance": 9,
+          "crossingTime": 1.1589704443824564
+        },
+        "firstContact": "landing-ramp"
+      }
+    },
+    {
+      "id": "canyon-miss-slow-arrival",
+      "label": "Clear miss: right distance but too late",
+      "source": "θ = 55°, v0 = 9.784533674036174 gives x = 7.45 and t = x/(v0·cos55°)",
+      "expectedStatus": "miss",
+      "expectedReasonId": "arrived-too-late",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "crossingDistance": 7.45,
+          "crossingTime": 1.3274703792827032
+        },
+        "firstContact": "landing-ramp"
+      }
+    },
+    {
+      "id": "canyon-miss-quick-arrival",
+      "label": "Clear miss: right distance but too soon",
+      "source": "θ = 35°, v0 = 10.918873923499255 gives x = 7.05 and t = x/(v0·cos35°)",
+      "expectedStatus": "miss",
+      "expectedReasonId": "arrived-too-soon",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "crossingDistance": 7.05,
+          "crossingTime": 0.7882187221015264
+        },
+        "firstContact": "landing-ramp"
+      }
+    },
+    {
+      "id": "canyon-borderline-near-edge",
+      "label": "Borderline: meets the ramp line exactly 7.0 m out",
+      "source": "θ = 45°, v0 = sqrt(7.0·9.81/(1 − tan15°)) = 9.685296303050176",
+      "expectedStatus": "borderline",
+      "expectedReasonId": "borderline",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "crossingDistance": 7,
+          "crossingTime": 1.0221158575699982
+        },
+        "firstContact": "landing-ramp"
+      }
+    },
+    {
+      "id": "canyon-borderline-far-edge",
+      "label": "Borderline: meets the ramp line exactly 7.9 m out",
+      "source": "θ = 45°, v0 = sqrt(7.9·9.81/(1 − tan15°)) = 10.28910116423637",
+      "expectedStatus": "borderline",
+      "expectedReasonId": "borderline",
+      "attempt": {
+        "runStatus": "complete",
+        "measurements": {
+          "crossingDistance": 7.9,
+          "crossingTime": 1.0858370390584677
+        },
+        "firstContact": "landing-ramp"
+      }
+    },
+    {
+      "id": "canyon-invalid-engine",
+      "label": "Invalid: the engine reported a failure",
+      "source": "A run that ends with an engine diagnostic cannot be judged.",
+      "expectedStatus": "invalid",
+      "expectedReasonId": "engineFailure",
+      "attempt": {
+        "runStatus": "engineFailure",
+        "measurements": {},
+        "firstContact": null
+      }
+    }
+  ]
+}

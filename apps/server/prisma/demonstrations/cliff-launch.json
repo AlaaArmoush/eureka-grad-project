@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "id": "cliff-launch",
+  "revision": 2,
+  "topic": "projectiles",
+  "order": 3,
+  "title": "Off a cliff",
+  "question": "Does a faster horizontal launch take longer to fall?",
+  "summary": "Two balls roll off the same 20 m ledge horizontally, at different speeds.",
+  "prediction": {
+    "prompt": "Which ball reaches the lower ground first?",
+    "choices": [
+      "The slower ball",
+      "The faster ball",
+      "They land together"
+    ],
+    "answerIndex": 2,
+    "reason": "Vertical and horizontal motion are independent. Both start with zero vertical speed and fall 20 m, so t = √(2h/g) ≈ 2.0 s for each. Speed only decides how far they travel in that time."
+  },
+  "lookFor": "The flight times match; only the ranges differ, and each range is horizontal speed × 2.0 s.",
+  "scenarioReference": "S01-03 / D01-03 / A01-03",
+  "primary": {
+    "key": "speed",
+    "label": "Horizontal speed",
+    "options": [
+      {
+        "value": "5",
+        "label": "5 m/s"
+      },
+      {
+        "value": "10",
+        "label": "10 m/s"
+      },
+      {
+        "value": "20",
+        "label": "20 m/s"
+      }
+    ]
+  },
+  "reference": "5",
+  "comparison": "20",
+  "shared": [],
+  "sharedDefaults": {},
+  "overlays": {
+    "trail": true,
+    "velocity": true,
+    "components": true,
+    "prediction": false,
+    "events": true,
+    "grid": true,
+    "labels": false
+  },
+  "scene": {
+    "id": "cliff-launch-v{speed}",
+    "seed": 17,
+    "numericalProfile": {
+      "fixedTimeStepSeconds": 0.016666666666666666,
+      "substeps": 1,
+      "scales": {
+        "lengthMeters": 1,
+        "massKilograms": 1,
+        "timeSeconds": 1
+      }
+    },
+    "gravityStrengthMetersPerSecondSquared": 9.81,
+    "linearDragKilogramsPerSecond": 0,
+    "bodies": [
+      {
+        "kind": "static",
+        "id": "default-ground",
+        "widthMeters": 1200,
+        "heightMeters": 0.5,
+        "restitution": 0,
+        "positionMeters": {
+          "x": 0,
+          "y": -0.75
+        },
+        "angleDegrees": 0
+      },
+      {
+        "kind": "dynamic",
+        "id": "projectile-1",
+        "radiusMeters": 0.5,
+        "massKilograms": 1,
+        "restitution": 0,
+        "positionMeters": {
+          "x": 0,
+          "y": 20
+        },
+        "launchSpeedMetersPerSecond": {
+          "parameter": "speed",
+          "scale": 1,
+          "offset": 0
+        },
+        "launchAngleDegrees": 0
+      },
+      {
+        "kind": "static",
+        "id": "platform-1",
+        "widthMeters": 4,
+        "heightMeters": 20,
+        "restitution": 0,
+        "positionMeters": {
+          "x": -2,
+          "y": 9.5
+        },
+        "angleDegrees": 0
+      }
+    ]
+  },
+  "framing": {
+    "flight": {
+      "kind": "fall",
+      "speedMetersPerSecond": {
+        "parameter": "speed",
+        "scale": 1,
+        "offset": 0
+      },
+      "heightMeters": 20,
+      "gravityMetersPerSecondSquared": 9.81
+    },
+    "marginsMeters": {
+      "left": 6,
+      "right": 3,
+      "bottom": 1.5,
+      "top": 2.5
+    },
+    "pixelsPerMeter": 40
+  }
+}

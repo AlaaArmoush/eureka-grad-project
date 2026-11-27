@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "id": "ideal-launch",
+  "revision": 2,
+  "topic": "projectiles",
+  "order": 1,
+  "title": "Heavy or light",
+  "question": "Does a heavier ball follow a different path?",
+  "summary": "Two balls leave the same spot at 20 m/s and 30°, with no air resistance. Only their mass differs.",
+  "prediction": {
+    "prompt": "How will the 10 kg ball's path compare with the 1 kg ball's?",
+    "choices": [
+      "It goes farther",
+      "It falls shorter",
+      "The paths are identical"
+    ],
+    "answerIndex": 2,
+    "reason": "With no air resistance the only force is gravity, F = mg. Acceleration is F/m = g for every mass, so both balls follow the same parabola."
+  },
+  "lookFor": "Compare the rows: range, flight time and peak height are the same for both masses, so the two paths lie on top of each other.",
+  "scenarioReference": "S01-01 / D01-01 / A01-01",
+  "primary": {
+    "key": "mass",
+    "label": "Mass",
+    "options": [
+      {
+        "value": "0.1",
+        "label": "0.1 kg"
+      },
+      {
+        "value": "1",
+        "label": "1 kg"
+      },
+      {
+        "value": "10",
+        "label": "10 kg"
+      }
+    ]
+  },
+  "reference": "1",
+  "comparison": "10",
+  "shared": [
+    {
+      "key": "speed",
+      "label": "Launch speed",
+      "options": [
+        {
+          "value": "5",
+          "label": "5 m/s"
+        },
+        {
+          "value": "10",
+          "label": "10 m/s"
+        },
+        {
+          "value": "20",
+          "label": "20 m/s"
+        },
+        {
+          "value": "30",
+          "label": "30 m/s"
+        }
+      ]
+    },
+    {
+      "key": "gravity",
+      "label": "Gravity",
+      "options": [
+        {
+          "value": "9.81",
+          "label": "Earth · 9.81 m/s²"
+        },
+        {
+          "value": "1.62",
+          "label": "Moon · 1.62 m/s²"
+        }
+      ]
+    }
+  ],
+  "sharedDefaults": {
+    "speed": "20",
+    "gravity": "9.81"
+  },
+  "overlays": {
+    "trail": true,
+    "velocity": true,
+    "components": true,
+    "prediction": false,
+    "events": true,
+    "grid": true,
+    "labels": false
+  },
+  "scene": {
+    "id": "ideal-launch-m{mass}-v{speed}-g{gravity}",
+    "seed": 17,
+    "numericalProfile": {
+      "fixedTimeStepSeconds": 0.016666666666666666,
+      "substeps": 1,
+      "scales": {
+        "lengthMeters": 1,
+        "massKilograms": 1,
+        "timeSeconds": 1
+      }
+    },
+    "gravityStrengthMetersPerSecondSquared": {
+      "parameter": "gravity",
+      "scale": 1,
+      "offset": 0
+    },
+    "linearDragKilogramsPerSecond": 0,
+    "bodies": [
+      {
+        "kind": "static",
+        "id": "default-ground",
+        "widthMeters": 1200,
+        "heightMeters": 0.5,
+        "restitution": 0,
+        "positionMeters": {
+          "x": 0,
+          "y": -0.75
+        },
+        "angleDegrees": 0
+      },
+      {
+        "kind": "dynamic",
+        "id": "projectile-1",
+        "radiusMeters": 0.5,
+        "massKilograms": {
+          "parameter": "mass",
+          "scale": 1,
+          "offset": 0
+        },
+        "restitution": 0,
+        "positionMeters": {
+          "x": 0,
+          "y": 0
+        },
+        "launchSpeedMetersPerSecond": {
+          "parameter": "speed",
+          "scale": 1,
+          "offset": 0
+        },
+        "launchAngleDegrees": 30
+      }
+    ]
+  },
+  "framing": {
+    "flight": {
+      "kind": "level",
+      "speedMetersPerSecond": {
+        "parameter": "speed",
+        "scale": 1,
+        "offset": 0
+      },
+      "angleDegrees": 30,
+      "gravityMetersPerSecondSquared": {
+        "parameter": "gravity",
+        "scale": 1,
+        "offset": 0
+      }
+    },
+    "marginsMeters": {
+      "left": 2,
+      "right": 2,
+      "bottom": 1.5,
+      "top": 1.5
+    },
+    "pixelsPerMeter": 40
+  }
+}

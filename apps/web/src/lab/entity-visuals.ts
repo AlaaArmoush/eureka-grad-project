@@ -2,28 +2,57 @@
 import type { Body, TargetTrigger, Vector2 } from "@eureka/contracts";
 import { Circle, Container, Graphics, Polygon } from "pixi.js";
 import { notebookLabel } from "./sketchbook.js";
-import { paintEntity, pencilEllipse, sceneColors } from "./materials.js";
+import { ballPigment, objectColor, paintEntity, pencilEllipse, sceneColors, zoneColors, type PaintBounds } from "./materials.js";
+import type { ChallengeZoneView } from "./store.js";
 
-export function createEntityVisual(entity: Body | TargetTrigger) {
+// ballIndex is this ball's place among the scene's balls; it picks the ball's colour.
+export function createEntityVisual(entity: Body | TargetTrigger, ballIndex = 0) {
+  const pigment = ballPigment(ballIndex);
   const graphic = new Container({ eventMode: "static", cursor: "pointer" });
   const geometry = new Graphics({ eventMode: "none" });
   const selection = new Graphics({ eventMode: "none" });
   const isGround = entity.id.toLowerCase().includes("ground");
   const isRamp = entity.id.toLowerCase().includes("ramp");
   const name = entity.kind === "target" ? "Target zone" : entity.kind === "dynamic" ? "Projectile" : isGround ? "Ground" : isRamp ? "Inclined plane" : "Platform";
-  const color = entity.kind === "target" ? sceneColors.target : entity.kind === "dynamic" ? sceneColors.reference : sceneColors.ink;
+  const color = objectColor(entity, ballIndex);
   const caption = notebookLabel(name, color);
   graphic.addChild(selection, geometry, caption);
   let paintKey = "";
+  let lastCaptionColor: number = color;
+  let hitScale = Number.NaN;
+  let hitAngle = Number.NaN;
 
-  function update(scale: number, angle: number, selected: boolean, entered: boolean, labels: boolean, position: Vector2, viewportWidth: number, moveMode: boolean): void {
-    const key = [scale, selected, entered, moveMode].join(":");
+  // For a target used as a challenge zone, `entry` is the zone and its state; otherwise it says whether a ball has entered it this run.
+  function update(scale: number, angle: number, selected: boolean, entry: boolean | ChallengeZoneView, labels: boolean, position: Vector2, viewportWidth: number, viewportHeight: number, moveMode: boolean): void {
     const shape = entity.shape;
+    let visible: PaintBounds | undefined;
+    if (shape.kind === "box") {
+      // Rotate the padded viewport back into the body's local drawing coordinates.
+      const cosine = Math.cos(angle);
+      const sine = Math.sin(angle);
+      const dx = viewportWidth / 2 - position.x;
+      const dy = viewportHeight / 2 - position.y;
+      const centerX = cosine * dx - sine * dy;
+      const centerY = sine * dx + cosine * dy;
+      const halfWidth = Math.abs(cosine) * (viewportWidth / 2 + 24) + Math.abs(sine) * (viewportHeight / 2 + 24);
+      const halfHeight = Math.abs(sine) * (viewportWidth / 2 + 24) + Math.abs(cosine) * (viewportHeight / 2 + 24);
+      visible = {
+        left: Math.max(-shape.widthMeters * scale / 2, centerX - halfWidth),
+        right: Math.min(shape.widthMeters * scale / 2, centerX + halfWidth),
+        top: Math.max(-shape.heightMeters * scale / 2, centerY - halfHeight),
+        bottom: Math.min(shape.heightMeters * scale / 2, centerY + halfHeight),
+      };
+    }
+    const zone = typeof entry === "boolean" ? undefined : entry;
+    const entered = zone === undefined ? entry === true : zone.state === "reached";
+    // A lab target turns from red to green when a ball enters it, like a challenge zone.
+    const targetPaint = zone !== undefined ? zoneColors[zone.state] : entered ? zoneColors.reached : zoneColors.waiting;
+    const key = [scale, selected, entered, zone?.state, moveMode, visible?.left, visible?.right, visible?.top, visible?.bottom].join(":");
     const selectionColor = moveMode ? sceneColors.velocity : color;
-    const selectionWash = moveMode ? 0x7da8b3 : 0xc5a25f;
+    const selectionWash = selectionColor;
     if (key !== paintKey) {
       paintKey = key;
-      paintEntity(geometry, entity, scale, entered);
+      paintEntity(geometry, entity, scale, entered, visible, targetPaint, pigment);
       selection.clear();
       if (selected && shape.kind === "circle") {
         const radius = shape.radiusMeters * scale + 8;
@@ -39,21 +68,33 @@ export function createEntityVisual(entity: Body | TargetTrigger) {
     // Only the geometry rotates. Labels and their pixel offsets remain upright.
     geometry.rotation = selection.rotation = -angle;
     graphic.position.set(position.x, position.y);
-    if (shape.kind === "circle") {
-      graphic.hitArea = new Circle(0, 0, shape.radiusMeters * scale);
-    } else {
-      const x = shape.widthMeters * scale / 2;
-      const y = shape.heightMeters * scale / 2;
-      const cosine = Math.cos(angle);
-      const sine = Math.sin(angle);
-      graphic.hitArea = new Polygon([
-        -x * cosine - y * sine, x * sine - y * cosine,
-        x * cosine - y * sine, -x * sine - y * cosine,
-        x * cosine + y * sine, -x * sine + y * cosine,
-        -x * cosine + y * sine, x * sine + y * cosine,
-      ]);
+    if (scale !== hitScale || angle !== hitAngle) {
+      hitScale = scale;
+      hitAngle = angle;
+
+      if (shape.kind === "circle") {
+        graphic.hitArea = new Circle(0, 0, shape.radiusMeters * scale);
+      } else {
+        const x = shape.widthMeters * scale / 2;
+        const y = shape.heightMeters * scale / 2;
+        const cosine = Math.cos(angle);
+        const sine = Math.sin(angle);
+        graphic.hitArea = new Polygon([
+          -x * cosine - y * sine, x * sine - y * cosine,
+          x * cosine - y * sine, -x * sine - y * cosine,
+          x * cosine + y * sine, -x * sine + y * cosine,
+          -x * cosine + y * sine, x * sine + y * cosine,
+        ]);
+      }
     }
-    caption.text = entered && entity.kind === "target" ? "Target entered ✓" : name;
+    caption.text = zone !== undefined ? zone.zone.label + (entered ? " ✓" : "") : name;
+    const captionColor = entity.kind === "target" ? targetPaint.ink : color;
+
+    // Restyle only on a change, so the caption is not re-rendered every frame.
+    if (captionColor !== lastCaptionColor) {
+      lastCaptionColor = captionColor;
+      caption.style.fill = captionColor;
+    }
     const compact = viewportWidth < 520;
     caption.style.fontSize = compact ? 15 : 17;
     caption.visible = labels && (!compact || selected || entity.kind === "target");

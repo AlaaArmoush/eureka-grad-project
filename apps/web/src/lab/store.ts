@@ -1,15 +1,10 @@
 // Supplies the portable camera-center coordinate.
-import type { Vector2 } from "@eureka/contracts";
+import type { ChallengeZone, Vector2 } from "@eureka/contracts";
+import type { CameraView } from "./coordinates.js";
 
 // Supplies a framework-independent editor store.
 import { createStore } from "zustand/vanilla";
-import type {
-  PlaceableEntityKind,
-  PlatformPlacementProperties,
-  ProjectilePlacementProperties,
-  RampPlacementProperties,
-  TargetPlacementProperties,
-} from "./authoring.js";
+import type { PlacementDefinition } from "./authoring.js";
 
 // Share the camera scale between wheel input, zoom controls and initial editor state.
 export const CAMERA_ZOOM = {
@@ -29,16 +24,45 @@ export interface OverlayVisibility {
   readonly labels: boolean;
 }
 
+// A target object used as a challenge zone, and where the current attempt stands with it: red until reached, green once reached, amber when too close to call.
+export interface ChallengeZoneView {
+  readonly zone: ChallengeZone;
+  readonly state: "waiting" | "reached" | "borderline" | "missed";
+}
+
+// What the open challenge draws over the scene, in world metres: its target zones, the live path and the ghost of the previous attempt.
+export interface ChallengeOverlay {
+  readonly zones: readonly ChallengeZoneView[];
+  readonly live: readonly Vector2[];
+  readonly ghosts: readonly (readonly Vector2[])[];
+}
+
+// The inspector's three panels; the store owns which one is showing so selection can bring the Object panel forward.
+export type InspectorTab = "properties" | "environment" | "display";
+
+// A "try it" bubble shown once above one inspector field, by its input name; it fades out on its own.
+export interface FieldGuide {
+  readonly fieldName: string;
+  readonly message: string;
+}
+
 export interface LabEditorState {
   readonly cameraCenterWorldMeters: Vector2;
   readonly pixelsPerMeter: number;
   readonly cameraInitialized: boolean;
   readonly cameraFitRequest: number;
+  readonly pendingCameraView: CameraView | null;
   fitCamera(): void;
   readonly selectedEntityId: string | null;
   readonly selectionNotice: string | null;
   selectEntity(entityId: string | null, notice?: string): void;
+  readonly inspectorTab: InspectorTab;
+  setInspectorTab(tab: InspectorTab): void;
+  readonly fieldGuide: FieldGuide | null;
+  setFieldGuide(guide: FieldGuide | null): void;
   readonly overlayVisibility: OverlayVisibility;
+  readonly challengeOverlay: ChallengeOverlay;
+  setChallengeOverlay(overlay: ChallengeOverlay): void;
 
   setCamera(centerWorldMeters: Vector2, pixelsPerMeter: number): void;
   setOverlayVisible(overlay: keyof OverlayVisibility, visible: boolean): void;
@@ -52,14 +76,7 @@ export type LabTool =
   | { readonly kind: "move" }
   | { readonly kind: "pan" }
   | { readonly kind: "delete" }
-  | {
-    readonly kind: "place";
-    readonly entityKind: PlaceableEntityKind;
-    readonly projectileProperties?: ProjectilePlacementProperties;
-    readonly platformProperties?: PlatformPlacementProperties;
-    readonly rampProperties?: RampPlacementProperties;
-    readonly targetProperties?: TargetPlacementProperties;
-  };
+  | ({ readonly kind: "place" } & PlacementDefinition);
 
 // Share editor state outside React; keep it across canvas remounts.
 export const labStore = createStore<LabEditorState>()((set) => ({
@@ -71,17 +88,31 @@ export const labStore = createStore<LabEditorState>()((set) => ({
   pixelsPerMeter: CAMERA_ZOOM.basePixelsPerMeter,
   cameraInitialized: false,
   cameraFitRequest: 0,
-  fitCamera: () => set((state) => ({ cameraFitRequest: state.cameraFitRequest + 1 })),
-  selectedEntityId: "projectile",
+  pendingCameraView: null,
+  fitCamera: () => set((state) => ({ cameraFitRequest: state.cameraFitRequest + 1, pendingCameraView: null })),
+  selectedEntityId: null,
   selectionNotice: null,
+  inspectorTab: "environment",
+  setInspectorTab: (inspectorTab) => {
+    set({ inspectorTab });
+  },
+  fieldGuide: null,
+  setFieldGuide: (fieldGuide) => {
+    set({ fieldGuide });
+  },
   overlayVisibility: {
     trail: true,
     velocity: true,
     components: true,
-    prediction: true,
+    prediction: false,
     events: true,
     grid: true,
-    labels: true,
+    labels: false,
+  },
+
+  challengeOverlay: { zones: [], live: [], ghosts: [] },
+  setChallengeOverlay: (challengeOverlay) => {
+    set({ challengeOverlay });
   },
 
   // Keep display choices across authored edits and canvas remounts.
@@ -110,14 +141,19 @@ export const labStore = createStore<LabEditorState>()((set) => ({
       },
       pixelsPerMeter,
       cameraInitialized: true,
+      pendingCameraView: null,
     });
   },
 
+  // Choosing a different object shows its properties; deselecting moves an empty Object panel to Environment.
   selectEntity: (selectedEntityId, notice) => {
-    set({
+    set((state) => ({
       selectedEntityId,
       selectionNotice: notice ?? null,
-    });
+      ...(selectedEntityId !== null && selectedEntityId !== state.selectedEntityId ? { inspectorTab: "properties" as const } : {}),
+      // With nothing selected the Object panel is empty, so show the scene's environment instead.
+      ...(selectedEntityId === null && state.inspectorTab === "properties" ? { inspectorTab: "environment" as const } : {}),
+    }));
   },
 
   activeTool: { kind: "select" },

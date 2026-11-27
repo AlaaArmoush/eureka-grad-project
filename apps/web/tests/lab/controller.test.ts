@@ -1,13 +1,13 @@
 import { expect, it, vi } from "vitest";
 import type { Snapshot } from "@eureka/contracts";
-import type { Engine, EngineResult } from "@eureka/engine";
+import { validateScene, type Engine, type EngineResult } from "@eureka/engine";
 import { createLabController, type LabController, type PlaybackBrowser, type PlaybackState } from "../../src/lab/controller.js";
 import { PROJECTILE_LAB_MOCK } from "../../src/lab/mocks.js";
 import {
-  DEFAULT_PROJECTILE_PROPERTIES, DEFAULT_RAMP_PROPERTIES, DEFAULT_TARGET_PROPERTIES,
+  DEFAULT_PLATFORM_PROPERTIES, DEFAULT_PROJECTILE_PROPERTIES, DEFAULT_RAMP_PROPERTIES, DEFAULT_TARGET_PROPERTIES,
 } from "../../src/lab/authoring.js";
 
-function createPlaybackHarness(playbackBrowser?: PlaybackBrowser, stopAtTick?: number) {
+function createPlaybackHarness(playbackBrowser?: PlaybackBrowser) {
   let nowMilliseconds = 0;
   let tick = 0;
   const scene = structuredClone(PROJECTILE_LAB_MOCK.scene);
@@ -48,6 +48,12 @@ function createPlaybackHarness(playbackBrowser?: PlaybackBrowser, stopAtTick?: n
       return { ok: true };
     }),
     dispose: vi.fn<Engine["dispose"]>(() => ({ ok: true })),
+    copyScene: vi.fn<Engine["copyScene"]>(() => ({ ok: true, value: structuredClone(scene) })),
+    // Accept a start edit exactly when the real engine would.
+    setInitialScene: vi.fn<Engine["setInitialScene"]>((next) => {
+      const validation = validateScene(next);
+      return validation.ok ? { ok: true } : validation;
+    }),
   } satisfies Engine;
 
   const releaseView = vi.fn();
@@ -61,7 +67,6 @@ function createPlaybackHarness(playbackBrowser?: PlaybackBrowser, stopAtTick?: n
     nowMilliseconds: () => nowMilliseconds,
     playbackBrowser,
     onPlaybackChange,
-    stopAtTick,
   });
 
   if (!result.ok) {
@@ -87,7 +92,7 @@ function createPlaybackHarness(playbackBrowser?: PlaybackBrowser, stopAtTick?: n
   };
 }
 
-function createBrowserHarness(initiallyHidden = false, stopAtTick?: number) {
+function createBrowserHarness(initiallyHidden = false) {
   let hidden = initiallyHidden;
   let nextFrameHandle = 1;
   const pendingFrames = new Map<number, () => void>();
@@ -119,7 +124,7 @@ function createBrowserHarness(initiallyHidden = false, stopAtTick?: number) {
     onFrameResult: vi.fn<PlaybackBrowser["onFrameResult"]>(),
   };
 
-  const h = createPlaybackHarness(browser, stopAtTick);
+  const h = createPlaybackHarness(browser);
 
   return {
     ...h,
@@ -612,48 +617,18 @@ it("does not publish readouts during or after disposal", () => {
   expect(h.readouts).toHaveLength(readoutCount);
 });
 
-// A finite sample must stop on its last accepted tick, even during a longer catch-up callback.
-it("pauses at a finite sample boundary without an extra engine call", () => {
-  const h = createBrowserHarness(false, 3);
-  h.controller.play();
-  h.runFrameAt(100);
-
-  expect(h.engine.advance).toHaveBeenCalledTimes(3);
-  expect(h.engine.advance.mock.calls.every(([count]) => count === 1)).toBe(true);
-  expect(h.controller.getPlaybackState().playing).toBe(false);
-  expect(h.pendingFrameCount()).toBe(0);
-  expect(h.readouts.at(-1)?.tick).toBe(3);
-  expect(h.controller.play().ok).toBe(false);
-  expect(h.controller.stepOnce().ok).toBe(false);
-  expect(h.engine.advance).toHaveBeenCalledTimes(3);
-
-  h.controller.reset();
-  expect(h.readouts.at(-1)?.tick).toBe(0);
-  expect(h.controller.play()).toEqual({ ok: true });
-  expect(h.pendingFrameCount()).toBe(1);
-});
-
-// A zero-length sample starts at its boundary and cannot schedule a physics advance.
-it("keeps a sample ending at tick zero paused", () => {
-  const h = createBrowserHarness(false, 0);
-
-  expect(h.controller.play().ok).toBe(false);
-  expect(h.controller.stepOnce().ok).toBe(false);
-  expect(h.pendingFrameCount()).toBe(0);
-  expect(h.engine.advance).not.toHaveBeenCalled();
-});
-
 // Physical authoring during playback must be rejected before any starting-scene mutation.
 it.each([
-  { name: "projectile placement", edit: (c: LabController) => c.placeProjectile({ x: 20, y: 20 }) },
-  { name: "platform placement", edit: (c: LabController) => c.placePlatform({ x: 20, y: 20 }) },
-  { name: "ramp placement", edit: (c: LabController) => c.placeRamp({ x: 20, y: 20 }) },
-  { name: "target placement", edit: (c: LabController) => c.placeTarget({ x: 20, y: 20 }) },
+  { name: "projectile placement", edit: (c: LabController) => c.placeEntity({ entityKind: "projectile", projectileProperties: DEFAULT_PROJECTILE_PROPERTIES, positionMeters: { x: 20, y: 20 } }) },
+  { name: "platform placement", edit: (c: LabController) => c.placeEntity({ entityKind: "platform", platformProperties: DEFAULT_PLATFORM_PROPERTIES, positionMeters: { x: 20, y: 20 } }) },
+  { name: "ramp placement", edit: (c: LabController) => c.placeEntity({ entityKind: "ramp", rampProperties: DEFAULT_RAMP_PROPERTIES, positionMeters: { x: 20, y: 20 } }) },
+  { name: "target placement", edit: (c: LabController) => c.placeEntity({ entityKind: "target", targetProperties: DEFAULT_TARGET_PROPERTIES, positionMeters: { x: 20, y: 20 } }) },
   { name: "projectile properties", edit: (c: LabController) => c.updateProjectileProperties("projectile", DEFAULT_PROJECTILE_PROPERTIES) },
   { name: "static body properties", edit: (c: LabController) => c.updateStaticBodyProperties("ramp", DEFAULT_RAMP_PROPERTIES) },
   { name: "target properties", edit: (c: LabController) => c.updateTargetProperties("target", DEFAULT_TARGET_PROPERTIES) },
   { name: "paused movement", edit: (c: LabController) => c.moveEntityWhilePaused("projectile", { x: 20, y: 20 }) },
   { name: "deletion", edit: (c: LabController) => c.deleteEntity("projectile") },
+  { name: "starting environment", edit: (c: LabController) => c.updateEnvironment(c.copyScene().environment) },
 ])("rejects $name while playing", ({ edit }) => {
   const h = createPlaybackHarness();
   const startingScene = h.controller.copyScene();
@@ -670,7 +645,7 @@ it.each([
 // Zero coordinates are valid when the proposed object does not penetrate a static surface.
 it.each([
   { entityId: "projectile", position: { x: 0, y: 1 } },
-  { entityId: "projectile", position: { x: 25, y: 0 } },
+  { entityId: "projectile", position: { x: 700, y: 0 } },
   { entityId: "ramp", position: { x: 0, y: 0 } },
   { entityId: "target", position: { x: 0, y: 0 } },
 ])("accepts paused coordinate editing for $entityId at $position without replacing its identity or other properties", ({ entityId, position }) => {
@@ -699,7 +674,7 @@ it.each([
   expect(h.controller.getPlaybackState().playing).toBe(false);
 });
 
-// Ground occupies x=[-10,20], y=[-0.5,0]; a radius-0.1 ball centred at the origin penetrates it.
+// Ground occupies x=[-600,600], y=[-0.5,0]; a radius-0.1 ball centred at the origin penetrates it.
 it("rejects a coordinate edit that embeds the projectile in the ground and preserves the accepted scene", () => {
   const h = createPlaybackHarness();
   const accepted = h.controller.copyScene();
@@ -733,6 +708,88 @@ it("rejects coordinate editing for an object that no longer exists", () => {
   expect(h.controller.moveEntityWhilePaused("removed-projectile", { x: 2, y: 3 })).toMatchObject({
     ok: false,
     diagnostics: [{ code: "UNKNOWN_ENTITY_ID", entityId: "removed-projectile" }],
+  });
+  expect(h.controller.copyScene()).toEqual(accepted);
+});
+
+// These are authoring inputs, not predicted trajectories: zero, reversed and horizontal gravity are valid.
+it.each([
+  { gravity: { x: 0, y: 0 }, drag: 0 },
+  { gravity: { x: 0, y: 1.62 }, drag: 0.1 },
+  { gravity: { x: -1.62, y: 0 }, drag: 0.5 },
+])("accepts starting gravity $gravity and drag $drag without changing object identity", ({ gravity, drag }) => {
+  const h = createPlaybackHarness();
+  const before = h.controller.copyScene();
+  const environment = { gravityMetersPerSecondSquared: gravity, linearDragKilogramsPerSecond: drag };
+  const result = h.controller.updateEnvironment(environment);
+
+  expect(result.ok).toBe(true);
+
+  if (!result.ok) {
+    throw new Error("Valid starting environment settings should be accepted.");
+  }
+
+  expect(result.value).toEqual({ ...before, revision: before.revision + 1, environment });
+  expect(h.controller.copyScene()).toEqual(result.value);
+  expect(h.engine.enqueue).not.toHaveBeenCalled();
+  expect(h.engine.advance).not.toHaveBeenCalled();
+  expect(h.engine.reset).not.toHaveBeenCalled();
+});
+
+// Rejection must preserve a previously accepted edit, including its revision and all objects.
+it.each([
+  { name: "NaN gravity X", gravity: { x: Number.NaN, y: 0 }, drag: 0 },
+  { name: "infinite gravity Y", gravity: { x: 0, y: Number.POSITIVE_INFINITY }, drag: 0 },
+  { name: "negative drag", gravity: { x: 0, y: 0 }, drag: -0.1 },
+  { name: "infinite drag", gravity: { x: 0, y: 0 }, drag: Number.POSITIVE_INFINITY },
+])("preserves the accepted authored scene after $name", ({ gravity, drag }) => {
+  const h = createPlaybackHarness();
+  expect(h.controller.updateEnvironment({
+    gravityMetersPerSecondSquared: { x: 0, y: 1.62 },
+    linearDragKilogramsPerSecond: 0.1,
+  }).ok).toBe(true);
+  const accepted = h.controller.copyScene();
+
+  expect(h.controller.updateEnvironment({
+    gravityMetersPerSecondSquared: gravity,
+    linearDragKilogramsPerSecond: drag,
+  }).ok).toBe(false);
+  expect(h.controller.copyScene()).toEqual(accepted);
+  expect(h.engine.enqueue).not.toHaveBeenCalled();
+});
+
+// Caller-owned form data and the returned result cannot become mutable handles into controller state.
+it("owns an independent copy of accepted environment settings", () => {
+  const h = createPlaybackHarness();
+  const environment = {
+    gravityMetersPerSecondSquared: { x: 0, y: -1.62 },
+    linearDragKilogramsPerSecond: 0.1,
+  };
+  const result = h.controller.updateEnvironment(environment);
+  expect(result.ok).toBe(true);
+
+  if (!result.ok) {
+    throw new Error("Valid environment settings should be accepted.");
+  }
+
+  const accepted = h.controller.copyScene();
+  environment.gravityMetersPerSecondSquared.y = 100;
+  environment.linearDragKilogramsPerSecond = 100;
+  expect(h.controller.copyScene()).toEqual(accepted);
+  expect(result.value).toEqual(accepted);
+  expect(result.value.environment).not.toBe(environment);
+  expect(result.value.environment).not.toBe(h.controller.copyScene().environment);
+});
+
+// An obsolete inspector callback must fail after its controller's lifetime ends.
+it("rejects starting environment changes after disposal", () => {
+  const h = createPlaybackHarness();
+  const accepted = h.controller.copyScene();
+  expect(h.controller.dispose().ok).toBe(true);
+
+  expect(h.controller.updateEnvironment(accepted.environment)).toMatchObject({
+    ok: false,
+    diagnostics: [{ code: "DISPOSED_ENGINE" }],
   });
   expect(h.controller.copyScene()).toEqual(accepted);
 });

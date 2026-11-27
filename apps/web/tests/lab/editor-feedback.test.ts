@@ -5,14 +5,17 @@ import { ObservationNotebook } from "../../src/lab/ObservationNotebook.js";
 import { PropertiesPanel } from "../../src/lab/PropertiesPanel.js";
 import { PROJECTILE_LAB_MOCK } from "../../src/lab/mocks.js";
 
-// Position editing stays in the X/Y readout without another set of action buttons.
-it("offers inline X and Y editing without duplicate position actions", () => {
+// Positions stay inline; each object keeps its applicable angle in one property form.
+it.each([
+  { entityId: "projectile", angleInputName: "edit-angle" },
+  { entityId: "ramp", angleInputName: "edit-static-angle" },
+])("offers inline positions and one angle control for $entityId", ({ entityId, angleInputName }) => {
   const html = renderToStaticMarkup(createElement(PropertiesPanel, {
     controllerRef: { current: null },
     displayedSnapshot: PROJECTILE_LAB_MOCK.snapshot,
     editableScene: PROJECTILE_LAB_MOCK.scene,
-    selectedEntityId: "projectile",
-    setEditableScene: () => {},
+    selectedEntityId: entityId,
+    queuedForTick: null,
   }));
 
   expect(html).toContain('aria-label="Edit X position"');
@@ -21,6 +24,9 @@ it("offers inline X and Y editing without duplicate position actions", () => {
   expect(html).not.toContain("Cancel position edit");
   expect(html).not.toContain("Horizontal position");
   expect(html).not.toContain("Vertical position");
+  expect(html).not.toContain('name="edit-rotation"');
+  expect(html).not.toContain("<dt>Rotation</dt>");
+  expect(html.split(`name="${angleInputName}"`)).toHaveLength(2);
 });
 
 // Running positions are readouts; physical coordinate editing waits until playback is paused.
@@ -31,12 +37,13 @@ it("keeps coordinate controls unavailable while playback is running", () => {
     editableScene: PROJECTILE_LAB_MOCK.scene,
     selectedEntityId: "projectile",
     playing: true,
-    setEditableScene: () => {},
+    queuedForTick: null,
   }));
 
   expect(html).not.toContain('name="edit-position-x"');
   expect(html).not.toContain('name="edit-position-y"');
-  expect(html).toContain("Rotation");
+  expect(html).toContain("<dt>X</dt>");
+  expect(html).toContain("<dt>Y</dt>");
 });
 
 // No selection is an ordinary editor state, with guidance rather than a missing-object error.
@@ -46,7 +53,7 @@ it("explains how to select an object when the inspector has no selection", () =>
     displayedSnapshot: PROJECTILE_LAB_MOCK.snapshot,
     editableScene: PROJECTILE_LAB_MOCK.scene,
     selectedEntityId: null,
-    setEditableScene: () => {},
+    queuedForTick: null,
   }));
 
   expect(html).toContain("No object selected");
@@ -61,7 +68,7 @@ it("identifies a missing selected object without offering a property edit", () =
     displayedSnapshot: PROJECTILE_LAB_MOCK.snapshot,
     editableScene: PROJECTILE_LAB_MOCK.scene,
     selectedEntityId: "removed-projectile",
-    setEditableScene: () => {},
+    queuedForTick: null,
   }));
 
   expect(html).toContain("Object no longer exists");
