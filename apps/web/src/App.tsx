@@ -537,29 +537,8 @@ export function App() {
       return;
     }
 
-    let placementResult;
+    const placementResult = controller.placeEntity(request);
 
-    if (request.entityKind === "ramp") {
-      placementResult = controller.placeRamp(
-        request.positionMeters,
-        request.rampProperties,
-      );
-    } else if (request.entityKind === "projectile") {
-      placementResult = controller.placeProjectile(
-        request.positionMeters,
-        request.projectileProperties,
-      );
-    } else if (request.entityKind === "platform") {
-      placementResult = controller.placePlatform(
-        request.positionMeters,
-        request.platformProperties,
-      );
-    } else {
-      placementResult = controller.placeTarget(
-        request.positionMeters,
-        request.targetProperties,
-      );
-    }
     if (!placementResult.ok) {
       reportLabResult("Couldn't place that", placementResult);
       return;

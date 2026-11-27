@@ -4,13 +4,7 @@ import type { CameraView } from "./coordinates.js";
 
 // Supplies a framework-independent editor store.
 import { createStore } from "zustand/vanilla";
-import type {
-  PlaceableEntityKind,
-  PlatformPlacementProperties,
-  ProjectilePlacementProperties,
-  RampPlacementProperties,
-  TargetPlacementProperties,
-} from "./authoring.js";
+import type { PlacementDefinition } from "./authoring.js";
 
 // Share the camera scale between wheel input, zoom controls and initial editor state.
 export const CAMERA_ZOOM = {
@@ -82,14 +76,7 @@ export type LabTool =
   | { readonly kind: "move" }
   | { readonly kind: "pan" }
   | { readonly kind: "delete" }
-  | {
-    readonly kind: "place";
-    readonly entityKind: PlaceableEntityKind;
-    readonly projectileProperties?: ProjectilePlacementProperties;
-    readonly platformProperties?: PlatformPlacementProperties;
-    readonly rampProperties?: RampPlacementProperties;
-    readonly targetProperties?: TargetPlacementProperties;
-  };
+  | ({ readonly kind: "place" } & PlacementDefinition);
 
 // Share editor state outside React; keep it across canvas remounts.
 export const labStore = createStore<LabEditorState>()((set) => ({

@@ -1,7 +1,7 @@
 // Resizing a ball must keep a supported ball on its surface instead of leaving it overlapping.
 import { expect, it } from "vitest";
 import { validateScene } from "@eureka/engine";
-import { addPlatformToScene, addProjectileToScene, DEFAULT_PROJECTILE_PROPERTIES, updateProjectileInScene } from "../../src/lab/authoring.js";
+import { DEFAULT_PROJECTILE_PROPERTIES, placeEntityInScene, updateProjectileInScene } from "../../src/lab/authoring.js";
 import { prepareDemonstrationLoad } from "../../src/lab/demo-loading.js";
 import { readDemonstrations } from "../../src/lab/demonstrations.js";
 
@@ -15,8 +15,8 @@ function sceneWithBallOnPlatform(ballY: number) {
   if (!loaded.ok) throw new Error("The reference scene must load.");
   // Remove the demonstration ground so the platform is the only surface under the ball.
   const bare = { ...loaded.value.scene, bodies: [] };
-  const withPlatform = addPlatformToScene(bare, { x: 0, y: 0 }, { widthMeters: 10, heightMeters: 1, restitution: 0 }).scene;
-  return addProjectileToScene(withPlatform, { x: 0, y: ballY }, { ...DEFAULT_PROJECTILE_PROPERTIES, radiusMeters: 0.1 }).scene;
+  const withPlatform = placeEntityInScene(bare, { entityKind: "platform", platformProperties: { widthMeters: 10, heightMeters: 1, restitution: 0 }, positionMeters: { x: 0, y: 0 } }).scene;
+  return placeEntityInScene(withPlatform, { entityKind: "projectile", projectileProperties: { ...DEFAULT_PROJECTILE_PROPERTIES, radiusMeters: 0.1 }, positionMeters: { x: 0, y: ballY } }).scene;
 }
 
 // The platform top is y = 0.5, so a radius r ball resting on it has its centre at y = 0.5 + r.

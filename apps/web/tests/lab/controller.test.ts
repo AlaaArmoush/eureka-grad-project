@@ -4,7 +4,7 @@ import type { Engine, EngineResult } from "@eureka/engine";
 import { createLabController, type LabController, type PlaybackBrowser, type PlaybackState } from "../../src/lab/controller.js";
 import { PROJECTILE_LAB_MOCK } from "../../src/lab/mocks.js";
 import {
-  DEFAULT_PROJECTILE_PROPERTIES, DEFAULT_RAMP_PROPERTIES, DEFAULT_TARGET_PROPERTIES,
+  DEFAULT_PLATFORM_PROPERTIES, DEFAULT_PROJECTILE_PROPERTIES, DEFAULT_RAMP_PROPERTIES, DEFAULT_TARGET_PROPERTIES,
 } from "../../src/lab/authoring.js";
 
 function createPlaybackHarness(playbackBrowser?: PlaybackBrowser) {
@@ -613,10 +613,10 @@ it("does not publish readouts during or after disposal", () => {
 
 // Physical authoring during playback must be rejected before any starting-scene mutation.
 it.each([
-  { name: "projectile placement", edit: (c: LabController) => c.placeProjectile({ x: 20, y: 20 }) },
-  { name: "platform placement", edit: (c: LabController) => c.placePlatform({ x: 20, y: 20 }) },
-  { name: "ramp placement", edit: (c: LabController) => c.placeRamp({ x: 20, y: 20 }) },
-  { name: "target placement", edit: (c: LabController) => c.placeTarget({ x: 20, y: 20 }) },
+  { name: "projectile placement", edit: (c: LabController) => c.placeEntity({ entityKind: "projectile", projectileProperties: DEFAULT_PROJECTILE_PROPERTIES, positionMeters: { x: 20, y: 20 } }) },
+  { name: "platform placement", edit: (c: LabController) => c.placeEntity({ entityKind: "platform", platformProperties: DEFAULT_PLATFORM_PROPERTIES, positionMeters: { x: 20, y: 20 } }) },
+  { name: "ramp placement", edit: (c: LabController) => c.placeEntity({ entityKind: "ramp", rampProperties: DEFAULT_RAMP_PROPERTIES, positionMeters: { x: 20, y: 20 } }) },
+  { name: "target placement", edit: (c: LabController) => c.placeEntity({ entityKind: "target", targetProperties: DEFAULT_TARGET_PROPERTIES, positionMeters: { x: 20, y: 20 } }) },
   { name: "projectile properties", edit: (c: LabController) => c.updateProjectileProperties("projectile", DEFAULT_PROJECTILE_PROPERTIES) },
   { name: "static body properties", edit: (c: LabController) => c.updateStaticBodyProperties("ramp", DEFAULT_RAMP_PROPERTIES) },
   { name: "target properties", edit: (c: LabController) => c.updateTargetProperties("target", DEFAULT_TARGET_PROPERTIES) },

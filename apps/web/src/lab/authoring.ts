@@ -22,16 +22,17 @@ export function updateEnvironmentInScene(scene: SceneDefinition, environment: Sc
   };
 }
 
-export type PlaceableEntityKind = "projectile" | "platform" | "ramp" | "target";
+// Each kind carries only its own properties.
+export type PlacementDefinition =
+  | { readonly entityKind: "projectile"; readonly projectileProperties: ProjectilePlacementProperties }
+  | { readonly entityKind: "platform"; readonly platformProperties: PlatformPlacementProperties }
+  | { readonly entityKind: "ramp"; readonly rampProperties: RampPlacementProperties }
+  | { readonly entityKind: "target"; readonly targetProperties: TargetPlacementProperties };
 
-export interface PlacementRequest {
-  readonly entityKind: PlaceableEntityKind;
-  readonly positionMeters: Vector2;
-  readonly projectileProperties?: ProjectilePlacementProperties;
-  readonly platformProperties?: PlatformPlacementProperties;
-  readonly rampProperties?: RampPlacementProperties;
-  readonly targetProperties?: TargetPlacementProperties;
-}
+export type PlaceableEntityKind = PlacementDefinition["entityKind"];
+
+export type PlacementRequest = PlacementDefinition & { readonly positionMeters: Vector2 };
+
 export interface MoveEntityRequest {
   readonly entityId: string;
   readonly positionMeters: Vector2;
@@ -100,24 +101,6 @@ function createRamp(
       positionMeters: { ...positionMeters },
       angleRadians,
     },
-  };
-}
-export function addRampToScene(
-  scene: SceneDefinition,
-  positionMeters: Vector2,
-  properties: RampPlacementProperties = DEFAULT_RAMP_PROPERTIES,
-): SceneDraftChange {
-  const id = createUniqueEntityId("ramp", scene);
-
-  const ramp = createRamp(id, positionMeters, properties);
-
-  return {
-    scene: {
-      ...scene,
-      revision: scene.revision + 1,
-      bodies: [...scene.bodies, ramp],
-    },
-    entityId: id,
   };
 }
 export function updateStaticBodyInScene(
@@ -208,22 +191,6 @@ function createProjectile(
   };
 }
 
-export function addProjectileToScene(
-  scene: SceneDefinition,
-  positionMeters: Vector2,
-  properties: ProjectilePlacementProperties = DEFAULT_PROJECTILE_PROPERTIES,
-): SceneDraftChange {
-  const id = createUniqueEntityId("projectile", scene);
-  const projectile = createProjectile(id, positionMeters, properties);
-  return {
-    scene: {
-      ...scene,
-      revision: scene.revision + 1,
-      bodies: [...scene.bodies, projectile],
-    },
-    entityId: id,
-  };
-}
 export function updateProjectileInScene(
   scene: SceneDefinition,
   projectileId: string,
@@ -330,24 +297,6 @@ function createPlatform(
   };
 }
 
-export function addPlatformToScene(
-  scene: SceneDefinition,
-  positionMeters: Vector2,
-  properties: PlatformPlacementProperties = DEFAULT_PLATFORM_PROPERTIES,
-): SceneDraftChange {
-  const id = createUniqueEntityId("platform", scene);
-
-  const platform = createPlatform(id, positionMeters, properties);
-
-  return {
-    scene: {
-      ...scene,
-      revision: scene.revision + 1,
-      bodies: [...scene.bodies, platform],
-    },
-    entityId: id,
-  };
-}
 // Target
 export interface TargetPlacementProperties {
   readonly radiusMeters: number;
@@ -374,21 +323,33 @@ function createTarget(
     },
   };
 }
-export function addTargetToScene(
-  scene: SceneDefinition,
-  positionMeters: Vector2,
-  properties: TargetPlacementProperties = DEFAULT_TARGET_PROPERTIES,
-): SceneDraftChange {
-  const id = createUniqueEntityId("target", scene);
+export function placeEntityInScene(scene: SceneDefinition, request: PlacementRequest): SceneDraftChange {
+  const id = createUniqueEntityId(request.entityKind, scene);
+  let bodies = scene.bodies;
+  let triggers = scene.triggers;
 
-  const target = createTarget(id, positionMeters, properties);
+  switch (request.entityKind) {
+    case "projectile":
+      bodies = [...scene.bodies, createProjectile(id, request.positionMeters, request.projectileProperties)];
+      break;
+    case "platform":
+      bodies = [...scene.bodies, createPlatform(id, request.positionMeters, request.platformProperties)];
+      break;
+    case "ramp":
+      bodies = [...scene.bodies, createRamp(id, request.positionMeters, request.rampProperties)];
+      break;
+    case "target":
+      triggers = [...scene.triggers, createTarget(id, request.positionMeters, request.targetProperties)];
+      break;
+    default: {
+      // Compile error here means a placement kind has no case.
+      const unplacedRequest: never = request;
+      return unplacedRequest;
+    }
+  }
 
   return {
-    scene: {
-      ...scene,
-      revision: scene.revision + 1,
-      triggers: [...scene.triggers, target],
-    },
+    scene: { ...scene, revision: scene.revision + 1, bodies, triggers },
     entityId: id,
   };
 }

@@ -17,13 +17,10 @@ import {
 
 // Supplies the pure scene changes
 import {
-  addPlatformToScene,
-  addProjectileToScene,
-  addRampToScene,
-  addTargetToScene,
+  placeEntityInScene,
+  type PlacementRequest,
   type SceneDraftChange,
   type ProjectilePlacementProperties,
-  type PlatformPlacementProperties,
   type RampPlacementProperties,
   type TargetPlacementProperties,
   updateProjectileInScene,
@@ -98,22 +95,7 @@ export interface LabController {
   copyScene(): SceneDefinition;
   updateEnvironment(environment: SceneDefinition["environment"]): EngineResult<SceneDefinition>;
 
-  placeRamp(
-    positionMeters: Vector2,
-    properties?: RampPlacementProperties,
-  ): EngineResult<SceneDraftChange>;
-  placeProjectile(
-    positionMeters: Vector2,
-    properties?: ProjectilePlacementProperties,
-  ): EngineResult<SceneDraftChange>;
-  placePlatform(
-    positionMeters: Vector2,
-    properties?: PlatformPlacementProperties,
-  ): EngineResult<SceneDraftChange>;
-  placeTarget(
-    positionMeters: Vector2,
-    properties?: TargetPlacementProperties,
-  ): EngineResult<SceneDraftChange>;
+  placeEntity(request: PlacementRequest): EngineResult<SceneDraftChange>;
   updateProjectileProperties(
     projectileId: string,
     properties: ProjectilePlacementProperties,
@@ -707,23 +689,8 @@ export function createLabController(options: LabControllerOptions): EngineResult
     };
   }
 
-  function placeRamp(
-    positionMeters: Vector2,
-    properties?: RampPlacementProperties,
-  ): EngineResult<SceneDraftChange> {
-    // Accept starting-scene changes only while this controller is active and paused.
-    const status = pausedAuthoringStatus();
-
-    if (!status.ok) {
-      return status;
-    }
-
-    const sceneChange = addRampToScene(
-      currentScene,
-      positionMeters,
-      properties,
-    );
-
+  // Validate, then keep one copy and return another.
+  function acceptSceneChange(sceneChange: SceneDraftChange): EngineResult<SceneDraftChange> {
     const validationResult = validateScene(sceneChange.scene);
 
     if (!validationResult.ok) {
@@ -737,94 +704,15 @@ export function createLabController(options: LabControllerOptions): EngineResult
       value: structuredClone(sceneChange),
     };
   }
-  function placeProjectile(
-    positionMeters: Vector2,
-    properties?: ProjectilePlacementProperties,
-  ): EngineResult<SceneDraftChange> {
-    // Accept starting-scene changes only while this controller is active and paused.
+
+  function placeEntity(request: PlacementRequest): EngineResult<SceneDraftChange> {
     const status = pausedAuthoringStatus();
 
     if (!status.ok) {
       return status;
     }
 
-    const sceneChange = addProjectileToScene(
-      currentScene,
-      positionMeters,
-      properties,
-    );
-    const validationResult = validateScene(sceneChange.scene);
-
-    if (!validationResult.ok) {
-      return validationResult;
-    }
-
-    currentScene = structuredClone(sceneChange.scene);
-
-    return {
-      ok: true,
-      value: structuredClone(sceneChange),
-    };
-  }
-  function placePlatform(
-    positionMeters: Vector2,
-    properties?: PlatformPlacementProperties,
-  ): EngineResult<SceneDraftChange> {
-    // Accept starting-scene changes only while this controller is active and paused.
-    const status = pausedAuthoringStatus();
-
-    if (!status.ok) {
-      return status;
-    }
-
-    const sceneChange = addPlatformToScene(
-      currentScene,
-      positionMeters,
-      properties,
-    );
-
-    const validationResult = validateScene(sceneChange.scene);
-
-    if (!validationResult.ok) {
-      return validationResult;
-    }
-
-    currentScene = structuredClone(sceneChange.scene);
-
-    return {
-      ok: true,
-      value: structuredClone(sceneChange),
-    };
-  }
-  function placeTarget(
-    positionMeters: Vector2,
-    properties?: TargetPlacementProperties,
-  ): EngineResult<SceneDraftChange> {
-    // Accept starting-scene changes only while this controller is active and paused.
-    const status = pausedAuthoringStatus();
-
-    if (!status.ok) {
-      return status;
-    }
-
-    const sceneChange = addTargetToScene(
-      currentScene,
-      positionMeters,
-      properties,
-    );
-
-    const validationResult = validateScene(sceneChange.scene);
-
-    if (!validationResult.ok) {
-      return validationResult;
-    }
-
-    currentScene = structuredClone(sceneChange.scene);
-
-    return {
-      ok: true,
-      value: structuredClone(sceneChange),
-    };
+    return acceptSceneChange(placeEntityInScene(currentScene, request));
   }
   function updateProjectileProperties(
     projectileId: string,
@@ -892,18 +780,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
       properties,
     );
 
-    const validationResult = validateScene(sceneChange.scene);
-
-    if (!validationResult.ok) {
-      return validationResult;
-    }
-
-    currentScene = structuredClone(sceneChange.scene);
-
-    return {
-      ok: true,
-      value: structuredClone(sceneChange),
-    };
+    return acceptSceneChange(sceneChange);
   }
   function updateStaticBodyProperties(
     bodyId: string,
@@ -952,18 +829,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
       properties,
     );
 
-    const validationResult = validateScene(sceneChange.scene);
-
-    if (!validationResult.ok) {
-      return validationResult;
-    }
-
-    currentScene = structuredClone(sceneChange.scene);
-
-    return {
-      ok: true,
-      value: structuredClone(sceneChange),
-    };
+    return acceptSceneChange(sceneChange);
   }
   function updateTargetProperties(
     targetId: string,
@@ -996,18 +862,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
 
     const sceneChange = updateTargetInScene(currentScene, targetId, properties);
 
-    const validationResult = validateScene(sceneChange.scene);
-
-    if (!validationResult.ok) {
-      return validationResult;
-    }
-
-    currentScene = structuredClone(sceneChange.scene);
-
-    return {
-      ok: true,
-      value: structuredClone(sceneChange),
-    };
+    return acceptSceneChange(sceneChange);
   }
   function moveEntityWhilePaused(
     entityId: string,
@@ -1044,18 +899,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
       positionMeters,
     );
 
-    const validationResult = validateScene(sceneChange.scene);
-
-    if (!validationResult.ok) {
-      return validationResult;
-    }
-
-    currentScene = structuredClone(sceneChange.scene);
-
-    return {
-      ok: true,
-      value: structuredClone(sceneChange),
-    };
+    return acceptSceneChange(sceneChange);
   }
   function deleteEntity(entityId: string): EngineResult<SceneDraftChange> {
     // Accept starting-scene changes only while this controller is active and paused.
@@ -1084,18 +928,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
     }
 
     const sceneChange = deleteEntityFromScene(currentScene, entityId);
-    const validationResult = validateScene(sceneChange.scene);
-
-    if (!validationResult.ok) {
-      return validationResult;
-    }
-
-    currentScene = structuredClone(sceneChange.scene);
-
-    return {
-      ok: true,
-      value: structuredClone(sceneChange),
-    };
+    return acceptSceneChange(sceneChange);
   }
 
   const removeVisibilityListener = playbackBrowser?.subscribeVisibilityChange(handleVisibilityChange);
@@ -1122,10 +955,7 @@ export function createLabController(options: LabControllerOptions): EngineResult
       dispose,
       copyScene: () => structuredClone(currentScene),
       updateEnvironment,
-      placeRamp,
-      placeProjectile,
-      placePlatform,
-      placeTarget,
+      placeEntity,
       updateProjectileProperties,
       updateStaticBodyProperties,
       updateTargetProperties,
