@@ -44,6 +44,9 @@ export const IDEAL_PREDICTION_DURATION_SECONDS = 2;
 const TRAIL_AFTER_CONTACT_SECONDS = 3;
 // Memory bound for very long runs: keep at most this many recorded ticks (one minute at 60 Hz).
 const MAXIMUM_TRAIL_SAMPLES = 3600;
+const TRAIL_MINIMUM_STEP_METERS = 1e-4;
+// Also frees each child's drawing data and caption style.
+const ITEM_DESTROY_OPTIONS = { children: true, context: true, style: true };
 
 interface RenderItem {
   readonly kind: "body" | "target";
@@ -96,10 +99,9 @@ export interface LabRenderer {
   dispose(): void;
 }
 
-// One drawn tick of the simulated trail: where each projectile was at that tick.
-interface TrailSample {
+interface TrailPoint {
   readonly tick: number;
-  readonly positionsMeters: ReadonlyMap<string, Vector2>;
+  readonly positionMeters: Vector2;
 }
 function visualKey(entity: Body | TargetTrigger, colourIndex: number): string {
   return JSON.stringify(entity.kind === "dynamic"
@@ -227,8 +229,19 @@ export function mountLabRenderer(
   //                          id(for renderer), item
   const renderItems = new Map<string, RenderItem>();
   let unsubscribeFromStore: (() => void) | undefined;
-  // The simulated trail, recorded from the ticks this renderer is given to draw.
-  let trailSamples: TrailSample[] = [];
+  // Each ball's simulated trail, recorded from the ticks this renderer is given to draw.
+  let trails = new Map<string, TrailPoint[]>();
+  let trailStartTick = 0;
+  let latestTrailTick: number | null = null;
+  // Trails are rebuilt only when the run or the zoom changes.
+  let trailsDirty = true;
+  let trailScale = 0;
+  let renderFrame: number | null = null;
+
+  // At most one minute back.
+  function firstKeptTick(): number {
+    return Math.max(trailStartTick, (latestTrailTick ?? 0) - MAXIMUM_TRAIL_SAMPLES + 1);
+  }
 
   const trailGraphic = new Graphics({ label: "projectile-trails" });
   const predictionGraphic = new Graphics({ label: "selected-projectile-ideal-prediction" });
@@ -272,7 +285,7 @@ export function mountLabRenderer(
   let paperTexture: Texture | undefined;
   let paper: TilingSprite | undefined;
   const resizeObserver = new ResizeObserver(() => {
-    if (initialized && !disposed) resizeAndRender();
+    if (initialized && !disposed) requestRender();
   });
 
   function getViewport(): ViewportTransform {
@@ -292,7 +305,7 @@ export function mountLabRenderer(
     host.classList.remove("is-panning");
 
     if (initialized && !disposed) {
-      resizeAndRender();
+      requestRender();
     }
   }
 
@@ -462,45 +475,52 @@ export function mountLabRenderer(
 
   // Every ball draws its own trail in its own colour, selected or not.
   function redrawTrails(viewport: ViewportTransform): void {
-    trailGraphic.clear();
+    const scale = viewport.pixelsPerMeter;
+    // Trails are drawn in metres, so panning only moves the graphic.
+    trailGraphic.position.set(viewport.widthPixels / 2 - viewport.centerWorldMeters.x * scale, viewport.heightPixels / 2 + viewport.centerWorldMeters.y * scale);
+    trailGraphic.scale.set(scale, -scale);
 
     if (!trailGraphic.visible) {
+      trailGraphic.clear();
+      trailsDirty = true;
       return;
     }
 
-    const balls = currentScene.bodies.filter((body) => body.kind === "dynamic");
+    if (!trailsDirty && trailScale === scale) {
+      return;
+    }
+
+    trailsDirty = false;
+    trailScale = scale;
+    trailGraphic.clear();
     const waitTicks = Math.round(TRAIL_AFTER_CONTACT_SECONDS / currentScene.numericalProfile.fixedTimeStepSeconds);
-    const firstTick = trailSamples[0]?.tick ?? 0;
+    const firstTick = firstKeptTick();
 
-    for (const ball of balls) {
-      const trailPoints: Vector2[] = [];
-      // Erasing starts a few seconds after the first touch and moves forward one tick per tick.
-      const contactTick = runEvents.find((event) => event.kind === "groundContact" && event.bodyId === ball.id)?.tick;
-      const oldestTick = contactTick === undefined ? firstTick : firstTick + Math.max(0, currentSnapshot.tick - contactTick - waitTicks);
+    for (const ball of currentScene.bodies) {
+      const points = trails.get(ball.id);
 
-      for (const sample of trailSamples) {
-        const positionMeters = sample.positionsMeters.get(ball.id);
-
-        if (positionMeters !== undefined && sample.tick >= oldestTick) {
-          trailPoints.push(positionMeters);
-        }
-      }
-
-      const [firstPointMeters, ...remainingPoints] = trailPoints;
-
-      if (firstPointMeters === undefined || remainingPoints.length === 0) {
+      if (ball.kind !== "dynamic" || points === undefined) {
         continue;
       }
 
-      const firstPoint = worldToScreen(firstPointMeters, viewport);
-      trailGraphic.moveTo(firstPoint.x, firstPoint.y);
+      // Erasing starts a few seconds after the first touch and moves forward one tick per tick.
+      const contactTick = runEvents.find((event) => event.kind === "groundContact" && event.bodyId === ball.id)?.tick;
+      const oldestTick = contactTick === undefined ? firstTick : firstTick + Math.max(0, currentSnapshot.tick - contactTick - waitTicks);
+      // Start at the ball's position at oldestTick: its last point at or before that tick.
+      const after = points.findIndex((point) => point.tick > oldestTick);
+      const [first, ...rest] = points.slice(after === -1 ? points.length - 1 : Math.max(0, after - 1));
 
-      for (const pointMeters of remainingPoints) {
-        const point = worldToScreen(pointMeters, viewport);
-        trailGraphic.lineTo(point.x, point.y);
+      if (first === undefined || rest.length === 0) {
+        continue;
       }
 
-      trailGraphic.stroke({ color: ballPigment(colourIndex(ball.id)).edge, width: 1.7, alpha: 0.86, cap: "round", join: "round" });
+      trailGraphic.moveTo(first.positionMeters.x, first.positionMeters.y);
+
+      for (const point of rest) {
+        trailGraphic.lineTo(point.positionMeters.x, point.positionMeters.y);
+      }
+
+      trailGraphic.stroke({ color: ballPigment(colourIndex(ball.id)).edge, width: 1.7 / scale, alpha: 0.86, cap: "round", join: "round" });
     }
   }
 
@@ -652,7 +672,18 @@ export function mountLabRenderer(
     }
   }
 
-  const resizeAndRender = (): void => {
+  function requestRender(): void {
+    if (renderFrame !== null || !initialized || disposed) {
+      return;
+    }
+
+    renderFrame = requestAnimationFrame(() => {
+      renderFrame = null;
+      drawFrame();
+    });
+  }
+
+  const drawFrame = (): void => {
     // Hidden pages retain their view instead of resizing it to a one-pixel canvas.
     if (!initialized || disposed || host.clientWidth === 0 || host.clientHeight === 0) {
       return;
@@ -748,26 +779,41 @@ export function mountLabRenderer(
 
   // Record one drawn tick; a tick that does not move forward is a Reset or a new run, so the old path is cleared.
   function recordTrailSample(snapshot: Snapshot): void {
-    const previous = trailSamples.at(-1);
-
-    if (previous !== undefined && snapshot.tick <= previous.tick) {
-      trailSamples = [];
+    if (latestTrailTick !== null && snapshot.tick <= latestTrailTick) {
+      trails = new Map();
+      latestTrailTick = null;
       // Reset also removed the engine's pull.
       pullState = null;
     }
 
-    const positionsMeters = new Map<string, Vector2>();
-
-    for (const body of snapshot.bodies) {
-      if (currentScene.bodies.some((entity) => entity.id === body.id && entity.kind === "dynamic")) {
-        positionsMeters.set(body.id, { ...body.pose.positionMeters });
-      }
+    if (latestTrailTick === null) {
+      trailStartTick = snapshot.tick;
     }
 
-    trailSamples.push({ tick: snapshot.tick, positionsMeters });
+    latestTrailTick = snapshot.tick;
+    trailsDirty = true;
+    const firstTick = firstKeptTick();
+    const ballIds = new Set(currentScene.bodies.filter((body) => body.kind === "dynamic").map((body) => body.id));
 
-    if (trailSamples.length > MAXIMUM_TRAIL_SAMPLES) {
-      trailSamples.splice(0, trailSamples.length - MAXIMUM_TRAIL_SAMPLES);
+    for (const body of snapshot.bodies) {
+      if (!ballIds.has(body.id)) {
+        continue;
+      }
+
+      const points = trails.get(body.id) ?? [];
+      trails.set(body.id, points);
+      const last = points.at(-1);
+      const position = body.pose.positionMeters;
+
+      // A resting ball adds no points.
+      if (last === undefined || Math.hypot(position.x - last.positionMeters.x, position.y - last.positionMeters.y) > TRAIL_MINIMUM_STEP_METERS) {
+        points.push({ tick: snapshot.tick, positionMeters: { ...position } });
+      }
+
+      // Keep the last point at or before firstTick: the ball was there at that tick.
+      while ((points[1]?.tick ?? Infinity) <= firstTick) {
+        points.shift();
+      }
     }
   }
 
@@ -783,7 +829,8 @@ export function mountLabRenderer(
     previewScene = null;
     ballColours.clear();
     currentSnapshot = structuredClone(nextSnapshot);
-    trailSamples = [];
+    trails = new Map();
+    latestTrailTick = null;
     recordTrailSample(currentSnapshot);
 
     // Discard pointer work and events from the previous scene.
@@ -797,12 +844,12 @@ export function mountLabRenderer(
     }
 
     for (const item of renderItems.values()) {
-      item.graphic.destroy({ children: true });
+      item.graphic.destroy(ITEM_DESTROY_OPTIONS);
     }
 
     renderItems.clear();
     syncRenderItems();
-    resizeAndRender();
+    requestRender();
   }
 
   // Same source, changed world: the trail, camera and unchanged graphics stay.
@@ -815,6 +862,7 @@ export function mountLabRenderer(
     previewScene = nextPreview === null ? null : structuredClone(nextPreview);
     startScene = structuredClone(nextStart);
     currentSnapshot = structuredClone(nextSnapshot);
+    trailsDirty = true;
 
     if (dragState !== null && !hasEntity(currentScene, dragState.entityId)) {
       dragState = null;
@@ -829,7 +877,7 @@ export function mountLabRenderer(
     }
 
     syncRenderItems();
-    resizeAndRender();
+    requestRender();
   }
 
   function updateSnapshot(nextSnapshot: Snapshot): void {
@@ -844,12 +892,12 @@ export function mountLabRenderer(
       return;
     }
 
+    const bodies = new Map(nextSnapshot.bodies.map((body) => [body.id, body]));
+
     // Paused edits stay where the learner put them until their tick runs.
     for (const item of previewScene === null ? renderItems.values() : []) {
       if (item.kind === "body") {
-        const body = nextSnapshot.bodies.find(
-          (candidate) => candidate.id === item.entityId,
-        );
+        const body = bodies.get(item.entityId);
 
         if (body === undefined) {
           throw new Error(`Snapshot omitted scene body "${item.entityId}".`);
@@ -860,7 +908,7 @@ export function mountLabRenderer(
       }
     }
 
-    resizeAndRender();
+    requestRender();
   }
 
   function updateRunEvents(events: readonly SnapshotEvent[]): void {
@@ -869,9 +917,10 @@ export function mountLabRenderer(
     }
 
     runEvents = events;
+    trailsDirty = true;
 
     if (initialized) {
-      resizeAndRender();
+      requestRender();
     }
   }
 
@@ -902,7 +951,7 @@ export function mountLabRenderer(
     };
 
     item.graphic.cursor = "grabbing";
-    resizeAndRender();
+    requestRender();
     event.stopPropagation();
   }
 
@@ -933,7 +982,7 @@ export function mountLabRenderer(
 
     if (outcome === "started") {
       pullState = { entityId: item.entityId, pointerId: event.pointerId, localAnchorMeters, targetMeters: pointerWorld };
-      resizeAndRender();
+      requestRender();
     }
 
     event.stopPropagation();
@@ -960,7 +1009,7 @@ export function mountLabRenderer(
       pullHandlers.release();
     }
 
-    resizeAndRender();
+    requestRender();
   }
 
   function handleItemPointerDown(
@@ -1012,14 +1061,14 @@ export function mountLabRenderer(
       y: pointerWorld.y + dragState.pointerOffsetMeters.y,
     };
 
-    resizeAndRender();
+    requestRender();
   }
   function cancelActiveDrag(): void {
     // Ending a pull removes the force; the ball keeps moving.
     if (pullState !== null) {
       pullState = null;
       pullHandlers.release();
-      resizeAndRender();
+      requestRender();
     }
 
     if (dragState === null) {
@@ -1036,7 +1085,7 @@ export function mountLabRenderer(
       item.graphic.cursor = "pointer";
     }
 
-    resizeAndRender();
+    requestRender();
   }
 
   function cancelPointerDrag(event: FederatedPointerEvent): void {
@@ -1070,7 +1119,7 @@ export function mountLabRenderer(
       item.positionMeters.y !== completedDrag.acceptedPositionMeters.y;
 
     if (!positionChanged) {
-      resizeAndRender();
+      requestRender();
       return;
     }
 
@@ -1083,7 +1132,7 @@ export function mountLabRenderer(
       item.positionMeters = { ...completedDrag.acceptedPositionMeters };
     }
 
-    resizeAndRender();
+    requestRender();
   }
 
   // Draw the selected object above the others, so a ball hidden under another ball shows when picked.
@@ -1160,7 +1209,7 @@ export function mountLabRenderer(
   function removeItem(item: RenderItem): void {
     renderItems.delete(item.entityId);
     item.graphic.removeFromParent();
-    queueMicrotask(() => item.graphic.destroy({ children: true }));
+    queueMicrotask(() => item.graphic.destroy(ITEM_DESTROY_OPTIONS));
   }
 
   function fitScene(): void {
@@ -1189,9 +1238,9 @@ export function mountLabRenderer(
         include(entity.pose.positionMeters.x, entity.pose.positionMeters.y);
       }
     }
-    for (const sample of trailSamples) {
-      for (const positionMeters of sample.positionsMeters.values()) {
-        include(positionMeters.x, positionMeters.y);
+    for (const points of trails.values()) {
+      for (const point of points) {
+        include(point.positionMeters.x, point.positionMeters.y);
       }
     }
     // Frame where each ball is going, so a launched ball starts near the left with room for its flight.
@@ -1382,10 +1431,12 @@ export function mountLabRenderer(
         state.overlayVisibility !== previousState.overlayVisibility ||
         state.challengeOverlay !== previousState.challengeOverlay
       ) {
-        resizeAndRender();
-
+        // The new tool's cursor must show immediately.
         if (state.activeTool !== previousState.activeTool) {
+          drawFrame();
           application.renderer.events.setCursor(background.cursor ?? "default");
+        } else {
+          requestRender();
         }
       }
     });
@@ -1405,6 +1456,12 @@ export function mountLabRenderer(
     }
 
     disposed = true;
+
+    if (renderFrame !== null) {
+      cancelAnimationFrame(renderFrame);
+      renderFrame = null;
+    }
+
     resizeObserver.disconnect();
     host.removeEventListener("wheel", handleWheel);
     host.removeEventListener("mousedown", preventMiddleMouseDefault);
